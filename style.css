@@ -206,3 +206,48 @@ button:focus-visible,select:focus-visible{outline-color:var(--accent-yellow)}
 .CodeMirror-error-gutter .CodeMirror-linenumber{
   color:#f50100 !important;
 }
+
+/* 凡例行の高さは変えず、右端の小さなスイッチのために横幅だけ確保します。 */
+.editor-guide{position:relative;flex-wrap:nowrap;white-space:nowrap;padding-right:70px}
+.editor-light-toggle{
+  position:absolute;top:0;right:20px;
+  display:inline-flex;align-items:center;gap:4px;height:15px;
+  padding:0 5px;border:1px solid #555;border-radius:9px;
+  background:#292929;color:#bcbcbc;font-size:10px;line-height:1;
+}
+.editor-light-toggle::after{
+  content:"";width:6px;height:6px;border-radius:50%;background:#858585;
+}
+.editor-light-toggle:hover,.editor-light-toggle:focus-visible{background:#383838;color:#eeeeee;border-color:#777}
+.editor-light-toggle:focus-visible{outline:1px solid #d5d5d5;outline-offset:2px}
+.editor-light-toggle[aria-checked="true"]{background:#464638;color:#e8e8d9;border-color:#74745e}
+.editor-light-toggle[aria-checked="true"]::after{background:#e0d471}
+@media(max-width:600px){
+  .editor-guide{column-gap:12px}
+  .editor-light-toggle{right:14px}
+}
+
+/* 明るくする範囲はエディタ枠と、その内側のCodeMirrorだけです。 */
+.editor-frame.is-light{background:#f2f2ef;border-color:#b8bbb8}
+.editor-frame.is-light .CodeMirror{background:#f2f2ef;color:#252a2a}
+.editor-frame.is-light .CodeMirror-gutters{background:#e8e9e5;border-right-color:#c7c9c6}
+.editor-frame.is-light .CodeMirror-linenumber{color:#58605f}
+.editor-frame.is-light .CodeMirror-step-jump:not(.CodeMirror-execution-gutter):not(.CodeMirror-activeline-gutter):hover .CodeMirror-linenumber{color:#242a2a}
+.editor-frame.is-light .CodeMirror-cursor{border-left-color:#262b2b}
+.editor-frame.is-light .CodeMirror-activeline-gutter{background:#dedfda}
+.editor-frame.is-light .CodeMirror-activeline-gutter .CodeMirror-linenumber{color:#222827}
+.editor-frame.is-light .CodeMirror-cursor-line{background:rgb(0 0 0 / 5%)}
+.editor-frame.is-light .CodeMirror-execution-line{background:#e8df9b99}
+.editor-frame.is-light .CodeMirror-execution-gutter{background:#e1d58f}
+.editor-frame.is-light .CodeMirror-execution-gutter .CodeMirror-linenumber{color:#38321b}
+.editor-frame.is-light .CodeMirror-matchingbracket{color:#232a25!important;background:#d5e2cc;outline-color:#91a68d}
+.editor-frame.is-light .CodeMirror-nonmatchingbracket{color:#292424!important;background:#eadcda}
+.editor-frame.is-light .CodeMirror .cm-keyword,.editor-frame.is-light .CodeMirror .cm-type{color:#303839}
+.editor-frame.is-light .CodeMirror .cm-def,.editor-frame.is-light .CodeMirror .cm-builtin{color:#363e3d}
+.editor-frame.is-light .CodeMirror .cm-variable,.editor-frame.is-light .CodeMirror .cm-variable-2,.editor-frame.is-light .CodeMirror .cm-variable-3{color:#272c2d}
+.editor-frame.is-light .CodeMirror .cm-number,.editor-frame.is-light .CodeMirror .cm-atom{color:#665822}
+.editor-frame.is-light .CodeMirror .cm-string,.editor-frame.is-light .CodeMirror .cm-string-2{color:#66543b}
+.editor-frame.is-light .CodeMirror .cm-meta{color:#52503a}
+.editor-frame.is-light .CodeMirror .cm-comment{color:#59655e}
+.editor-frame.is-light .CodeMirror .cm-operator,.editor-frame.is-light .CodeMirror .cm-property{color:#444b49}
+.editor-frame.is-light .CodeMirror .cm-error{color:#302b2b}

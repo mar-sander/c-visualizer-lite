@@ -10,6 +10,11 @@ const editor = CodeMirror.fromTextArea($('code-input'), {
   indentUnit:4,
   gutters:['CodeMirror-linenumbers']
 });
+const editorLightToggle = $('editor-light-toggle');
+editorLightToggle.addEventListener('click', () => {
+  const isLight = document.querySelector('.editor-frame').classList.toggle('is-light');
+  editorLightToggle.setAttribute('aria-checked', String(isLight));
+});
 
 const sampleBody = {
   add:['int a = 10;', 'int b = 3;', 'int c = a + b;', 'printf("%d\\n", c);'],
