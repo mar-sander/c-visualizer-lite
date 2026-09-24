@@ -1,0 +1,208 @@
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display+SC:ital,wght@0,400;0,700;0,900;1,400;1,700;1,900&display=swap');
+:root{color-scheme:dark;--bg:#0d0d0d;--surface:#181818;--surface2:#232323;--surface-inset:#101010;--surface-hover:#2c2c2c;--line:#3f3f3f;--line-strong:#666666;--text:#f2f2f2;--muted:#b5b5b5;--text-dim:#858585;--accent-yellow:#ffe600;--accent-yellow-strong:#fff04a;--accent-yellow-soft:rgba(255,230,0,.14);--accent-yellow-gutter:rgba(255,230,0,.22);--shadow:rgba(0,0,0,.55);--mint:var(--accent-yellow);--sky:#a8a8a8;font-family:system-ui,-apple-system,"Noto Sans JP",sans-serif}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 75% 0%,#233746 0,transparent 36rem),var(--bg);color:var(--text)}button,select{font:inherit}button{cursor:pointer}button:focus-visible,select:focus-visible{outline:3px solid var(--sky);outline-offset:3px}.app-shell{max-width:1640px;margin:auto;padding:0 clamp(16px,2.8vw,42px) 36px}.site-header{min-height:76px;display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid var(--line)}.brand{display:flex;align-items:center;gap:12px}.brand-mark{display:grid;place-items:center;width:40px;height:40px;background:var(--mint);border-radius:12px;color:#10231c;font-size:26px;font-weight:900;letter-spacing:.0em}.brand-mark span{color:#3b7767}.brand strong{display:block;font-size:clamp(15px,1.6vw,21px)}.brand small{display:block;color:var(--muted);font-size:10px;letter-spacing:.12em;margin-top:2px}.header-button,.step-button,.close-button{border:1px solid var(--line);background:var(--surface2);color:var(--text);border-radius:12px;min-height:44px;padding:8px 15px}.header-button:hover,.step-button:not(:disabled):hover{background:#2c4352}.intro{display:flex;align-items:end;justify-content:space-between;gap:18px;padding:28px 0 24px}.eyebrow,.section-index{font-size:11px;letter-spacing:.16em;font-weight:800;color:var(--mint)}h1{font-size:clamp(24px,2.5vw,36px);margin:6px 0 8px;line-height:1.25}h2{font-size:20px;line-height:1.3;margin:5px 0 0}.intro p:not(.eyebrow){margin:0;color:var(--muted);font-size:14px}.demo-badge{align-self:center;color:#ffcb80;font-size:12px;border:1px solid #7b6145;background:#312b28;padding:8px 12px;border-radius:30px;white-space:nowrap}.workspace{display:grid;grid-template-columns:minmax(0,1.18fr) minmax(0,1fr);gap:16px;align-items:stretch}.panel{min-width:0;background:var(--surface);border:1px solid var(--line);border-radius:18px;overflow:hidden;box-shadow:0 14px 35px #060b1160}.panel-heading{min-height:84px;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:16px 20px}.panel-hint,.flow-label{font-size:12px;color:var(--muted);text-align:right}.editor-guide{display:flex;flex-wrap:wrap;gap:8px 18px;color:var(--muted);font-size:11px;padding:0 20px 12px}.editor-guide span{display:inline-flex;align-items:center;gap:7px}.editor-guide i{display:inline-block;width:13px;height:13px;border-radius:3px}.legend-cursor{background:var(--sky)}.legend-execution{background:var(--mint)}.editor-frame{margin:0 14px;border:1px solid var(--line);border-radius:11px;overflow:hidden;background:#111c26}.CodeMirror{height:390px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:14px;line-height:1.7;background:#111c26;color:#e5eeee}.CodeMirror-gutters{background:#182632;border-right:1px solid var(--line)}.CodeMirror-linenumber{color:#9eafbd;padding:0 10px 0 7px}.CodeMirror-cursor{border-left:2px solid #eff9fb}.CodeMirror-activeline-gutter{background:#34556c}.CodeMirror-activeline-gutter .CodeMirror-linenumber{color:#fff;font-weight:bold}.CodeMirror-execution-line{background:#27524377}.CodeMirror-execution-gutter{background:#2a624a}.CodeMirror-execution-gutter .CodeMirror-linenumber{color:#aeffd0;font-weight:900}.CodeMirror-execution-marker{color:#8df4ac;font-size:15px;padding-left:4px}.CodeMirror-matchingbracket{color:#15271f!important;background:#99f2c4;border-radius:3px;outline:1px solid #b8ffd8}.CodeMirror-nonmatchingbracket{color:#ffaaa3!important}.cm-keyword{color:#f7a5bc}.cm-def{color:#9dd3f5}.cm-variable{color:#eef2e2}.cm-number{color:#ffcf91}.cm-string{color:#acdca8}.cm-comment{color:#8ba99d}.code-footer{padding:13px 20px;color:var(--muted);font-size:11px;min-height:43px}.flow-panel{display:flex;flex-direction:column}.flow-content{padding:0 20px;flex:1;min-height:377px}.idle-state{border:1px dashed #506577;border-radius:14px;min-height:330px;display:flex;align-items:center;justify-content:center;flex-direction:column;text-align:center;padding:22px}.idle-icon{font-size:36px;color:var(--mint)}.idle-state h3{margin:8px 0}.idle-state p{font-size:13px;color:var(--muted);max-width:28em;line-height:1.7;margin:0}.step-top{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:0 0 14px;color:var(--mint);font-size:12px;font-weight:800;letter-spacing:.08em}.step-track{height:5px;background:#354759;border-radius:10px;overflow:hidden;margin-bottom:18px}.step-track span{display:block;height:100%;background:var(--mint);border-radius:10px;transition:width .2s}.step-code{border:1px solid #467362;background:#203c36;padding:14px;border-radius:12px}.step-code small,.flow-detail small{display:block;color:#aad4c2;font-size:11px;font-weight:bold;margin-bottom:8px}.step-code code{font-family:ui-monospace,Consolas,monospace;font-size:14px;white-space:pre-wrap;overflow-wrap:anywhere}.flow-detail{padding:20px 2px 8px}.flow-detail h3{font-size:16px;margin:0 0 8px}.flow-detail p{line-height:1.65;margin:0;color:#dbe6e9;font-size:14px}.value-card{display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:var(--surface2);border:1px solid var(--line);border-radius:12px;padding:11px 14px;margin:14px 0}.value-card strong{color:var(--sky);font-size:13px}.value-card span{font-family:ui-monospace,Consolas,monospace;font-size:16px}.value-card em{font-style:normal;color:var(--mint)}.next-line{border-top:1px solid var(--line);padding:13px 2px;color:var(--muted);font-size:12px}.next-line strong{color:var(--text)}.step-controls{display:flex;align-items:center;justify-content:space-between;gap:8px;border-top:1px solid var(--line);padding:14px 20px}.step-button{min-width:95px}.step-button:disabled{opacity:.42;cursor:not-allowed}.step-count{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}.action-area{margin-top:16px}.action-row{display:flex;gap:14px;align-items:stretch}.visualize-button{display:flex;align-items:center;gap:16px;justify-content:center;border:0;border-radius:16px;background:#8de2b2;color:#10231d;min-height:82px;padding:15px 26px;min-width:min(100%,370px);font-size:20px;font-weight:850;box-shadow:0 8px 0 #458963,0 12px 28px #07110d;transition:transform .1s,box-shadow .1s,background .1s;touch-action:manipulation}.visualize-button:hover{background:#a7f1c8}.visualize-button:active,.visualize-button.pressed{transform:translateY(6px);box-shadow:0 2px 0 #458963,0 4px 14px #07110d;background:#cbffe0}.visualize-button:disabled{cursor:wait;opacity:.85}.play-icon{font-size:22px}.button-arrow{margin-left:auto;font-size:21px}.demo-switch{border:1px solid var(--line);background:var(--surface);border-radius:15px;padding:12px 16px;min-width:190px;display:flex;flex-direction:column;justify-content:center;gap:7px}.demo-switch label{font-size:11px;letter-spacing:.1em;font-weight:bold;color:var(--muted)}.demo-switch select{min-height:36px;background:var(--surface2);color:var(--text);border:1px solid #617a83;border-radius:7px;padding:4px 8px}.feedback{min-height:62px;margin-top:16px}.feedback-card{padding:14px 17px;border-radius:12px;border:1px solid var(--line);background:var(--surface);display:flex;align-items:center;justify-content:space-between;gap:10px}.feedback-card strong{display:block;font-size:16px;margin-bottom:3px}.feedback-card p{margin:0;color:#d1dfe2;font-size:13px;line-height:1.55}.feedback-card.success{border-color:#529c71;background:#18382d}.feedback-card.failure{border-color:#b98762;background:#382b26}.feedback-card.stale{border-color:#8497a1}.feedback-card.processing{border-color:#668ea0}.feedback-action{border:1px solid currentColor;color:var(--text);background:transparent;border-radius:8px;min-height:44px;padding:8px 13px;white-space:nowrap}.feedback-action:hover{background:#ffffff22}.footnote{font-size:11px;color:var(--muted);line-height:1.6;margin:8px 0 0}.history-dialog{width:min(460px,calc(100% - 24px));max-height:min(85vh,700px);border:1px solid #648b8c;border-radius:18px;background:#1b2a35;color:var(--text);padding:22px;box-shadow:0 25px 80px #000c}.history-dialog::backdrop{background:#071017bd}.dialog-heading{display:flex;justify-content:space-between;align-items:center}.history-dialog p{color:var(--muted);font-size:13px;line-height:1.6}.close-button{font-size:24px;width:44px;padding:0}.history-list{display:grid;gap:10px}.history-item{width:100%;background:#263b48;border:1px solid #496170;border-radius:12px;color:var(--text);text-align:left;padding:13px;min-height:70px}.history-item:hover{border-color:var(--mint);background:#305044}.history-item strong{display:block;font-size:14px}.history-item small{display:block;color:var(--muted);margin-top:5px}
+@media(max-width:900px){.workspace{grid-template-columns:1fr}.CodeMirror{height:340px}.flow-content{min-height:340px}.panel-hint{display:none}}
+@media(max-width:600px){.site-header{min-height:68px}.brand-mark{width:36px;height:36px;font-size:21px}.brand small{font-size:8px}.header-button{font-size:12px;padding:7px 9px}.intro{display:block;padding:22px 0 18px}.demo-badge{display:inline-block;margin-top:14px}.panel-heading{padding:14px}.editor-guide{padding:0 14px 12px}.editor-frame{margin:0 8px}.CodeMirror{height:300px;font-size:12px}.flow-content{padding:0 13px;min-height:325px}.step-controls{padding:12px}.action-row{flex-direction:column}.visualize-button{width:100%;min-width:0;min-height:68px}.demo-switch{flex-direction:row;align-items:center;justify-content:space-between}.feedback-card{align-items:flex-start;flex-direction:column}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
+
+/* ==================================================
+   Stage UI-C1: Color Pass 1
+   構造や寸法には触れず、無彩色＋黄色へ配色だけを整理します。
+   ================================================== */
+body{background:radial-gradient(circle at 75% 0%,#252525 0,transparent 36rem),var(--bg)}
+button:focus-visible,select:focus-visible{outline-color:var(--accent-yellow)}
+.brand-mark{background:var(--accent-yellow);color:#111111}
+.brand-mark span{color:#515151}
+.header-button,.step-button,.close-button{background:var(--surface2);border-color:var(--line);color:var(--text)}
+.header-button:hover,.step-button:not(:disabled):hover{background:var(--surface-hover)}
+.eyebrow,.section-index{color:var(--accent-yellow)}
+.demo-badge{color:var(--text);border-color:var(--line-strong);background:var(--surface2)}
+.panel{background:var(--surface);border-color:var(--line);box-shadow:0 14px 35px var(--shadow)}
+.legend-cursor{background:#a8a8a8}
+.legend-execution{background:var(--accent-yellow)}
+.editor-frame{background:var(--surface-inset);border-color:var(--line)}
+.CodeMirror{background:var(--surface-inset);color:#dedede}
+.CodeMirror-gutters{background:#191919;border-right-color:var(--line)}
+.CodeMirror-linenumber{color:#8f8f8f;font-variant-numeric:tabular-nums;font-weight:400}
+.CodeMirror-step-jump,.CodeMirror-step-jump .CodeMirror-linenumber{cursor:pointer}
+.CodeMirror-step-jump:not(.CodeMirror-execution-gutter):not(.CodeMirror-activeline-gutter):hover .CodeMirror-linenumber{color:#c9c9c9}
+.CodeMirror-cursor{border-left-color:#ffffff}
+.CodeMirror-activeline-gutter{background:#454545}
+.CodeMirror-activeline-gutter .CodeMirror-linenumber{color:#ffffff;font-weight:400}
+.CodeMirror-cursor-line{background:rgb(255 255 255 / 6%)}
+.CodeMirror-execution-line{background:var(--accent-yellow-soft)}
+.CodeMirror-execution-gutter{background:var(--accent-yellow-gutter)}
+.CodeMirror-execution-gutter .CodeMirror-linenumber{color:var(--accent-yellow);font-weight:400}
+.CodeMirror-matchingbracket{color:#ffffff!important;background:#4a4a4a;outline:1px solid #c9c9c9}
+.CodeMirror-nonmatchingbracket{color:#ffffff!important;background:#333333;text-decoration:underline double}
+.CodeMirror .cm-keyword,.CodeMirror .cm-type{color:#f4f4f4;font-weight:700}
+.CodeMirror .cm-def,.CodeMirror .cm-builtin{color:#d6d6d6}
+.CodeMirror .cm-variable,.CodeMirror .cm-variable-2,.CodeMirror .cm-variable-3{color:#e8e8e8}
+.CodeMirror .cm-number,.CodeMirror .cm-atom{color:#c2c2c2}
+.CodeMirror .cm-string,.CodeMirror .cm-string-2{color:#d9d9d9}
+.CodeMirror .cm-comment{color:#7f7f7f}
+.CodeMirror .cm-operator,.CodeMirror .cm-meta,.CodeMirror .cm-property{color:#aaaaaa}
+.CodeMirror .cm-error{color:#ffffff;text-decoration:underline double}
+.idle-state{border-color:#555555}
+.idle-icon{color:var(--accent-yellow)}
+.step-top{color:var(--accent-yellow)}
+.step-track{background:#393939}
+.step-track span{background:var(--accent-yellow)}
+.step-code{border-color:#5a5a5a;background:#202020}
+.step-code small,.flow-detail small{color:var(--muted)}
+.flow-detail p{color:#dedede}
+.value-card{background:var(--surface2);border-color:var(--line)}
+.value-card strong{color:#c8c8c8}
+.value-card em{color:var(--accent-yellow)}
+.visualize-button{background:var(--accent-yellow);color:#111111;box-shadow:0 8px 0 #8d8100,0 12px 28px var(--shadow)}
+.visualize-button:hover{background:var(--accent-yellow-strong)}
+.visualize-button:active,.visualize-button.pressed{background:#fff57a;box-shadow:0 2px 0 #8d8100,0 4px 14px var(--shadow)}
+.demo-switch{background:var(--surface);border-color:var(--line)}
+.demo-switch select{background:var(--surface2);color:var(--text);border-color:var(--line-strong)}
+.feedback-card{background:var(--surface);border-color:var(--line)}
+.feedback-card p{color:#d2d2d2}
+.feedback-card.success{border-color:#707070;border-left:6px solid #ededed;background:#1c1c1c}
+.feedback-card.failure{border-color:#707070;border-left:7px double #bdbdbd;background:#262626}
+.feedback-card.stale{border-color:#777777}
+.feedback-card.processing{border-color:var(--accent-yellow);background:#202020}
+.history-dialog{border-color:var(--line-strong);background:#1a1a1a;color:var(--text);box-shadow:0 25px 80px rgba(0,0,0,.75)}
+.history-dialog::backdrop{background:rgba(0,0,0,.78)}
+.history-item{background:#252525;border-color:#4d4d4d;color:var(--text)}
+.history-item:hover{border-color:var(--accent-yellow);background:#303030}
+
+/* Stage UI-D1: 補助操作、入力値、出力結果。既存のエディタ配色と寸法は維持します。 */
+.header-tools{display:flex;align-items:center;gap:10px}
+.code-panel{grid-column:1;grid-row:1}
+.flow-panel{grid-column:2;grid-row:1}
+.action-area{grid-column:1 / -1;grid-row:2;margin-top:0}
+.sample-picker{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px}
+.sample-picker select{min-height:44px;max-width:185px;padding:8px 11px;border:1px solid var(--line-strong);border-radius:12px;background:var(--surface2);color:var(--text);font:inherit;font-size:13px}
+.sample-picker select:focus-visible,.scanf-field input:focus-visible{outline:3px solid var(--accent-yellow);outline-offset:2px}
+.scanf-field{display:grid;grid-template-columns:auto minmax(0,175px) minmax(0,1fr);align-items:center;gap:8px 12px;min-height:68px;padding:10px 20px 0;color:var(--muted);font-size:12px}
+.scanf-field label{color:var(--text);font-weight:700;white-space:nowrap}
+.scanf-field input{width:100%;min-height:44px;padding:8px 12px;border:1px solid var(--line-strong);border-radius:9px;background:var(--surface-inset);color:var(--text);font:inherit;font-size:15px}
+.scanf-field input:disabled{border-color:var(--line);background:var(--surface2);color:var(--text-dim);cursor:not-allowed}
+.scanf-field span{color:var(--muted);line-height:1.4}
+.output-card{display:flex;align-items:center;justify-content:space-between;gap:14px;min-height:68px;margin:0 20px 12px;padding:10px 14px;border:1px solid var(--line);border-radius:12px;background:var(--surface2)}
+.output-card>div{display:flex;flex-direction:column;gap:4px;min-width:0}
+.output-heading{font-size:11px;font-weight:800;letter-spacing:.05em;color:var(--text)}
+.output-state{font-size:12px;color:var(--muted)}
+.output-card output{max-width:50%;overflow-wrap:anywhere;font-family:ui-monospace,Consolas,monospace;font-size:20px;font-weight:700;color:var(--muted)}
+.output-card.has-output output{color:var(--accent-yellow)}
+@media(max-width:900px){
+  .code-panel,.action-area,.flow-panel{grid-column:1;grid-row:auto}
+}
+@media(max-width:600px){
+  .site-header{flex-wrap:wrap;padding:10px 0}
+  .header-tools{width:100%;justify-content:space-between}
+  .sample-picker{flex:1;min-width:0}
+  .sample-picker select{flex:1;min-width:0;max-width:none}
+  .scanf-field{grid-template-columns:auto minmax(0,1fr);padding:10px 14px 0}
+  .scanf-field span{grid-column:1 / -1}
+  .output-card{margin:0 13px 12px}
+}
+
+/* Stage UI-D2: 説明を減らし、CODE / FLOW の入口をそろえて詰めます。 */
+.panel-heading{min-height:48px;padding:12px 20px}
+@media(max-width:600px){.panel-heading{padding:12px 14px}}
+
+/* Stage UI-D3: RUNを視界の左下に残し、RESULTをSTEPの入口にします。 */
+.app-shell{padding-bottom:max(96px,calc(80px + env(safe-area-inset-bottom)))}
+.action-area .demo-switch{width:max-content;max-width:100%}
+.feedback:empty{min-height:0;margin-top:0}
+.visualize-button{
+  position:fixed;
+  left:max(16px,env(safe-area-inset-left));
+  bottom:max(16px,env(safe-area-inset-bottom));
+  z-index:5;
+  width:max-content;
+  max-width:calc(100vw - 32px);
+  min-width:0;
+  min-height:64px;
+  padding:12px 24px;
+  gap:10px;
+  background:rgba(255,230,0,.84);
+  box-shadow:0 6px 0 #8d8100,0 10px 24px var(--shadow);
+}
+.visualize-button:hover,.visualize-button:focus-visible{background:var(--accent-yellow-strong)}
+.visualize-button:focus-visible{outline:3px solid #ffffff;outline-offset:3px}
+.visualize-button:active,.visualize-button.pressed{box-shadow:0 2px 0 #8d8100,0 4px 14px var(--shadow)}
+.output-card[hidden],.step-controls[hidden]{display:none}
+.result-state{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;min-height:330px;padding:22px;text-align:center}
+.result-label{font-size:13px;font-weight:800;letter-spacing:.18em;color:var(--muted)}
+.result-value{max-width:100%;font:700 clamp(48px,7vw,78px)/1.1 ui-monospace,Consolas,monospace;overflow-wrap:anywhere;color:var(--accent-yellow)}
+.result-flow-button{min-height:44px;padding:10px 18px;border:1px solid var(--line-strong);border-radius:10px;background:var(--surface2);color:var(--text);touch-action:manipulation}
+.result-flow-button:hover,.result-flow-button:focus-visible{background:var(--surface-hover)}
+@media(max-width:600px){
+  .visualize-button{min-height:58px;padding:10px 20px;font-size:18px}
+  .result-state{min-height:300px}
+}
+
+/* Stage UI-D4: 最終状態を参照しながら、RESULTとSTEPを往復します。 */
+.action-tools{display:flex;align-items:stretch;flex-wrap:wrap;gap:12px}
+.final-summary{display:flex;align-items:center;flex-wrap:wrap;gap:10px 22px;min-width:0;max-width:100%;min-height:68px;padding:10px 16px;border:1px solid var(--line);border-radius:15px;background:var(--surface)}
+.final-summary>div{display:flex;flex-direction:column;gap:4px;min-width:0}
+.final-summary>div>span{font-size:11px;color:var(--muted)}
+.final-summary strong{font:700 18px ui-monospace,Consolas,monospace;color:var(--text);overflow-wrap:anywhere}
+.summary-variables{display:flex;flex-wrap:wrap;gap:4px 10px;color:var(--muted);font:13px ui-monospace,Consolas,monospace}
+.summary-variable{white-space:nowrap}
+.result-variables{display:flex;flex-direction:column;align-items:center;gap:9px;max-width:100%}
+.result-variables-label{font-size:11px;font-weight:700;letter-spacing:.12em;color:var(--muted)}
+.result-variable-values{display:flex;justify-content:center;flex-wrap:wrap;gap:8px;max-width:100%}
+.result-variable{padding:7px 11px;border:1px solid var(--line);border-radius:8px;background:var(--surface2);color:#dedede;font:14px ui-monospace,Consolas,monospace;overflow-wrap:anywhere}
+
+/* CodeMirrorの既存tokenだけで、無彩色の明度と控えめな暖色差をつけます。 */
+.CodeMirror .cm-def,.CodeMirror .cm-builtin{color:#ededed;font-weight:600}
+.CodeMirror .cm-variable,.CodeMirror .cm-variable-2,.CodeMirror .cm-variable-3{color:#d5d5d5;font-weight:400}
+.CodeMirror .cm-number,.CodeMirror .cm-atom{color:#d0cab3;font-weight:600}
+.CodeMirror .cm-string,.CodeMirror .cm-string-2{color:#d1c8b5}
+.CodeMirror .cm-meta{color:#c9c3aa;font-weight:600}
+.CodeMirror .cm-comment{color:#979797;font-weight:400}
+.CodeMirror .cm-operator,.CodeMirror .cm-property{color:#aaaaaa}
+
+.visualize-button{background:rgba(255,230,0,.54)}
+@media(max-width:600px){
+  .action-tools{gap:8px}
+  .final-summary{flex:1;padding:9px 12px;gap:8px 16px}
+}
+
+/* Lite：実データを載せるための最小限の調整。UI LABの配置と色を継承します。 */
+.engine-sandbox{display:none}
+.CodeMirror{height:390px}
+.CodeMirror-cursor-line{background:rgb(255 255 255 / 6%)}
+.CodeMirror-execution-line{background:var(--accent-yellow-soft)}
+.output-card output,.result-value{white-space:pre-wrap}
+.result-value{font-size:clamp(24px,4.5vw,52px);line-height:1.3}
+.flow-detail p,.value-card span{white-space:pre-wrap}
+.flow-detail p{overflow-wrap:anywhere}
+.value-card span{font-size:13px;overflow-wrap:anywhere}
+.failure-state{padding:22px;border:1px solid var(--line-strong);border-radius:12px;line-height:1.6;background:var(--surface2)}
+.failure-state h3{font-size:17px;margin:0 0 10px}
+.failure-state p{margin:8px 0;white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px}
+.failure-state .partial-output{border-top:1px solid var(--line);padding-top:10px}
+.sample-picker{min-width:0}
+@media(max-width:900px){
+  .workspace{grid-template-columns:1fr}
+  /* 縦並びの画面ではRUNをCODE直下へ置き、STEPとOUTPUTを覆いません。 */
+  .visualize-button{position:static;width:calc(100% - 28px);max-width:none;margin:14px;box-shadow:0 4px 0 #8d8100}
+}
+@media(max-width:600px){
+  .site-header{align-items:flex-start}
+  .sample-picker{width:100%;justify-content:space-between}
+  .sample-picker select{width:60%;max-width:none}
+  .CodeMirror{height:300px}
+  .output-card output{max-width:55%;font-size:16px}
+}
+
+/* 授業版のブランド要素だけ、正式版と同じ書体を使用します。 */
+.brand strong,
+.visualize-button > span:last-child,
+.brand-mark{
+  font-family:"Playfair Display SC", serif;
+  font-weight:700;
+}
+
+/* エラー位置は行番号だけ赤く示します。実行行・カーソル行より優先します。 */
+.CodeMirror-error-gutter .CodeMirror-linenumber{
+  color:#f50100 !important;
+}
