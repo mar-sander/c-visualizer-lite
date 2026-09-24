@@ -28,6 +28,29 @@ let currentCursorLine = -1;
 let highlightedLine = -1;
 const jumpableLines = new Set();
 const errorLines = new Set();
+let alignmentCheckPending = false;
+
+// UI LAB UI-C3：ガター、本文、行番号の実座標がずれた場合だけ再計算します。
+function checkEditorAlignment(){
+  if(alignmentCheckPending) return;
+  alignmentCheckPending = true;
+  requestAnimationFrame(() => {
+    alignmentCheckPending = false;
+    const wrapper = editor.getWrapperElement();
+    const gutters = wrapper.querySelector('.CodeMirror-gutters');
+    const sizer = wrapper.querySelector('.CodeMirror-sizer');
+    const scroll = wrapper.querySelector('.CodeMirror-scroll');
+    const gutterRect = gutters.getBoundingClientRect();
+    const numberRects = wrapper.querySelectorAll('.CodeMirror-code .CodeMirror-gutter-wrapper .CodeMirror-linenumber');
+    const displacedNumber = Array.from(numberRects).some(number => {
+      const rect = number.getBoundingClientRect();
+      return Math.abs(rect.left - gutterRect.left) > 1 || rect.right > gutterRect.right + 1;
+    });
+    if(Math.abs(sizer.getBoundingClientRect().left + scroll.scrollLeft - gutterRect.right) > 1 || displacedNumber){
+      editor.refresh();
+    }
+  });
+}
 
 function element(tag, className, value){
   const node = document.createElement(tag);
@@ -236,7 +259,7 @@ function showFailure(result){
   const box = element('div', 'failure-state');
   box.append(element('h3', '', '確認が必要です'));
   for(const warning of warnings) box.append(element('p', '', warning));
-  if(result.output) box.append(element('p', 'partial-output', `停止までの出力：${result.output}`));
+  if(result.output) box.append(element('p', 'partial-output', `农止までの出力：${result.output}`));
   flow.replaceChildren(box);
   $('step-controls').hidden = true;
   outputCard.hidden = true;
@@ -310,3 +333,8 @@ $('step-prev').addEventListener('click', () => {
 updateCursor();
 setOutput('');
 showIdle('準備ができました', '左でCコードを書き、RUNで処理を確認してください。');
+checkEditorAlignment();
+window.addEventListener('load', checkEditorAlignment);
+window.addEventListener('resize', checkEditorAlignment);
+window.visualViewport?.addEventListener('resize', checkEditorAlignment);
+document.fonts?.ready.then(checkEditorAlignment, checkEditorAlignment);
