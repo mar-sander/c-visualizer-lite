@@ -184,12 +184,35 @@ function decodeEngineExplanation(html){
   return node.textContent.trim();
 }
 
-function valueChange(index){
+function renderValueChange(index){
+  const change = element('div', 'value-card');
+  change.append(element('strong', '', '値の変化'));
   const now = new Map(currentSteps[index].variablesAtStep);
   const before = new Map(index > 0 ? currentSteps[index - 1].variablesAtStep : []);
   const changes = [...now].filter(([name, value]) => before.get(name) !== value);
-  if(!changes.length) return '変数の変化なし';
-  return changes.map(([name, value]) => `${name}：${before.has(name) ? before.get(name) : '—'} → ${value}`).join(' / ');
+  if(!changes.length){
+    change.append(element('span', 'value-card-empty', '変数の変化なし'));
+    return change;
+  }
+
+  const boxes = element('div', 'scalar-boxes');
+  for(const [name, value] of changes){
+    const currentValue = value === '未初期化' ? '—' : value;
+    const previousValue = before.has(name) && before.get(name) !== '未初期化'
+      ? before.get(name) : '—';
+    const variable = element('div', 'scalar-variable');
+    variable.append(
+      element('span', 'scalar-variable-name', name),
+      element('span', 'scalar-variable-value', currentValue)
+    );
+    // 未代入の宣言だけは「— → —」と重複表示しません。
+    if(before.has(name) || value !== '未初期化'){
+      variable.append(element('span', 'scalar-variable-history', `${previousValue} → ${currentValue}`));
+    }
+    boxes.append(variable);
+  }
+  change.append(boxes);
+  return change;
 }
 
 function renderStep(){
@@ -212,8 +235,7 @@ function renderStep(){
     element('small', '', 'コンピュータはいま何をしている？'),
     element('p', '', decodeEngineExplanation(step.text))
   );
-  const change = element('div', 'value-card');
-  change.append(element('strong', '', '値の変化'), element('span', '', valueChange(activeStep)));
+  const change = renderValueChange(activeStep);
   const nextStep = currentSteps[activeStep + 1];
   const next = element('div', 'next-line');
   next.append(
