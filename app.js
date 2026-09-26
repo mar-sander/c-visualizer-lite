@@ -4,6 +4,7 @@ const flow = $('flow-content');
 const outputCard = document.querySelector('.output-card');
 const editor = CodeMirror.fromTextArea($('code-input'), {
   mode:'text/x-csrc',
+  inputStyle:'textarea',
   lineNumbers:true,
   matchBrackets:true,
   tabSize:4,
