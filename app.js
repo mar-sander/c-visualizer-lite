@@ -36,6 +36,145 @@ const jumpableLines = new Set();
 const errorLines = new Set();
 let alignmentCheckPending = false;
 
+const HISTORY_KEY = 'c-visualizer-lite-history-v1';
+const HISTORY_LIMIT = 20;
+const historyDialog = $('history-dialog');
+let historyEntries = loadHistory();
+let selectedHistoryId = null;
+
+function loadHistory(){
+  try{
+    const raw = localStorage.getItem(HISTORY_KEY);
+    if(!raw) return [];
+    const data = JSON.parse(raw);
+    if(data.version !== 1 || !Array.isArray(data.entries)) return [];
+    // 壊れたデータを画面やエディタへ渡さないよう、必要な項目だけを検査します。
+    return data.entries.filter(entry =>
+      entry && typeof entry.id === 'string' && typeof entry.timestamp === 'string' &&
+      !Number.isNaN(Date.parse(entry.timestamp)) && typeof entry.code === 'string' &&
+      ['result', 'check'].includes(entry.kind) && typeof entry.output === 'string' &&
+      Array.isArray(entry.variables) && entry.variables.every(pair =>
+        Array.isArray(pair) && pair.length === 2 && pair.every(value => typeof value === 'string')) &&
+      Array.isArray(entry.warnings) && entry.warnings.every(value => typeof value === 'string')
+    ).slice(0, HISTORY_LIMIT);
+  }catch(_error){
+    return [];
+  }
+}
+
+function persistHistory(){
+  try{
+    localStorage.setItem(HISTORY_KEY, JSON.stringify({version:1, entries:historyEntries}));
+  }catch(_error){
+    // 保存が使えなくてもRUNや現在の表示は続行します。
+  }
+}
+
+function saveHistory(code, kind, result, warnings = []){
+  try{
+    // 解析結果の可変配列を参照せず、保存時点の値だけを独立させます。
+    const snapshot = JSON.parse(JSON.stringify({
+      code,
+      kind,
+      output:typeof result?.output === 'string' ? result.output : '',
+      variables:Array.isArray(result?.variables) ? result.variables : [],
+      warnings
+    }));
+    const previous = historyEntries[0];
+    const same = previous && ['code', 'kind', 'output', 'variables', 'warnings'].every(key =>
+      JSON.stringify(previous[key]) === JSON.stringify(snapshot[key]));
+    if(same){
+      previous.timestamp = new Date().toISOString();
+    }else{
+      historyEntries.unshift({
+        id:crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        timestamp:new Date().toISOString(),
+        ...snapshot
+      });
+      historyEntries.length = Math.min(historyEntries.length, HISTORY_LIMIT);
+    }
+    persistHistory();
+  }catch(_error){
+    // 履歴用データが想定外でも解析結果へ影響させません。
+  }
+}
+
+function historyDate(timestamp){
+  const date = new Date(timestamp);
+  const pad = value => String(value).padStart(2, '0');
+  return `${date.getFullYear()}/${pad(date.getMonth() + 1)}/${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function renderHistory(){
+  const empty = !historyEntries.length;
+  $('history-empty').hidden = !empty;
+  $('history-content').hidden = empty;
+  if(empty) selectedHistoryId = null;
+  else if(!historyEntries.some(entry => entry.id === selectedHistoryId)){
+    selectedHistoryId = historyEntries[0].id;
+  }
+
+  const list = $('history-list');
+  list.replaceChildren();
+  for(const entry of historyEntries){
+    const button = element('button', 'challenge-history-item');
+    button.type = 'button';
+    button.setAttribute('aria-pressed', String(entry.id === selectedHistoryId));
+    const preview = entry.code.split('\n').map(line => line.trim()).filter(Boolean).slice(0, 2).join(' / ');
+    button.append(
+      element('span', 'history-item-meta', `${historyDate(entry.timestamp)} · ${entry.kind === 'result' ? 'RESULT' : '確認あり'}`),
+      element('span', 'history-preview', preview || '（空のコード）')
+    );
+    button.addEventListener('click', () => { selectedHistoryId = entry.id; renderHistory(); });
+    list.append(button);
+  }
+
+  const detail = $('history-detail');
+  detail.replaceChildren();
+  if(empty) return;
+  const entry = historyEntries.find(item => item.id === selectedHistoryId);
+  detail.append(element('h3', '', `${entry.kind === 'result' ? 'RESULT' : '確認あり'} · ${historyDate(entry.timestamp)}`));
+  detail.append(element('h4', '', 'コード'), element('pre', 'history-code', entry.code));
+  if(entry.kind === 'check'){
+    detail.append(element('h4', '', '確認メッセージ'));
+    for(const warning of entry.warnings) detail.append(element('p', 'history-warning', warning));
+  }
+  if(entry.kind === 'result' || entry.output){
+    detail.append(element('h4', '', '出力'), element('pre', 'history-output', entry.output || '出力はありません'));
+  }
+  if(entry.kind === 'result' || entry.variables.length){
+    detail.append(element('h4', '', '最終変数状態'));
+    const values = element('div', 'history-variables');
+    values.textContent = entry.variables.length ? '' : '変数はありません';
+    for(const [name, value] of entry.variables){
+      values.append(element('span', 'history-variable', `${name} = ${value}`));
+    }
+    detail.append(values);
+  }
+  const actions = element('div', 'history-detail-actions');
+  const restore = element('button', 'history-action history-restore', 'このコードに戻す');
+  restore.type = 'button';
+  restore.addEventListener('click', () => {
+    editor.setValue(entry.code);
+    $('sample-select').value = '';
+    invalidateResult();
+    $('feedback').textContent = 'コードを戻しました。RUNで確認してください。';
+    historyDialog.close();
+    editor.focus();
+  });
+  const remove = element('button', 'history-action', '1件削除');
+  remove.type = 'button';
+  remove.addEventListener('click', () => {
+    historyEntries = historyEntries.filter(item => item.id !== entry.id);
+    selectedHistoryId = null;
+    persistHistory();
+    renderHistory();
+    (historyEntries.length ? $('history-list').firstElementChild : $('history-close')).focus();
+  });
+  actions.append(restore, remove);
+  detail.append(actions);
+}
+
 // UI LAB UI-C3：ガター、本文、行番号の実座標がずれた場合だけ再計算します。
 function checkEditorAlignment(){
   if(alignmentCheckPending) return;
@@ -281,7 +420,7 @@ function showResultPage(){
 }
 
 function showFailure(result){
-  const warnings = result.warningText.filter(Boolean);
+  const warnings = (result.warningText || []).filter(Boolean);
   markErrorLines(warnings);
   if(!warnings.length) warnings.push('対応範囲で処理の流れを確認できませんでした。入力を見直してください。');
   const box = element('div', 'failure-state');
@@ -293,6 +432,7 @@ function showFailure(result){
   outputCard.hidden = true;
   $('feedback').textContent = 'コードを修正して、もう一度RUNしてください。';
   flow.scrollIntoView({behavior:'auto', block:'start'});
+  return warnings;
 }
 
 function runCode(){
@@ -311,7 +451,9 @@ function runCode(){
     const result = window.cVisualizerLiteResult;
     if(!result || result.hasWarnings || !result.steps.length){
       currentSteps = [];
-      showFailure(result || { warningText:[], output:'' });
+      const failed = result || { warningText:[], output:'' };
+      const warnings = showFailure(failed);
+      saveHistory(code, 'check', failed, warnings);
       return;
     }
     currentSteps = result.steps;
@@ -320,9 +462,12 @@ function runCode(){
     showFinalSummary(finalState);
     markJumpableLines();
     showResultPage();
+    saveHistory(code, 'result', result);
   }catch(error){
     currentSteps = [];
-    showFailure({ warningText:['処理を表示できませんでした。コードを確認して、再RUNしてください。'], output:'' });
+    const failed = { warningText:['処理を表示できませんでした。コードを確認して、再RUNしてください。'], output:'' };
+    const warnings = showFailure(failed);
+    saveHistory(code, 'check', failed, warnings);
     console.error('Visualizer Lite RUN failed', error);
   }
 }
@@ -348,6 +493,19 @@ $('sample-select').addEventListener('change', event => {
   event.target.value = Object.keys(sampleBody).find(key => sampleBody[key] === body);
 });
 $('visualize').addEventListener('click', runCode);
+$('history-open').addEventListener('click', () => {
+  renderHistory();
+  historyDialog.showModal();
+});
+$('history-close').addEventListener('click', () => historyDialog.close());
+$('history-clear').addEventListener('click', () => {
+  if(!window.confirm('すべての履歴を削除しますか？')) return;
+  historyEntries = [];
+  selectedHistoryId = null;
+  persistHistory();
+  renderHistory();
+  $('history-close').focus();
+});
 $('step-next').addEventListener('click', () => {
   if(!hasCurrentResult() || activeStep < 0) return;
   if(activeStep === currentSteps.length - 1) showResultPage();
