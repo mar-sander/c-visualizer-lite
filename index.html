@@ -15,26 +15,26 @@
         <span class="brand-mark" aria-hidden="true">C<span>.</span></span>
         <div><strong>C CODE VISUALIZER -LITE-</strong><small>四則演算 学習版</small></div>
       </div>
-      <label class="sample-picker" for="sample-select">
-        <span>サンプル</span>
-        <select id="sample-select" aria-label="サンプルコード">
-          <option value="">自分で書く</option>
-          <option value="add">足し算</option>
-          <option value="sub">引き算</option>
-          <option value="mul">掛け算</option>
-          <option value="div">割り算</option>
-          <option value="all">四則演算まとめ</option>
-          <option value="precedence">括弧と計算順序</option>
-        </select>
-      </label>
+      <div class="header-tools">
+        <button type="button" id="history-open" class="history-open" aria-haspopup="dialog" aria-controls="history-dialog">履歴</button>
+        <label class="sample-picker" for="sample-select">
+          <select id="sample-select" aria-label="サンプルコード">
+            <option value="">SAMPLE</option>
+            <option value="add">足し算</option>
+            <option value="sub">引き算</option>
+            <option value="mul">掛け算</option>
+            <option value="div">割り算</option>
+            <option value="all">四則演算まとめ</option>
+            <option value="precedence">括弧と計算順序</option>
+          </select>
+        </label>
+      </div>
     </header>
     <main>
       <div class="workspace">
         <section class="panel code-panel" aria-label="01 / CODE">
-          <div class="panel-heading"><span class="section-index">01 / CODE</span></div>
-          <div class="editor-guide">
-            <span><i class="legend-cursor"></i> カーソル位置</span>
-            <span><i class="legend-execution"></i> 実行位置</span>
+          <div class="panel-heading">
+            <span class="section-index">01 / CODE</span>
             <button type="button" id="editor-light-toggle" class="editor-light-toggle" role="switch" aria-checked="false" aria-label="エディタのライト表示" title="エディタのライト表示を切り替え">Light</button>
           </div>
           <div class="editor-frame">
@@ -73,6 +73,20 @@ int main(void){
       <p class="footnote">C言語の対応範囲で処理を可視化します。1行に1つの文を書いてください。完全なコンパイラや正誤判定ではありません。</p>
     </main>
   </div>
+  <dialog id="history-dialog" class="challenge-history" aria-labelledby="history-title">
+    <div class="history-heading">
+      <h2 id="history-title">履歴</h2>
+      <button type="button" id="history-close" class="history-close" aria-label="履歴を閉じる">×</button>
+    </div>
+    <p id="history-empty" class="history-empty" hidden>まだ履歴はありません。RUNすると、ここに挑戦の記録が残ります。</p>
+    <div id="history-content" class="history-content">
+      <div class="history-list-area">
+        <div id="history-list" class="challenge-history-list" aria-label="実行履歴"></div>
+        <button type="button" id="history-clear" class="history-action history-clear">全履歴削除</button>
+      </div>
+      <section id="history-detail" class="history-detail" aria-label="選択した履歴の詳細"></section>
+    </div>
+  </dialog>
   <!-- 既存解析エンジンの入出力先。画面へは解析済みの実データを反映します。 -->
   <div class="engine-sandbox" aria-hidden="true">
     <div id="codeEditor"><pre id="codeLineNumbers"></pre><pre id="codeHighlight"></pre></div>
