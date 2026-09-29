@@ -326,7 +326,6 @@ function decodeEngineExplanation(html){
 
 function renderValueChange(index){
   const change = element('div', 'value-card');
-  change.append(element('strong', '', '値の変化'));
   const now = new Map(currentSteps[index].variablesAtStep);
   const before = new Map(index > 0 ? currentSteps[index - 1].variablesAtStep : []);
   const changes = [...now].filter(([name, value]) => before.get(name) !== value);
@@ -369,10 +368,10 @@ function renderStep(){
   fill.style.width = `${(activeStep + 1) / currentSteps.length * 100}%`;
   track.append(fill);
   const code = element('div', 'step-code');
-  code.append(element('small', '', 'いま実行している行'), element('code', '', editor.getLine(step.lineNo - 1)));
+  code.append(element('code', '', editor.getLine(step.lineNo - 1)));
   const explanation = element('div', 'flow-detail');
   explanation.append(
-    element('small', '', 'コンピュータはいま何をしている？'),
+    element('small', '', 'コードは何をしてる？'),
     element('p', '', decodeEngineExplanation(step.text))
   );
   const change = renderValueChange(activeStep);
