@@ -57,7 +57,7 @@ button:focus-visible,select:focus-visible {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  border-bottom: 1px solid var(--line)
+  /* border-bottom: 1px solid var(--line) */
 }
 
 .brand {
