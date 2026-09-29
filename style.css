@@ -982,7 +982,7 @@ button:focus-visible,select:focus-visible {
   background: rgb(50 46 14);
 }
 
-.step-code small,.flow-detail small {
+.flow-detail small {
   color: var(--muted)
 }
 
