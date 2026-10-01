@@ -497,6 +497,12 @@ $('history-open').addEventListener('click', () => {
   historyDialog.showModal();
 });
 $('history-close').addEventListener('click', () => historyDialog.close());
+historyDialog.addEventListener('click', event => {
+  const rect = historyDialog.getBoundingClientRect();
+  const outside = event.clientX < rect.left || event.clientX > rect.right ||
+    event.clientY < rect.top || event.clientY > rect.bottom;
+  if(outside) historyDialog.close();
+});
 $('history-clear').addEventListener('click', () => {
   if(!window.confirm('すべての履歴を削除しますか？')) return;
   historyEntries = [];
