@@ -474,7 +474,6 @@ function showResultPage(){
   $('step-controls').hidden = true;
   outputCard.hidden = true;
   $('feedback').textContent = '';
-  flow.scrollIntoView({behavior:'auto', block:'start'});
   if(shouldReveal) revealResult(resultValue, finalState.output);
 }
 
@@ -491,7 +490,6 @@ function showFailure(result){
   $('step-controls').hidden = true;
   outputCard.hidden = true;
   $('feedback').textContent = 'コードを修正して、もう一度RUNしてください。';
-  flow.scrollIntoView({behavior:'auto', block:'start'});
   return warnings;
 }
 
