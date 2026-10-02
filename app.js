@@ -35,6 +35,57 @@ let highlightedLine = -1;
 const jumpableLines = new Set();
 const errorLines = new Set();
 let alignmentCheckPending = false;
+let resultRevealPending = false;
+let resultReveal = null;
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+// 表示専用の演出です。解析結果・履歴へ途中の文字列を戻しません。
+function cancelResultReveal(){
+  if(!resultReveal) return;
+  clearTimeout(resultReveal.timer);
+  resultReveal.node.replaceChildren(document.createTextNode(resultReveal.output));
+  resultReveal = null;
+}
+
+function revealResult(node, output){
+  if(!output || reducedMotion.matches) return;
+  const characters = Array.from(output);
+  const glyphs = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ+-*/=<>#';
+  // 長い出力も約600ms以内。左から最大5組に分け、各組を3回揺らして確定します。
+  const groupSize = Math.max(1, Math.ceil(characters.length / 5));
+  const finalText = element('span', 'result-reveal-final', output);
+  const animatedText = element('span', 'result-reveal-text');
+  animatedText.setAttribute('aria-hidden', 'true');
+  node.replaceChildren(finalText, animatedText);
+  const animation = {node, output, timer:null};
+  resultReveal = animation;
+  const started = performance.now();
+
+  function update(){
+    // 同一演出・同一画面だけを更新します。中断時も必ず正式な値へ戻します。
+    if(resultReveal !== animation) return;
+    if(!node.isConnected || !hasCurrentResult() || activeStep !== -1 || reducedMotion.matches){
+      cancelResultReveal();
+      return;
+    }
+    const fixedCount = Math.floor((performance.now() - started) / 120) * groupSize;
+    if(fixedCount >= characters.length){
+      cancelResultReveal();
+      return;
+    }
+    const end = Math.min(fixedCount + groupSize, characters.length);
+    animatedText.textContent = characters.slice(0, end).map((character, index) => {
+      if(index < fixedCount || /\s/u.test(character)) return character;
+      return glyphs[Math.floor(Math.random() * glyphs.length)];
+    }).join('');
+    animation.timer = setTimeout(update, 40);
+  }
+  update();
+}
+
+reducedMotion.addEventListener('change', event => {
+  if(event.matches) cancelResultReveal();
+});
 
 const HISTORY_KEY = 'c-visualizer-lite-history-v1';
 const HISTORY_LIMIT = 20;
@@ -205,6 +256,7 @@ function element(tag, className, value){
 }
 
 function showIdle(title, message){
+  cancelResultReveal();
   const box = element('div', 'idle-state');
   box.append(element('h3', '', title), element('p', '', message));
   flow.replaceChildren(box);
@@ -305,6 +357,8 @@ function hasCurrentResult(){
 }
 
 function invalidateResult(){
+  cancelResultReveal();
+  resultRevealPending = false;
   clearJumpableLines();
   clearErrorLines();
   currentSteps = [];
@@ -356,6 +410,7 @@ function renderValueChange(index){
 
 function renderStep(){
   if(!hasCurrentResult() || activeStep < 0) return;
+  cancelResultReveal();
   const step = currentSteps[activeStep];
   showExecutionLine(step.lineNo);
   const top = element('div', 'step-top');
@@ -393,11 +448,15 @@ function renderStep(){
 
 function showResultPage(){
   if(!hasCurrentResult()) return;
+  cancelResultReveal();
+  const shouldReveal = resultRevealPending;
+  resultRevealPending = false;
   activeStep = -1;
   showExecutionLine(null);
   const result = element('div', 'result-state');
   result.append(element('span', 'result-label', 'RESULT'));
-  result.append(element('output', 'result-value', finalState.output || '出力はまだありません'));
+  const resultValue = element('output', 'result-value', finalState.output || '出力はまだありません');
+  result.append(resultValue);
   const variables = element('div', 'result-variables');
   variables.append(element('span', 'result-variables-label', 'VARIABLES'));
   const values = element('div', 'result-variable-values');
@@ -416,9 +475,11 @@ function showResultPage(){
   outputCard.hidden = true;
   $('feedback').textContent = '';
   flow.scrollIntoView({behavior:'auto', block:'start'});
+  if(shouldReveal) revealResult(resultValue, finalState.output);
 }
 
 function showFailure(result){
+  cancelResultReveal();
   const warnings = (result.warningText || []).filter(Boolean);
   markErrorLines(warnings);
   if(!warnings.length) warnings.push('対応範囲で処理の流れを確認できませんでした。入力を見直してください。');
@@ -435,6 +496,8 @@ function showFailure(result){
 }
 
 function runCode(){
+  cancelResultReveal();
+  resultRevealPending = false;
   clearJumpableLines();
   clearErrorLines();
   finalState = null;
@@ -460,6 +523,7 @@ function runCode(){
     resultCode = code;
     showFinalSummary(finalState);
     markJumpableLines();
+    resultRevealPending = true;
     showResultPage();
     saveHistory(code, 'result', result);
   }catch(error){

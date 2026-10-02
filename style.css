@@ -19,6 +19,10 @@
   --shadow: rgba(0,0,0,.55);
   --mint: var(--accent-yellow);
   --sky: #a8a8a8;
+  --analysis-grid-color: rgb(34 34 34 / 32%);
+  --analysis-grid:
+    linear-gradient(var(--analysis-grid-color) 1px, transparent 1px),
+    linear-gradient(90deg, var(--analysis-grid-color) 1px, transparent 1px);
   font-family: system-ui,-apple-system,"Noto Sans JP",sans-serif
 }
 
@@ -1536,6 +1540,22 @@ button:focus-visible,select:focus-visible {
   line-height: 1.3
 }
 
+/* 最終文字列で寸法と読み上げを保ち、形成中の文字だけを同じ位置へ重ねます。 */
+
+.result-value:has(.result-reveal-text) {
+  position: relative
+}
+
+.result-reveal-final {
+  opacity: 0
+}
+
+.result-reveal-text {
+  position: absolute;
+  inset: 0;
+  pointer-events: none
+}
+
 .flow-detail p,.value-card span {
   white-space: pre-wrap
 }
@@ -2074,6 +2094,64 @@ button:focus-visible,select:focus-visible {
 .history-clear {
   margin: 8px 12px 12px;
   align-self: flex-start
+}
+
+/* Stage L-UI10: 面の色 → 方眼 → 文字。背景だけなので入力・クリックを遮りません。
+   透明なRESULT/STEP領域には、親パネルの方眼がそのまま透けて見えます。 */
+
+body {
+  background-image: var(--analysis-grid), radial-gradient(circle at 75% 0%,#252525 0,transparent 36rem);
+  background-size: 5px 5px, 5px 5px, auto
+}
+
+.panel,
+.CodeMirror,
+.CodeMirror-gutters,
+.final-summary,
+.output-card,
+.step-code,
+.value-card,
+.value-card .scalar-variable-value,
+.result-variable,
+.failure-state,
+.challenge-history,
+.challenge-history-item,
+.challenge-history-item[aria-pressed="true"],
+.history-code,
+.history-output,
+.history-open,
+.history-close,
+.history-action,
+.sample-picker select,
+.editor-light-toggle,
+.step-button,
+.result-flow-button,
+.visualize-button,
+.visualize-button:focus-visible,
+:is(.history-open, .history-action, .editor-light-toggle, .step-button:not(:disabled), .result-flow-button):is(:hover, :focus-visible),
+.editor-light-toggle[aria-checked="true"] {
+  background-image: var(--analysis-grid);
+  background-size: 5px 5px
+}
+
+/* 黄色い面では濃淡差が大きいため、RUNの線だけ薄くします。 */
+
+.visualize-button {
+  --analysis-grid-color: rgb(34 34 34 / 8%);
+  --analysis-grid:
+    linear-gradient(var(--analysis-grid-color) 1px, transparent 1px),
+    linear-gradient(90deg, var(--analysis-grid-color) 1px, transparent 1px)
+}
+
+.visualize-button:hover {
+  background-image: none
+}
+
+/* Lightでは既存の明るい入力面とハイライトを優先します。 */
+
+.editor-frame.is-light .CodeMirror,
+.editor-frame.is-light .CodeMirror-gutters {
+  background-image: none
 }
 
 @media(max-width:600px) {
