@@ -1383,6 +1383,7 @@ button:focus-visible,select:focus-visible {
 .final-summary {
   display: flex;
   align-items: center;
+  justify-content: center;
   flex-wrap: wrap;
   gap: 10px 22px;
   min-width: 0;
