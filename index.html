@@ -87,6 +87,9 @@ int main(void){
       <button type="submit">UNLOCK</button>
       <p id="secret-code-error" role="status" aria-live="polite" hidden>INVALID CODE</p>
     </form>
+    <div id="secret-code-success" class="secret-code-success" role="status" aria-live="polite" hidden>
+      <span id="secret-code-success-text">UNLOCKED</span>
+    </div>
   </dialog>
   <!-- 既存解析エンジンの入出力先。画面へは解析済みの実データを反映します。 -->
   <div class="engine-sandbox" aria-hidden="true">
