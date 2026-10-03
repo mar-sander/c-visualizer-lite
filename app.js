@@ -26,6 +26,79 @@ const sampleBody = {
   precedence:['int x = 2 + 3 * 4;', 'int y = (2 + 3) * 4;', 'printf("%d %d\\n", x, y);']
 };
 
+// 常時表示の選択肢はHTML側に置き、解除対象だけをID単位で追加します。
+const UNLOCK_CODES = new Map([['getsample', 'samples']]);
+const UNLOCK_KEY = 'c-visualizer-lite-unlocks-v1';
+const UNLOCKED_OPTIONS = {
+  samples:[
+    ['add', '足し算'], ['sub', '引き算'], ['mul', '掛け算'],
+    ['div', '割り算'], ['all', '四則演算まとめ'], ['precedence', '括弧と計算順序']
+  ]
+};
+const unlockedIds = loadUnlocks();
+const secretCodeDialog = $('secret-code-dialog');
+const secretCodeInput = $('secret-code-input');
+
+function loadUnlocks(){
+  try{
+    const raw = localStorage.getItem(UNLOCK_KEY);
+    if(!raw) return new Set();
+    const data = JSON.parse(raw);
+    if(!data || data.version !== 1 || !Array.isArray(data.unlocked) ||
+      !data.unlocked.every(id => typeof id === 'string' && id.length > 0)) return new Set();
+    return new Set(data.unlocked);
+  }catch(_error){
+    return new Set();
+  }
+}
+
+function persistUnlocks(){
+  try{
+    localStorage.setItem(UNLOCK_KEY, JSON.stringify({version:1, unlocked:[...unlockedIds]}));
+  }catch(_error){
+    // 保存できなくても、この画面での解除状態と主要機能は続行します。
+  }
+}
+
+function renderUnlockedSamples(){
+  const select = $('sample-select');
+  for(const [id, options] of Object.entries(UNLOCKED_OPTIONS)){
+    if(!unlockedIds.has(id)) continue;
+    for(const [value, label] of options){
+      if(!Array.from(select.options).some(option => option.value === value)){
+        select.add(new Option(label, value));
+      }
+    }
+  }
+}
+
+renderUnlockedSamples();
+$('secret-code-open').addEventListener('click', () => {
+  secretCodeInput.value = '';
+  $('secret-code-error').hidden = true;
+  secretCodeDialog.showModal();
+  secretCodeInput.focus();
+});
+$('secret-code-form').addEventListener('submit', event => {
+  event.preventDefault();
+  const unlockId = UNLOCK_CODES.get(secretCodeInput.value.trim());
+  if(!unlockId){
+    $('secret-code-error').hidden = false;
+    return;
+  }
+  unlockedIds.add(unlockId);
+  persistUnlocks();
+  renderUnlockedSamples();
+  secretCodeInput.value = '';
+  secretCodeDialog.close();
+});
+secretCodeDialog.addEventListener('click', event => {
+  const rect = secretCodeDialog.getBoundingClientRect();
+  const outside = event.clientX < rect.left || event.clientX > rect.right ||
+    event.clientY < rect.top || event.clientY > rect.bottom;
+  if(outside) secretCodeDialog.close();
+});
+
 let currentSteps = [];
 let finalState = null;
 let resultCode = null;

@@ -1913,6 +1913,92 @@ button:focus-visible,select:focus-visible {
   background: #000b
 }
 
+/* CODEの見出し位置と文字組を保ちながら、キーボード操作可能な隠しボタンにします。 */
+.secret-code-open {
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .16em;
+  color: var(--accent-yellow);
+  cursor: default
+}
+
+.secret-code-open:focus-visible {
+  outline: 1px solid var(--accent-yellow);
+  outline-offset: 3px
+}
+
+.secret-code-dialog {
+  width: min(340px, calc(100vw - 32px));
+  max-width: none;
+  margin: auto;
+  padding: 22px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--surface);
+  background-image: var(--analysis-grid);
+  background-size: 5px 5px;
+  color: var(--text);
+  box-shadow: 0 24px 80px #000b
+}
+
+.secret-code-dialog::backdrop {
+  background: #000b
+}
+
+.secret-code-form {
+  display: grid;
+  gap: 13px
+}
+
+.secret-code-form h2 {
+  margin: 0 0 3px;
+  color: var(--accent-yellow);
+  font-size: 13px;
+  letter-spacing: .16em
+}
+
+.secret-code-form input {
+  width: 100%;
+  min-height: 42px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: var(--surface-inset);
+  color: var(--text);
+  font: inherit
+}
+
+.secret-code-form input:focus-visible {
+  outline: 2px solid var(--accent-yellow)
+}
+
+.secret-code-form button {
+  min-height: 42px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: var(--surface2);
+  color: var(--accent-yellow);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .12em
+}
+
+.secret-code-form button:hover {
+  background: var(--surface-hover)
+}
+
+.secret-code-form p {
+  margin: 0;
+  color: #d8d8d8;
+  font-size: 11px;
+  letter-spacing: .08em
+}
+
 .history-heading {
   display: flex;
   align-items: center;
