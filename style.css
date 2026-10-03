@@ -1933,6 +1933,8 @@ button:focus-visible,select:focus-visible {
 }
 
 .secret-code-dialog {
+  position: relative;
+  overflow: hidden;
   width: min(340px, calc(100vw - 32px));
   max-width: none;
   margin: auto;
@@ -1997,6 +1999,84 @@ button:focus-visible,select:focus-visible {
   color: #d8d8d8;
   font-size: 11px;
   letter-spacing: .08em
+}
+
+.secret-code-success {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  padding: 22px;
+  background: rgb(17 17 17 / 92%);
+  background-image: var(--analysis-grid);
+  background-size: 5px 5px;
+  color: var(--accent-yellow);
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: .16em;
+  text-align: center
+}
+
+.secret-code-success[hidden] {
+  display: none
+}
+
+.secret-code-dialog.is-unlocking {
+  border-color: var(--accent-yellow);
+  animation: unlock-frame-pulse 800ms ease-out
+}
+
+.secret-code-dialog.is-unlocking .secret-code-form {
+  opacity: 0;
+  pointer-events: none
+}
+
+.secret-code-dialog.is-unlocking .secret-code-success span {
+  animation: unlock-text-form 800ms cubic-bezier(.2,.7,.2,1)
+}
+
+.secret-code-dialog.is-unlocking::after {
+  content: "";
+  position: absolute;
+  z-index: 3;
+  left: 0;
+  right: 0;
+  top: -8px;
+  height: 2px;
+  background: var(--accent-yellow);
+  box-shadow: 0 0 12px var(--accent-yellow),0 0 28px rgb(255 230 0 / 42%);
+  pointer-events: none;
+  animation: unlock-scan 650ms cubic-bezier(.2,.7,.2,1) forwards
+}
+
+@keyframes unlock-scan {
+  from { transform: translateY(0) }
+  to { transform: translateY(250px) }
+}
+
+@keyframes unlock-frame-pulse {
+  0% { box-shadow: 0 24px 80px #000b }
+  28% { box-shadow: 0 0 0 1px rgb(255 230 0 / 60%),0 0 32px rgb(255 230 0 / 18%),0 24px 80px #000b }
+  100% { box-shadow: 0 24px 80px #000b }
+}
+
+@keyframes unlock-text-form {
+  0% { opacity: 0; letter-spacing: .34em; transform: scale(.98) }
+  35% { opacity: 1 }
+  100% { opacity: 1; letter-spacing: .16em; transform: scale(1) }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .secret-code-dialog.is-unlocking,
+  .secret-code-dialog.is-unlocking .secret-code-success span,
+  .secret-code-dialog.is-unlocking::after {
+    animation: none
+  }
+
+  .secret-code-dialog.is-unlocking::after {
+    display: none
+  }
 }
 
 .history-heading {
