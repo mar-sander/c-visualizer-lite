@@ -35,9 +35,14 @@ const UNLOCKED_OPTIONS = {
     ['div', '割り算'], ['all', '四則演算まとめ'], ['precedence', '括弧と計算順序']
   ]
 };
+const UNLOCK_LABELS = {
+  samples:'SAMPLE UNLOCKED'
+};
 const unlockedIds = loadUnlocks();
 const secretCodeDialog = $('secret-code-dialog');
 const secretCodeInput = $('secret-code-input');
+const secretCodeSuccess = $('secret-code-success');
+let unlockFeedbackTimer = 0;
 
 function loadUnlocks(){
   try{
@@ -72,8 +77,28 @@ function renderUnlockedSamples(){
   }
 }
 
+function resetUnlockFeedback(){
+  clearTimeout(unlockFeedbackTimer);
+  unlockFeedbackTimer = 0;
+  secretCodeDialog.classList.remove('is-unlocking');
+  secretCodeSuccess.hidden = true;
+  $('secret-code-form').removeAttribute('aria-hidden');
+}
+
+function showUnlockFeedback(unlockId){
+  $('secret-code-success-text').textContent = UNLOCK_LABELS[unlockId] || 'UNLOCKED';
+  secretCodeSuccess.hidden = false;
+  $('secret-code-form').setAttribute('aria-hidden', 'true');
+  secretCodeDialog.classList.add('is-unlocking');
+  const duration = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 350 : 800;
+  unlockFeedbackTimer = window.setTimeout(() => {
+    secretCodeDialog.close();
+  }, duration);
+}
+
 renderUnlockedSamples();
 $('secret-code-open').addEventListener('click', () => {
+  resetUnlockFeedback();
   secretCodeInput.value = '';
   $('secret-code-error').hidden = true;
   secretCodeDialog.showModal();
@@ -86,11 +111,16 @@ $('secret-code-form').addEventListener('submit', event => {
     $('secret-code-error').hidden = false;
     return;
   }
+  const isNewUnlock = !unlockedIds.has(unlockId);
   unlockedIds.add(unlockId);
   persistUnlocks();
   renderUnlockedSamples();
   secretCodeInput.value = '';
-  secretCodeDialog.close();
+  if(isNewUnlock){
+    showUnlockFeedback(unlockId);
+  }else{
+    secretCodeDialog.close();
+  }
 });
 secretCodeDialog.addEventListener('click', event => {
   const rect = secretCodeDialog.getBoundingClientRect();
@@ -98,6 +128,7 @@ secretCodeDialog.addEventListener('click', event => {
     event.clientY < rect.top || event.clientY > rect.bottom;
   if(outside) secretCodeDialog.close();
 });
+secretCodeDialog.addEventListener('close', resetUnlockFeedback);
 
 let currentSteps = [];
 let finalState = null;
