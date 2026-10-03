@@ -20,12 +20,6 @@
         <label class="sample-picker" for="sample-select">
           <select id="sample-select" aria-label="サンプルコード">
             <option value="">SAMPLE</option>
-            <option value="add">足し算</option>
-            <option value="sub">引き算</option>
-            <option value="mul">掛け算</option>
-            <option value="div">割り算</option>
-            <option value="all">四則演算まとめ</option>
-            <option value="precedence">括弧と計算順序</option>
           </select>
         </label>
       </div>
@@ -34,7 +28,7 @@
       <div class="workspace">
         <section class="panel code-panel" aria-label="CODE">
           <div class="panel-heading">
-            <span class="section-index">CODE</span>
+            <button type="button" id="secret-code-open" class="section-index secret-code-open" aria-haspopup="dialog" aria-controls="secret-code-dialog" aria-label="SECRET CODEを入力">CODE</button>
             <button type="button" id="editor-light-toggle" class="editor-light-toggle" role="switch" aria-checked="false" aria-label="エディタのライト表示" title="エディタのライト表示を切り替え">Light</button>
           </div>
           <div class="editor-frame">
@@ -85,6 +79,14 @@ int main(void){
       </div>
       <section id="history-detail" class="history-detail" aria-label="選択した履歴の詳細"></section>
     </div>
+  </dialog>
+  <dialog id="secret-code-dialog" class="secret-code-dialog" aria-labelledby="secret-code-title">
+    <form id="secret-code-form" class="secret-code-form">
+      <h2 id="secret-code-title">SECRET CODE</h2>
+      <input id="secret-code-input" type="text" aria-label="SECRET CODE" autocomplete="off" autocapitalize="none" spellcheck="false">
+      <button type="submit">UNLOCK</button>
+      <p id="secret-code-error" role="status" aria-live="polite" hidden>INVALID CODE</p>
+    </form>
   </dialog>
   <!-- 既存解析エンジンの入出力先。画面へは解析済みの実データを反映します。 -->
   <div class="engine-sandbox" aria-hidden="true">
