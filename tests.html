@@ -403,7 +403,7 @@
       {
         name:'else側の変数宣言は未対応',
         code:`#include <stdio.h>\n\nint main(void){\n    int score = 45;\n    if(score >= 60){\n        printf("合格\\n");\n    }else{\n        int bonus = 5;\n        printf("再挑戦\\n");\n    }\n    return 0;\n}`,
-        expect:{ output:'再挑戦', outputExcludes:['合格'], variables:['score = 45'], variablesExclude:['bonus ='], warningMin:1, hintsInclude:['分岐内の変数宣言は未対応'], executedExcludes:['int bonus = 5;'] }
+        expect:{ output:'出力はまだありません。', outputExcludes:['合格', '再挑戦'], variables:['score = 45'], variablesExclude:['bonus ='], warningMin:1, hintsInclude:['分岐内の変数宣言は未対応'], executedExcludes:['int bonus = 5;', 'printf("再挑戦'] }
       },
       {
         name:'else ifは引き続き安全に停止',
@@ -3979,6 +3979,85 @@
     });
     testCases.push(...typedScalarTests);
 
+    // Stage L-COND1：条件判定の値と進路を、文章ではなくLite STEPのmetadataで確認します。
+    const conditionalTests = [];
+    function conditionalCase(name, statements, condition, result, selected, skipped, extra = {}){
+      conditionalTests.push({
+        name:`L-COND1 ${name}`,
+        code:makeMainCode(`    ${statements.split('\n').join('\n    ')}\n    return 0;`),
+        expect:{ warningMax:0, decisions:[{condition, result, selected, skipped}], ...extra }
+      });
+    }
+    conditionalCase('int比較true', 'int score = 75;\nif(score >= 60){\n    printf("PASS");\n}',
+      'score >= 60', true, 'if', null,
+      {output:'PASS', comparison:{left:{source:'score', value:75, display:'75'}, operator:'>=', right:{source:'60', value:60, display:'60'}}});
+    conditionalCase('int比較false・副作用なし', 'int score = 45;\nint value = 0;\nif(score >= 60){\n    value = 1;\n    printf("WRONG");\n}',
+      'score >= 60', false, 'none', 'if',
+      {variables:['value = 0'], output:'出力はまだありません。', noStepsFor:['value = 1;', 'printf("WRONG");']});
+    conditionalCase('float比較', 'float x = 1.5f;\nif(x > 1.0f){\n    printf("YES");\n}',
+      'x > 1.0f', true, 'if', null, {output:'YES'});
+    conditionalCase('double比較', 'double x = 2.5;\nif(x <= 3.0){\n    printf("YES");\n}',
+      'x <= 3.0', true, 'if', null, {output:'YES'});
+    conditionalCase('char文字定数比較', "char c = 'A';\nif(c == 'A'){\n    printf(\"YES\");\n}",
+      "c == 'A'", true, 'if', null, {output:'YES'});
+    conditionalCase('char数値比較', "char c = 'A';\nif(c > 60){\n    printf(\"YES\");\n}",
+      'c > 60', true, 'if', null, {output:'YES'});
+    conditionalCase('char判定snapshotと選択側代入', "char c = 'A';\nif(c > 60){\n    c = 66;\n}",
+      'c > 60', true, 'if', null,
+      {variables:["c = 'B' (66)"], decisionVariablesAtStep:[["c", "'A' (65)"]],
+        comparison:{left:{source:'c', value:65, display:"'A' (65)"}, operator:'>', right:{source:'60', value:60, display:'60'}}});
+    conditionalCase('float比較表示は短い', 'float x = 0.1f;\nif(x < 1.0f){\n    printf("YES");\n}',
+      'x < 1.0f', true, 'if', null,
+      {comparison:{left:{source:'x', value:Math.fround(0.1), display:'0.1'}, operator:'<', right:{source:'1.0f', value:1, display:'1'}}});
+    for(const [operator, result] of [['<',false], ['<=',false], ['>',true], ['>=',true], ['==',false], ['!=',true]]){
+      conditionalCase(`${operator} operator`, `int x = 5;\nif(x ${operator} 3){\n    printf("YES");\n}`,
+        `x ${operator} 3`, result, result ? 'if' : 'none', result ? null : 'if',
+        {output:result ? 'YES' : '出力はまだありません。'});
+    }
+    conditionalCase('if-else同一行true', 'int x = 0;\nif(1){\n    x = 1;\n}else{\n    x = 2;\n}',
+      '1', true, 'if', 'else', {variables:['x = 1'], noStepsFor:['x = 2;']});
+    conditionalCase('if-else同一行false', 'int x = 0;\nif(0){\n    x = 1;\n}else{\n    x = 2;\n}',
+      '0', false, 'else', 'if', {variables:['x = 2'], noStepsFor:['x = 1;']});
+    conditionalCase('if-else別行true', 'if(1){\n    printf("IF");\n}\nelse{\n    printf("WRONG");\n}',
+      '1', true, 'if', 'else', {output:'IF', noStepsFor:['printf("WRONG");']});
+    conditionalCase('if-else別行false', 'if(0){\n    printf("WRONG");\n}\nelse{\n    printf("ELSE");\n}',
+      '0', false, 'else', 'if', {output:'ELSE', noStepsFor:['printf("WRONG");']});
+    conditionalCase('非比較変数true', 'int x = 1;\nif(x){\n    printf("YES");\n}',
+      'x', true, 'if', null, {output:'YES', nonComparison:true, evaluatedDisplay:'1'});
+    conditionalCase('非比較変数false', 'int x = 0;\nif(x){\n    printf("WRONG");\n}',
+      'x', false, 'none', 'if', {nonComparison:true, evaluatedDisplay:'0'});
+    conditionalCase('非比較定数true', 'if(1){\n    printf("YES");\n}',
+      '1', true, 'if', null, {output:'YES', nonComparison:true});
+    conditionalCase('非比較定数false', 'if(0){\n    printf("WRONG");\n}',
+      '0', false, 'none', 'if', {nonComparison:true});
+    conditionalCase('選択側代入後に通常処理へ復帰', 'int x = 0;\nif(1){\n    x = 1;\n}\nx = x + 1;',
+      '1', true, 'if', null, {variables:['x = 2']});
+    conditionalCase('分岐内returnで早期終了', 'if(1){\n    return 0;\n}\nprintf("WRONG");',
+      '1', true, 'if', null, {noStepsFor:['printf("WRONG");']});
+    conditionalCase('printf時点の出力snapshot', 'printf("A");\nif(1){\n    printf("B");\n}',
+      '1', true, 'if', null, {output:'AB', decisionOutputAtStep:'A'});
+
+    function rejectedConditionalCase(name, statements, noStepsFor = []){
+      conditionalTests.push({
+        name:`L-COND1 ${name}`,
+        code:makeMainCode(`    ${statements.split('\n').join('\n    ')}\n    return 0;`),
+        expect:{warningMin:1, decisions:[], noStepsFor}
+      });
+    }
+    rejectedConditionalCase('選択if側のfloat宣言を事前拒否', 'if(1){\n    float value = 1.5f;\n    printf("WRONG");\n}', ['printf("WRONG");']);
+    rejectedConditionalCase('非選択if側のfloat宣言を事前拒否', 'if(0){\n    float value = 1.5f;\n    printf("WRONG");\n}', ['printf("WRONG");']);
+    rejectedConditionalCase('非選択if側のint宣言を事前拒否', 'if(0){\n    int value = 1;\n    printf("WRONG");\n}', ['printf("WRONG");']);
+    rejectedConditionalCase('非選択else側のchar宣言を事前拒否', 'if(1){\n    printf("WRONG");\n}else{\n    char value = 65;\n}', ['printf("WRONG");']);
+    rejectedConditionalCase('選択else側のdouble宣言を事前拒否', 'if(0){\n    printf("WRONG");\n}else{\n    double value = 2.5;\n}', ['printf("WRONG");']);
+    rejectedConditionalCase('非選択側の更新文を事前拒否', 'int x = 0;\nif(1){\n    x = 1;\n}else{\n    x++;\n}', ['x = 1;']);
+    rejectedConditionalCase('else ifは未対応', 'if(1){\n    printf("WRONG");\n}else if(0){\n    printf("WRONG2");\n}', ['printf("WRONG");']);
+    conditionalTests.push({
+      name:'L-COND1 論理演算子は未対応',
+      code:makeMainCode('    if(1 && 1){\n        printf("WRONG");\n    }\n    return 0;'),
+      expect:{warningMin:1, decisions:[], noStepsFor:['printf("WRONG");']}
+    });
+    testCases.push(...conditionalTests);
+
     function checkCase(testCase){
       const codeInput = document.getElementById('codeInput');
       const scanfInput = document.getElementById('scanfInput');
@@ -4071,6 +4150,53 @@
         if(!bridge.steps.some(step => (step.variablesAtStep || []).some(
           current => current[0] === pair[0] && current[1] === pair[1]
         ))) failures.push(`Lite STEP snapshotに「${pair.join(' = ')}」がない`);
+      }
+      if(expected.decisions){
+        const decisions = bridge.steps.filter(step => step.branchDecision);
+        if(decisions.length !== expected.decisions.length){
+          failures.push(`判定STEP数: 期待${expected.decisions.length} / 実際${decisions.length}`);
+        }
+        expected.decisions.forEach((wanted, index) => {
+          const step = decisions[index];
+          const decision = step?.branchDecision;
+          if(!decision) return;
+          for(const key of ['kind', 'condition', 'result', 'selected', 'skipped']){
+            const value = key === 'kind' ? 'if' : wanted[key];
+            if(decision[key] !== value) failures.push(`判定${index + 1}の${key}: 期待「${value}」/ 実際「${decision[key]}」`);
+          }
+          if(!Array.isArray(step.variablesAtStep) || typeof step.outputAtStep !== 'string'){
+            failures.push(`判定${index + 1}のLite snapshotがない`);
+          }
+          if(expected.nonComparison && decision.comparison !== null){
+            failures.push(`判定${index + 1}は非比較条件なのでcomparisonがnullではない`);
+          }
+          if(expected.evaluatedDisplay !== undefined && decision.evaluatedDisplay !== expected.evaluatedDisplay){
+            failures.push(`判定値の表示: 期待「${expected.evaluatedDisplay}」/ 実際「${decision.evaluatedDisplay}」`);
+          }
+          if(expected.decisionOutputAtStep !== undefined && step.outputAtStep !== expected.decisionOutputAtStep){
+            failures.push(`判定STEPの出力snapshot: 期待「${expected.decisionOutputAtStep}」/ 実際「${step.outputAtStep}」`);
+          }
+          if(expected.decisionVariablesAtStep &&
+            JSON.stringify(step.variablesAtStep) !== JSON.stringify(expected.decisionVariablesAtStep)){
+            failures.push(`判定STEPの変数snapshot: 期待「${JSON.stringify(expected.decisionVariablesAtStep)}」/ 実際「${JSON.stringify(step.variablesAtStep)}」`);
+          }
+        });
+        if(bridge.steps.some(step => step.branchDecision && !/^\s*if\s*\(/.test(
+          testCase.code.split('\n')[step.lineNo - 1] || ''
+        ))) failures.push('if以外のSTEPにbranchDecisionが付いている');
+      }
+      if(expected.comparison){
+        const comparison = bridge.steps.find(step => step.branchDecision)?.branchDecision.comparison;
+        if(!comparison || comparison.operator !== expected.comparison.operator ||
+          !['left', 'right'].every(side => ['source', 'value', 'display'].every(key =>
+            Object.is(comparison[side]?.[key], expected.comparison[side][key])))){
+          failures.push('判定STEPの比較値・operator・表示値が一致しない');
+        }
+      }
+      for(const fragment of expected.noStepsFor || []){
+        if(bridge.steps.some(step => (testCase.code.split('\n')[step.lineNo - 1] || '').includes(fragment))){
+          failures.push(`非実行行「${fragment}」のSTEPを作らない`);
+        }
       }
       if(expected.expression){
         const expression = evaluateArithmeticExpression(

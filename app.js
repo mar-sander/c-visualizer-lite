@@ -512,6 +512,27 @@ function renderValueChange(index){
   return change;
 }
 
+function renderDecisionStep(decision){
+  const card = element('div', 'decision-card');
+  const evaluation = element('div', 'decision-evaluation');
+  const values = decision.comparison
+    ? `${decision.comparison.left.display} ${decision.comparison.operator} ${decision.comparison.right.display}`
+    : `${decision.condition} → ${decision.evaluatedDisplay}`;
+  const outcome = element('span', 'decision-outcome', decision.result ? '成立' : '不成立');
+  outcome.append(element('small', '', decision.result ? 'TRUE' : 'FALSE'));
+  evaluation.append(element('span', 'decision-values', values), outcome);
+
+  const paths = element('div', 'decision-paths');
+  paths.append(element('span', decision.selected === 'if' ? 'decision-path is-selected' : 'decision-path is-skipped',
+    `IF · ${decision.selected === 'if' ? '選択' : '通らない'}`));
+  if(decision.selected === 'else' || decision.skipped === 'else'){
+    paths.append(element('span', decision.selected === 'else' ? 'decision-path is-selected' : 'decision-path is-skipped',
+      `ELSE · ${decision.selected === 'else' ? '選択' : '通らない'}`));
+  }
+  card.append(evaluation, paths);
+  return card;
+}
+
 function renderStep(){
   if(!hasCurrentResult() || activeStep < 0) return;
   cancelResultReveal();
@@ -528,19 +549,22 @@ function renderStep(){
   track.append(fill);
   const code = element('div', 'step-code');
   code.append(element('code', '', editor.getLine(step.lineNo - 1)));
-  const explanation = element('div', 'flow-detail');
-  explanation.append(
-    element('small', '', 'コードは何をしてる？'),
-    element('p', '', decodeEngineExplanation(step.text))
-  );
-  const change = renderValueChange(activeStep);
+  const explanation = step.branchDecision ? renderDecisionStep(step.branchDecision) : element('div', 'flow-detail');
+  if(!step.branchDecision){
+    explanation.append(
+      element('small', '', 'コードは何をしてる？'),
+      element('p', '', decodeEngineExplanation(step.text))
+    );
+  }
+  // 判定では値が変わらないので、空の変化カードを重ねません。
+  const change = step.branchDecision ? null : renderValueChange(activeStep);
   const nextStep = currentSteps[activeStep + 1];
   const next = element('div', 'next-line');
   next.append(
     element('span', '', '次： '),
     element('strong', '', nextStep ? `${nextStep.lineNo}行目` : 'RESULT')
   );
-  flow.replaceChildren(top, track, code, explanation, change, next);
+  flow.replaceChildren(top, track, code, explanation, ...(change ? [change] : []), next);
   $('step-controls').hidden = false;
   $('step-prev').disabled = false;
   $('step-next').disabled = false;

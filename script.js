@@ -1392,6 +1392,10 @@ function evaluateExpression(expr, variables, resolveArrayAccess = null, variable
       operator,
       leftValue:left.value,
       rightValue:right.value,
+      leftSource:leftExpr,
+      rightSource:rightExpr,
+      leftDisplay:displayScalarValue(left.value, left.type),
+      rightDisplay:displayScalarValue(right.value, right.type),
       conditionMet
     }
   };
@@ -1661,9 +1665,10 @@ function visualizeCode(){
     return `${access.indexVariable}の値は${access.resolvedIndex}です。そのため、${access.name}[${access.sourceIndex}]は${access.name}[${access.resolvedIndex}]を表します。`;
   }
 
-  function addStep(lineNo, text, markAsExecuted = true, arrayViews = []){
+  function addStep(lineNo, text, markAsExecuted = true, arrayViews = [], branchDecision = null){
     const step = { step:stepNo++, lineNo, text };
     if(arrayViews.length) step.arrayViews = arrayViews;
+    if(branchDecision) step.branchDecision = branchDecision;
     // Lite UI用：STEPを記録した瞬間の状態です。後のprintfや代入を遡及させません。
     step.outputAtStep = output;
     step.variablesAtStep = variableOrder.map(name => [
@@ -2466,6 +2471,26 @@ function visualizeCode(){
 
   // if全体を条件評価より先に調べ、最大2階層の対応構造だけを受け付けます。
   // 選択されない側も構造だけは確認しますが、条件式や文の実行はここでは行いません。
+  function validateMainIfStatement(index, structuralCode){
+    const trimmed = executableLines[index].trim();
+    const unsupported = (title, message) => ({ ok:false, title, message });
+    if(hasMultipleStatementsOnOneLine(trimmed)){
+      return unsupported('if分岐内の改行を確認', 'if側・else側では1行に1つの文を書いてください。if文全体は実行しません。');
+    }
+    if(/^(?:int|float|double|char)\b/.test(structuralCode)){
+      return unsupported('分岐内の変数宣言は未対応', 'if側・else側で新しい変数を宣言する形は未対応です。if文全体は実行しません。');
+    }
+    if(parseVariableUpdate(structuralCode, true) !== null || /\+=|-=|\+\+|--/.test(structuralCode)){
+      return unsupported('分岐内の更新文は未対応', 'if側・else側の更新文は未対応です。if文全体は実行しません。');
+    }
+    const printfMatch = matchSimplePrintfStatement(trimmed);
+    if(/^return\s+0\s*;?$/.test(structuralCode) ||
+       /^[A-Za-z_]\w*\s*=\s*.+;$/.test(structuralCode) || printfMatch){
+      return { ok:true };
+    }
+    return unsupported('分岐内の文は未対応', 'if側・else側に未対応の文があります。if文全体は実行しません。');
+  }
+
   function inspectSupportedIf(startIndex, options = {}){
     const containerEndIndex = Math.min(
       options.containerEndIndex ?? Math.max(startIndex, executionEndIndex - 1),
@@ -2473,7 +2498,7 @@ function visualizeCode(){
     );
     const outerRange = findIfBlock(startIndex);
     const safeEndIndex = Math.min(outerRange.endIndex, containerEndIndex);
-    const validateSimpleStatement = options.validateSimpleStatement ?? null;
+    const validateSimpleStatement = options.validateSimpleStatement ?? validateMainIfStatement;
 
     function failure(title, message){
       return { ok:false, title, message, endIndex:safeEndIndex };
@@ -2564,7 +2589,9 @@ function visualizeCode(){
           );
         }
 
-        if(validateSimpleStatement){
+        // main直下の正式範囲だけを新しく事前検査します。既存の入れ子ifと
+        // ループ内ifは従来の検査・実行規則を維持します。
+        if(validateSimpleStatement && (options.validateSimpleStatement || depth === 1)){
           const validation = validateSimpleStatement(index, structuralCode);
           if(!validation.ok){
             return failure(validation.title, validation.message);
@@ -2774,6 +2801,22 @@ function visualizeCode(){
       }
     }else{
       const conditionMet = result.value !== 0;
+      // 判定済みの値をLiteへ渡します。表示側で説明文を再解析しません。
+      const comparison = result.comparison;
+      const branchDecision = {
+        kind:'if',
+        condition:node.condition,
+        comparison:comparison ? {
+          left:{ source:comparison.leftSource, value:comparison.leftValue, display:comparison.leftDisplay },
+          operator:comparison.operator,
+          right:{ source:comparison.rightSource, value:comparison.rightValue, display:comparison.rightDisplay }
+        } : null,
+        evaluatedValue:result.value,
+        evaluatedDisplay:displayScalarValue(result.value, result.type),
+        result:conditionMet,
+        selected:conditionMet ? 'if' : (node.hasElse ? 'else' : 'none'),
+        skipped:conditionMet ? (node.hasElse ? 'else' : null) : 'if'
+      };
       const conditionExplanation = result.comparison
         ? describeComparison(result)
         : `${escapeHtml(result.readable)} を計算した結果は ${result.value} です。C言語では0以外を条件成立、0を条件不成立として扱います。`;
@@ -2791,7 +2834,7 @@ function visualizeCode(){
         : (conditionMet ? '波かっこの中の処理を実行します。' : '波かっこの中の処理は実行しません。');
       if(nested){
         addAnalysis(analysis, lineNo, `入れ子のif文の条件 <code>${escapeHtml(node.condition)}</code> を判定しました。${conditionExplanation}${nestedBranchExplanation}`);
-        addStep(lineNo, `入れ子のif文の条件 ${escapeHtml(node.condition)} を判定しました。${nestedBranchExplanation}`);
+        addStep(lineNo, `入れ子のif文の条件 ${escapeHtml(node.condition)} を判定しました。${nestedBranchExplanation}`, true, [], branchDecision);
       }else{
         addAnalysis(analysis, lineNo, `${conditionExplanation}${outerBranchExplanation}`);
         const stepExplanation = node.hasElse
@@ -2799,7 +2842,7 @@ function visualizeCode(){
             ? '条件が成立したため、if文の中へ進みます。else文の中は実行しません。'
             : '条件が成立しなかったため、if文の中は実行せず、else文の中へ進みます。')
           : (conditionMet ? '条件が成立したため、if文の中へ進みます。' : '条件が成立しなかったため、if文の中は実行しません。');
-        addStep(lineNo, `${escapeHtml(node.condition)}を判定しました。<br>${stepExplanation}`);
+        addStep(lineNo, `${escapeHtml(node.condition)}を判定しました。<br>${stepExplanation}`, true, [], branchDecision);
       }
 
       if(conditionMet){
