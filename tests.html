@@ -4378,8 +4378,84 @@
         .replace(/'/g, '&#39;');
     }
 
-    function runAllTests(){
+    // 製品画面を別フレームで動かし、説明と判定カードの両立を確認します。
+    async function checkDecisionUiCases(){
+      const cases = [
+        {name:'float比較・説明とカード', body:'float temperature = 36.5f;\nif(temperature < 37.0f){\n    printf("OK");\n}',
+          explanation:['temperature の値', '37.0f', 'より小さいか', '進む処理を決めています'],
+          values:'36.5 < 37', outcome:'成立TRUE', paths:['IF · 選択'], source:'temperature'},
+        ...[['<=','以下か'], ['>','より大きいか'], ['>=','以上か'], ['==','等しいか'], ['!=','等しくないか']]
+          .map(([operator, meaning]) => ({name:`${operator}の意味`,
+            body:`int score = 45;\nif(score ${operator} 60){\n    printf("OK");\n}`,
+            explanation:['score の値', '60', meaning, '進む処理を決めています']})),
+        {name:'式の左辺', body:'int score = 50;\nint bonus = 10;\nif(score + bonus >= 80){\n    printf("OK");\n}',
+          explanation:['score + bonus を計算した結果', '80', '以上か']},
+        {name:'falseでも意味を表示', body:'int score = 45;\nif(score >= 60){\n    printf("OK");\n}',
+          explanation:['score の値', '60', '以上か'], values:'45 >= 60', outcome:'不成立FALSE', paths:['IF · 通らない']},
+        ...[['x','int x = 1;', 'x の値'], ['1','', '条件式 1'], ['0','', '条件式 0']]
+          .map(([condition, declaration, subject]) => ({name:`非比較 if(${condition})`,
+            body:`${declaration}\nif(${condition}){\n    printf("OK");\n}`,
+            explanation:[subject, '0ではないか', '進む処理を決めています']}))
+      ];
+      const frame = document.createElement('iframe');
+      frame.src = 'index.html';
+      frame.hidden = true;
+      document.body.append(frame);
+      try{
+        await new Promise((resolve, reject) => {
+          frame.addEventListener('load', resolve, {once:true});
+          frame.addEventListener('error', () => reject(new Error('製品画面を読み込めません')), {once:true});
+        });
+        const ui = frame.contentWindow;
+        const doc = ui.document;
+        const editor = ui.eval('editor');
+        return cases.map(testCase => {
+          const failures = [];
+          editor.setValue(makeMainCode(`    ${testCase.body.trim().split('\n').join('\n    ')}\n    return 0;`));
+          doc.getElementById('visualize').click();
+          const bridge = ui.cVisualizerLiteResult;
+          if(bridge.hasWarnings) failures.push('条件の解析で警告が出ました');
+          doc.querySelector('.result-flow-button')?.click();
+          const index = bridge.steps.findIndex(step => step.branchDecision);
+          if(index < 0){
+            failures.push('判定STEPがありません');
+          }else{
+            ui.eval(`activeStep = ${index}; renderStep()`);
+            const children = [...doc.getElementById('flow-content').children];
+            const order = ['step-top', 'step-track', 'step-code', 'flow-detail', 'decision-card', 'next-line'];
+            if(children.map(item => item.className).join('|') !== order.join('|')) failures.push('FLOWの表示順が違います');
+            const detail = doc.querySelector('.flow-detail');
+            if(detail?.querySelector('small')?.textContent !== 'コードは何をしてる？') failures.push('説明見出しがありません');
+            for(const word of testCase.explanation){
+              if(!detail?.querySelector('p')?.textContent.includes(word)) failures.push(`説明に「${word}」がありません`);
+            }
+            if(/成立|不成立|TRUE|FALSE|選択|通らない/.test(detail?.querySelector('p')?.textContent || '')) failures.push('説明に判定結果が重複しています');
+            if(testCase.values && !doc.querySelector('.decision-values')?.textContent.includes(testCase.values)) failures.push('判定値が違います');
+            if(testCase.outcome && doc.querySelector('.decision-outcome')?.textContent !== testCase.outcome) failures.push('判定結果が違います');
+            for(const path of testCase.paths || []){
+              if(!doc.querySelector('.decision-paths')?.textContent.includes(path)) failures.push(`進路「${path}」がありません`);
+            }
+            if(doc.querySelector('.value-card')) failures.push('条件STEPに空の変数カードがあります');
+            if(testCase.source){
+              bridge.steps[index].text = '説明文として使わない';
+              ui.eval('renderStep()');
+              if(!doc.querySelector('.flow-detail p')?.textContent.includes(testCase.source)) failures.push('説明がmetadataを使用していません');
+            }
+          }
+          return {testCase:{name:`L-COND1.1 ${testCase.name}`}, result:{passed:failures.length === 0, failures,
+            actual:{output:'説明とDecision Cardを確認', warningCount:0}}};
+        });
+      }catch(error){
+        return cases.map(testCase => ({testCase:{name:`L-COND1.1 ${testCase.name}`},
+          result:{passed:false, failures:[String(error)], actual:{output:'', warningCount:0}}}));
+      }finally{
+        frame.remove();
+      }
+    }
+
+    async function runAllTests(){
       const results = testCases.map(testCase => ({ testCase, result:checkCase(testCase) }));
+      results.push(...await checkDecisionUiCases());
       const passed = results.filter(item => item.result.passed).length;
       const failed = results.length - passed;
 
