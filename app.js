@@ -533,6 +533,24 @@ function renderDecisionStep(decision){
   return card;
 }
 
+function describeDecisionPurpose(decision){
+  const variableName = /^[A-Za-z_]\w*$/;
+  if(!decision.comparison){
+    const condition = decision.condition.trim();
+    const subject = variableName.test(condition) ? `${condition} の値` : `条件式 ${condition}`;
+    return `${subject}が0ではないかを調べ、進む処理を決めています。`;
+  }
+
+  const {left, operator, right} = decision.comparison;
+  const meanings = {
+    '<':'より小さいか', '<=':'以下か', '>':'より大きいか',
+    '>=':'以上か', '==':'等しいか', '!=':'等しくないか'
+  };
+  const subject = variableName.test(left.source)
+    ? `${left.source} の値` : `${left.source} を計算した結果`;
+  return `${subject}が ${right.source} ${meanings[operator]}を調べ、進む処理を決めています。`;
+}
+
 function renderStep(){
   if(!hasCurrentResult() || activeStep < 0) return;
   cancelResultReveal();
@@ -549,13 +567,14 @@ function renderStep(){
   track.append(fill);
   const code = element('div', 'step-code');
   code.append(element('code', '', editor.getLine(step.lineNo - 1)));
-  const explanation = step.branchDecision ? renderDecisionStep(step.branchDecision) : element('div', 'flow-detail');
-  if(!step.branchDecision){
-    explanation.append(
-      element('small', '', 'コードは何をしてる？'),
-      element('p', '', decodeEngineExplanation(step.text))
-    );
-  }
+  const explanation = element('div', 'flow-detail');
+  explanation.append(
+    element('small', '', 'コードは何をしてる？'),
+    element('p', '', step.branchDecision
+      ? describeDecisionPurpose(step.branchDecision)
+      : decodeEngineExplanation(step.text))
+  );
+  const decision = step.branchDecision ? renderDecisionStep(step.branchDecision) : null;
   // 判定では値が変わらないので、空の変化カードを重ねません。
   const change = step.branchDecision ? null : renderValueChange(activeStep);
   const nextStep = currentSteps[activeStep + 1];
@@ -564,7 +583,7 @@ function renderStep(){
     element('span', '', '次： '),
     element('strong', '', nextStep ? `${nextStep.lineNo}行目` : 'RESULT')
   );
-  flow.replaceChildren(top, track, code, explanation, ...(change ? [change] : []), next);
+  flow.replaceChildren(top, track, code, explanation, ...(decision ? [decision] : []), ...(change ? [change] : []), next);
   $('step-controls').hidden = false;
   $('step-prev').disabled = false;
   $('step-next').disabled = false;
