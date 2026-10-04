@@ -522,28 +522,32 @@ function shouldProbablyEndWithSemicolon(trimmed){
   if(/^else\b/.test(trimmed)) return false;
   if(/^for\s*\(/.test(trimmed)) return false;
   if(/^while\s*\(/.test(trimmed)) return false;
-  return /(=|printf\s*\(|return\b|int\s+)/.test(trimmed);
+  return /(=|printf\s*\(|return\b|(?:int|float|double|char)\s+)/.test(trimmed);
 }
 
 
 function countSemicolonsOutsideString(text){
   let count = 0;
-  let inString = false;
+  let quote = null;
   let escape = false;
   for(const ch of text){
     if(escape){
       escape = false;
       continue;
     }
-    if(ch === '\\'){
+    if(ch === '\\' && quote){
       escape = true;
       continue;
     }
-    if(ch === '"'){
-      inString = !inString;
+    if(ch === quote){
+      quote = null;
       continue;
     }
-    if(ch === ';' && !inString) count++;
+    if(!quote && (ch === '"' || ch === "'")){
+      quote = ch;
+      continue;
+    }
+    if(ch === ';' && !quote) count++;
   }
   return count;
 }
@@ -556,6 +560,59 @@ function hasMultipleStatementsOnOneLine(trimmed){
 // symbol tableでは、Object.prototypeではなく実際に宣言した名前だけを確認します。
 function hasOwnSymbol(symbolTable, name){
   return Object.prototype.hasOwnProperty.call(symbolTable, name);
+}
+
+function splitScalarDeclarators(text){
+  const parts = [];
+  const stack = [];
+  let quote = null;
+  let escaped = false;
+  let start = 0;
+  const closing = { ')':'(', ']':'[', '}':'{' };
+  for(let index = 0; index < text.length; index++){
+    const ch = text[index];
+    if(escaped){ escaped = false; continue; }
+    if(quote){
+      if(ch === '\\') escaped = true;
+      else if(ch === quote) quote = null;
+      continue;
+    }
+    if(ch === '"' || ch === "'"){ quote = ch; continue; }
+    if('([{'.includes(ch)) stack.push(ch);
+    else if(hasOwnSymbol(closing, ch)){
+      if(stack.pop() !== closing[ch]) return null;
+    }else if(ch === ',' && stack.length === 0){
+      parts.push(text.slice(start, index).trim());
+      start = index + 1;
+    }
+  }
+  if(stack.length || quote) return null;
+  parts.push(text.slice(start).trim());
+  return parts;
+}
+
+// 単一宣言の従来経路は維持し、複数宣言だけを専用経路へ渡します。
+function parseMultipleScalarDeclaration(text){
+  const match = String(text).trim().match(/^(int|float|double|char)\s+([\s\S]*);$/);
+  if(!match) return { matched:false };
+  const type = match[1];
+  const parts = splitScalarDeclarators(match[2]);
+  if(parts?.length === 1) return { matched:false };
+  if(!parts || parts.some(part => part === '')){
+    return { matched:true, ok:false, message:'宣言する変数をカンマの前後に1つずつ書いてください。' };
+  }
+  const declarators = [];
+  for(const part of parts){
+    if(/^[A-Za-z_]\w*\s*\[/.test(part)){
+      return { matched:true, ok:false, message:'通常の変数と配列を同じ宣言文に混ぜる形は現在未対応です。' };
+    }
+    const declarator = part.match(/^([A-Za-z_]\w*)\s*(?:=\s*(.+))?$/);
+    if(!declarator){
+      return { matched:true, ok:false, message:`${type}変数の宣言の書き方を確認してください。` };
+    }
+    declarators.push({ name:declarator[1], expr:declarator[2] });
+  }
+  return { matched:true, ok:true, type, declarators };
 }
 
 // ++ / -- / += / -= を、for専用ではない共通の変数更新として読み取ります。
@@ -585,14 +642,16 @@ function parseVariableUpdate(text, requiresSemicolon){
     };
   }
 
-  match = code.match(/^([A-Za-z_]\w*)\s*(\+=|-=)\s*([-+]?\d+)$/);
+  match = code.match(/^([A-Za-z_]\w*)\s*(\+=|-=)\s*([-+]?(?:(?:\d+\.\d*|\.\d+)[fF]?|\d+))$/);
   if(match){
-    const integer = Number(match[3]);
+    const operand = match[3];
+    const amount = Number(operand.replace(/[fF]$/, ''));
     return {
       name:match[1],
       operator:match[2],
-      amount:match[2] === '+=' ? integer : -integer,
-      operand:integer,
+      amount:match[2] === '+=' ? amount : -amount,
+      operand:amount,
+      operandExpression:operand,
       source:code
     };
   }
@@ -956,7 +1015,8 @@ function splitArgs(text){
 
 function tokenizeExpression(expr){
   const tokens = [];
-  const regex = /\s*([A-Za-z_]\w*\s*\[\s*(?:[+-]?\d+|[A-Za-z_]\w*)\s*\]|[A-Za-z_]\w*|\d+|[()+\-*/%])\s*/g;
+  // 小数点とf/F suffixを数値の一部として読み取ります。指数表記は今回の範囲外です。
+  const regex = /\s*('(?:\\.|[^'\\])*'|[A-Za-z_]\w*\s*\[\s*[^\[\]]+?\s*\]|(?:\d+\.\d*|\.\d+)(?:[fF])?|\d+|[A-Za-z_]\w*|[()+\-*/%])\s*/g;
   let match;
   let consumed = '';
   while((match = regex.exec(expr)) !== null){
@@ -969,7 +1029,71 @@ function tokenizeExpression(expr){
   return { ok:true, tokens };
 }
 
-function evaluateArithmeticExpression(expr, variables, resolveArrayAccess = null){
+// Cの通常の文字定数はcharではなくint型。1文字または基本escapeだけを受理します。
+function parseCharacterLiteral(token){
+  const content = token.slice(1, -1);
+  const escapes = { n:10, t:9, r:13, 0:0, '\\':92, "'":39, '"':34 };
+  if(content.length === 2 && content[0] === '\\' && hasOwnSymbol(escapes, content[1])){
+    return { ok:true, value:escapes[content[1]], type:'int', readable:token };
+  }
+  if(content.length === 1 && /^[\x20-\x7e]$/.test(content) && content !== '\\'){
+    return { ok:true, value:content.charCodeAt(0), type:'int', readable:token };
+  }
+  return { ok:false, error:'文字定数は基本ASCIIの1文字、または対応する基本escapeを1つだけ書いてください。' };
+}
+
+function promoteNumericType(left, right){
+  // charは算術に入る前にintへ昇格し、演算結果にchar型は残りません。
+  const promotedLeft = left === 'char' ? 'int' : left;
+  const promotedRight = right === 'char' ? 'int' : right;
+  return promotedLeft === 'double' || promotedRight === 'double' ? 'double'
+    : promotedLeft === 'float' || promotedRight === 'float' ? 'float' : 'int';
+}
+
+// float literalとfloat演算の結果は単精度へ丸め、変数への保存時も代入先型へ変換します。
+// doubleはNumberの精度を使用し、intへの変換は安全な範囲で0方向に切り捨てます。
+function convertScalarValue(value, type){
+  if(!Number.isFinite(value)) return { ok:false, error:'計算結果が有限の数値ではありません。' };
+  if(type === 'char'){
+    const integer = Math.trunc(value);
+    return Number.isSafeInteger(integer) && integer >= 0 && integer <= 127
+      ? { ok:true, value:integer }
+      : { ok:false, error:'Visualizerではcharの実装依存差を避けるため、保存できるコード値を基本ASCIIの0～127に限定しています。' };
+  }
+  if(type === 'float'){
+    const rounded = Math.fround(value);
+    return Number.isFinite(rounded)
+      ? { ok:true, value:rounded }
+      : { ok:false, error:'floatで扱える範囲を超えました。' };
+  }
+  if(type === 'double') return { ok:true, value };
+  if(type === 'int'){
+    const integer = Math.trunc(value);
+    return Number.isSafeInteger(integer)
+      ? { ok:true, value:integer }
+      : { ok:false, error:'計算結果はintの安全な整数として扱えません。' };
+  }
+  return { ok:false, error:'変数の型情報を確認できません。' };
+}
+
+function displayScalarValue(value, type){
+  if(type === 'char' && typeof value === 'number'){
+    const escapes = { 0:'\\0', 9:'\\t', 10:'\\n', 13:'\\r', 34:'\\"', 39:"\\'", 92:'\\\\' };
+    const visible = escapes[value] || (value >= 32 && value <= 126
+      ? String.fromCharCode(value)
+      : `コード値${value}`);
+    return visible.startsWith('コード値') ? visible : `'${visible}' (${value})`;
+  }
+  if(type !== 'float' || !Number.isFinite(value)) return String(value);
+  // 同じfloat値に戻せる最短の十進表示を選び、単精度の誤差を画面に長く出しません。
+  for(let digits = 1; digits <= 9; digits++){
+    const candidate = Number(value.toPrecision(digits));
+    if(Object.is(Math.fround(candidate), value)) return String(candidate);
+  }
+  return String(value);
+}
+
+function evaluateArithmeticExpression(expr, variables, resolveArrayAccess = null, variableTypes = null){
   if(/\+\+|--/.test(expr)){
     return { ok:false, error:'式の中で使う ++ と -- は現在未対応です。値を1増減するときは、単独の更新文として使用してください。' };
   }
@@ -984,11 +1108,14 @@ function evaluateArithmeticExpression(expr, variables, resolveArrayAccess = null
 
   // 配列要素のread後に式の別部分で失敗しても、read済みの情報を失わないようにします。
   // 配列要素そのものの解決失敗（access）は、既存のerror metadataを優先します。
-  function preserveResolvedArrayAccess(result){
-    if(result.ok || result.access || result.arrayAccess || arrayAccesses.length === 0){
-      return result;
-    }
-    return { ...result, arrayAccess:arrayAccesses[0] };
+  function preserveResolvedArrayAccesses(result){
+    if(result.ok) return result;
+    const preservedAccesses = result.arrayAccesses || [...arrayAccesses];
+    return {
+      ...result,
+      arrayAccesses:preservedAccesses,
+      arrayAccess:result.arrayAccess || preservedAccesses[0] || null
+    };
   }
 
   function peek(){ return tokens[pos]; }
@@ -1002,9 +1129,13 @@ function evaluateArithmeticExpression(expr, variables, resolveArrayAccess = null
       const right = parseTerm();
       if(!right.ok) return right;
       const before = `${left.readable} ${op} ${right.readable}`;
+      const type = promoteNumericType(left.type, right.type);
+      const converted = convertScalarValue(op === '+' ? left.value + right.value : left.value - right.value, type);
+      if(!converted.ok) return converted;
       left = {
         ok:true,
-        value: op === '+' ? left.value + right.value : left.value - right.value,
+        value:converted.value,
+        type,
         readable:`${before}`
       };
     }
@@ -1018,17 +1149,26 @@ function evaluateArithmeticExpression(expr, variables, resolveArrayAccess = null
       const op = consume();
       const right = parseFactor();
       if(!right.ok) return right;
+      if(op === '%' && (!['int', 'char'].includes(left.type) || !['int', 'char'].includes(right.type))){
+        return { ok:false, error:'% はint同士の整数演算でのみ使用できます。charは演算前にintへ昇格します。' };
+      }
       if((op === '/' || op === '%') && right.value === 0){
         return { ok:false, error:'0で割ろうとしています。' };
       }
+      const type = promoteNumericType(left.type, right.type);
       let value;
       if(op === '*') value = left.value * right.value;
       // Cのint除算と同じく、正負どちらも小数部分を0方向へ切り捨てます。
-      if(op === '/') value = Math.trunc(left.value / right.value);
+      if(op === '/') value = type === 'int'
+        ? Math.trunc(left.value / right.value)
+        : left.value / right.value;
       if(op === '%') value = left.value % right.value;
+      const converted = convertScalarValue(value, type);
+      if(!converted.ok) return converted;
       left = {
         ok:true,
-        value,
+        value:converted.value,
+        type,
         readable:`${left.readable} ${op} ${right.readable}`
       };
     }
@@ -1039,15 +1179,32 @@ function evaluateArithmeticExpression(expr, variables, resolveArrayAccess = null
     const token = consume();
     if(token === undefined) return { ok:false, error:'式が途中で終わっています。' };
 
-    if(token === '+') return parseFactor();
+    if(token === '+'){
+      const factor = parseFactor();
+      return factor.ok && factor.type === 'char'
+        ? { ...factor, type:'int', readable:`+${factor.readable}` }
+        : factor;
+    }
     if(token === '-'){
       const factor = parseFactor();
       if(!factor.ok) return factor;
-      return { ok:true, value:-factor.value, readable:`-${factor.readable}` };
+      return { ok:true, value:-factor.value, type:factor.type === 'char' ? 'int' : factor.type, readable:`-${factor.readable}` };
     }
 
+    if(token.startsWith("'")) return parseCharacterLiteral(token);
+
     if(/^\d+$/.test(token)){
-      return { ok:true, value:Number(token), readable:token };
+      const value = Number(token);
+      if(!Number.isSafeInteger(value)) return { ok:false, error:'整数literalは安全な整数として扱えません。' };
+      return { ok:true, value, type:'int', readable:token };
+    }
+
+    if(/^(?:\d+\.\d*|\.\d+)[fF]?$/.test(token)){
+      const type = /[fF]$/.test(token) ? 'float' : 'double';
+      const converted = convertScalarValue(Number(token.replace(/[fF]$/, '')), type);
+      return converted.ok
+        ? { ok:true, value:converted.value, type, readable:token }
+        : converted;
     }
 
     const arrayAccess = parseSupportedArrayAccess(token);
@@ -1064,6 +1221,7 @@ function evaluateArithmeticExpression(expr, variables, resolveArrayAccess = null
       return {
         ok:true,
         value:resolved.value,
+        type:'int',
         readable:`${arrayAccess.name}[${arrayAccess.sourceIndex}](${resolved.value})`
       };
     }
@@ -1075,8 +1233,12 @@ function evaluateArithmeticExpression(expr, variables, resolveArrayAccess = null
       if(variables[token] === UNINITIALIZED){
         return { ok:false, error:`変数 ${token} は宣言されていますが、まだ値が代入されていません。` };
       }
+      const type = variableTypes && hasOwnSymbol(variableTypes, token) ? variableTypes[token] : null;
+      if(!['int', 'float', 'double', 'char'].includes(type)){
+        return { ok:false, error:`変数 ${token} の型情報を確認できません。` };
+      }
       usedVars.push({ name:token, value:variables[token] });
-      return { ok:true, value:variables[token], readable:`${token}(${variables[token]})` };
+      return { ok:true, value:variables[token], type, readable:`${token}(${displayScalarValue(variables[token], type)})` };
     }
 
     if(token === '('){
@@ -1084,23 +1246,25 @@ function evaluateArithmeticExpression(expr, variables, resolveArrayAccess = null
       if(!inside.ok) return inside;
       if(peek() !== ')') return { ok:false, error:'かっこの閉じ忘れがあります。' };
       consume();
-      return { ok:true, value:inside.value, readable:`(${inside.readable})` };
+      return { ok:true, value:inside.value, type:inside.type, readable:`(${inside.readable})` };
     }
 
     return { ok:false, error:`${token} は式として読み取れません。` };
   }
 
   const result = parseExpression();
-  if(!result.ok) return preserveResolvedArrayAccess(result);
+  if(!result.ok) return preserveResolvedArrayAccesses(result);
   if(pos < tokens.length){
-    return preserveResolvedArrayAccess({ ok:false, error:'式の途中に読み取れない部分があります。' });
+    return preserveResolvedArrayAccesses({ ok:false, error:'式の途中に読み取れない部分があります。' });
   }
 
   return {
     ok:true,
     value:result.value,
+    type:result.type,
     readable:result.readable,
     usedVars,
+    arrayAccesses:[...arrayAccesses],
     arrayAccess:arrayAccesses[0] || null
   };
 }
@@ -1109,9 +1273,18 @@ function findComparison(expr){
   const operators = ['<=', '>=', '==', '!=', '<', '>'];
   const comparisons = [];
   let depth = 0;
+  let inCharacter = false;
+  let escaped = false;
 
   for(let index = 0; index < expr.length; index++){
     const ch = expr[index];
+    if(escaped){ escaped = false; continue; }
+    if(inCharacter){
+      if(ch === '\\') escaped = true;
+      else if(ch === "'") inCharacter = false;
+      continue;
+    }
+    if(ch === "'"){ inCharacter = true; continue; }
     if(ch === '(') depth++;
     if(ch === ')') depth--;
     if(depth !== 0) continue;
@@ -1135,10 +1308,20 @@ function stripWrappingParentheses(expr){
   while(stripped.startsWith('(') && stripped.endsWith(')')){
     let depth = 0;
     let wrapsWholeExpression = true;
+    let inCharacter = false;
+    let escaped = false;
 
     for(let index = 0; index < stripped.length; index++){
-      if(stripped[index] === '(') depth++;
-      if(stripped[index] === ')') depth--;
+      const ch = stripped[index];
+      if(escaped){ escaped = false; continue; }
+      if(inCharacter){
+        if(ch === '\\') escaped = true;
+        else if(ch === "'") inCharacter = false;
+        continue;
+      }
+      if(ch === "'"){ inCharacter = true; continue; }
+      if(ch === '(') depth++;
+      if(ch === ')') depth--;
 
       // 最初の開き括弧が末尾より前で閉じるなら、式全体を包んでいません。
       if(depth === 0 && index < stripped.length - 1){
@@ -1158,13 +1341,13 @@ function stripWrappingParentheses(expr){
   return stripped;
 }
 
-function evaluateExpression(expr, variables, resolveArrayAccess = null){
+function evaluateExpression(expr, variables, resolveArrayAccess = null, variableTypes = null){
   // 比較式全体を包む冗長な括弧だけを外し、内側の比較を見つけます。
   const normalizedExpr = stripWrappingParentheses(expr);
   const found = findComparison(normalizedExpr);
   if(!found.ok) return found;
   if(!found.comparison){
-    return evaluateArithmeticExpression(normalizedExpr, variables, resolveArrayAccess);
+    return evaluateArithmeticExpression(normalizedExpr, variables, resolveArrayAccess, variableTypes);
   }
 
   const { operator, index } = found.comparison;
@@ -1175,9 +1358,9 @@ function evaluateExpression(expr, variables, resolveArrayAccess = null){
   }
 
   // 比較の左右は、これまでと同じ四則演算パーサーで先に計算します。
-  const left = evaluateArithmeticExpression(leftExpr, variables, resolveArrayAccess);
+  const left = evaluateArithmeticExpression(leftExpr, variables, resolveArrayAccess, variableTypes);
   if(!left.ok) return left;
-  const right = evaluateArithmeticExpression(rightExpr, variables, resolveArrayAccess);
+  const right = evaluateArithmeticExpression(rightExpr, variables, resolveArrayAccess, variableTypes);
   if(!right.ok){
     if(left.arrayAccess && !right.access && !right.arrayAccess){
       return { ...right, arrayAccess:left.arrayAccess };
@@ -1201,6 +1384,7 @@ function evaluateExpression(expr, variables, resolveArrayAccess = null){
   return {
     ok:true,
     value:conditionMet ? 1 : 0,
+    type:'int',
     readable:`${left.readable} ${operator} ${right.readable}`,
     usedVars:[...left.usedVars, ...right.usedVars],
     arrayAccess:left.arrayAccess || right.arrayAccess || null,
@@ -1252,7 +1436,18 @@ function isSimpleIntegerLiteral(expr){
   return /^[-+]?\d+$/.test(String(expr).trim());
 }
 
-function makeInitialValueExplanation(name, expr, result){
+function makeInitialValueExplanation(name, expr, result, type = 'int', assignedValue = result.value){
+  if(type !== 'int'){
+    const value = displayScalarValue(assignedValue, type);
+    const operation = type === 'char' && /^'(?:\\.|[^'\\])'$/.test(expr.trim())
+      ? `<code>${escapeHtml(expr)}</code> に対応するコード値を読み取り、`
+      : /^[+-]?(?:\d+\.?\d*|\.\d+)[fF]?$/.test(expr.trim())
+        ? '' : `<code>${escapeHtml(expr)}</code> を計算し、`;
+    return {
+      analysis:`${type}型の変数 <code>${name}</code> を作り、${operation}<code>${escapeHtml(value)}</code> を代入しました。`,
+      step:`${name} という${type}型の箱を作り、${escapeHtml(value)} を代入しました。`
+    };
+  }
   if(result.comparison){
     const cValue = result.comparison.conditionMet ? '成立を1' : '不成立を0';
     return {
@@ -1307,6 +1502,8 @@ function visualizeCode(){
   const executedLines = new Set();
   const warningLines = new Set();
   const variables = Object.create(null);
+  // 値のtableと型のtableを分け、Liteの既存表示データ形式を維持します。
+  const variableTypes = Object.create(null);
   const variableOrder = [];
   const arrays = Object.create(null);
   const arrayOrder = [];
@@ -1332,9 +1529,24 @@ function visualizeCode(){
     }
   }
 
-  function rememberVariable(name, value){
+  function declareScalar(name, value, type){
     if(!hasOwnSymbol(variables, name)) variableOrder.push(name);
     variables[name] = value;
+    variableTypes[name] = type;
+  }
+
+  function setScalarValue(name, value){
+    variables[name] = value;
+  }
+
+  function getScalarType(name){
+    return hasOwnSymbol(variableTypes, name) ? variableTypes[name] : undefined;
+  }
+
+  function scalarDisplay(name){
+    return variables[name] === UNINITIALIZED
+      ? '未初期化'
+      : displayScalarValue(variables[name], getScalarType(name));
   }
 
   function getSymbolKind(name){
@@ -1390,6 +1602,9 @@ function visualizeCode(){
           ok:false,
           error:`添字に使われている変数 ${access.indexVariable} には、まだ値が代入されていません。`
         };
+      }
+      if(getScalarType(access.indexVariable) !== 'int'){
+        return { ok:false, error:`添字に使われている変数 ${access.indexVariable} はint型でなければなりません。` };
       }
       if(!Number.isSafeInteger(variables[access.indexVariable])){
         return {
@@ -1452,7 +1667,7 @@ function visualizeCode(){
     // Lite UI用：STEPを記録した瞬間の状態です。後のprintfや代入を遡及させません。
     step.outputAtStep = output;
     step.variablesAtStep = variableOrder.map(name => [
-      name, variables[name] === UNINITIALIZED ? '未初期化' : String(variables[name])
+      name, scalarDisplay(name)
     ]);
     steps.push(step);
     if(markAsExecuted) executedLines.add(lineNo);
@@ -1473,7 +1688,8 @@ function visualizeCode(){
     const result = evaluateExpression(
       expr,
       variables,
-      allowArrayRead ? resolveArrayRead : null
+      allowArrayRead ? resolveArrayRead : null,
+      variableTypes
     );
     if(!result.ok){
       if(!allowArrayRead){
@@ -1489,32 +1705,42 @@ function visualizeCode(){
       };
     }
 
+    const converted = convertScalarValue(result.value, getScalarType(name));
+    if(!converted.ok){
+      if(!allowArrayRead){
+        addHint(hints, lineNo, '代入する値を確認', escapeHtml(converted.error));
+        warningLines.add(lineNo);
+      }
+      return { ok:false, error:converted.error, arrayAccess:result.arrayAccess || null };
+    }
     const before = variables[name];
-    rememberVariable(name, result.value);
+    setScalarValue(name, converted.value);
+    const assigned = scalarDisplay(name);
+    const beforeDisplay = before === UNINITIALIZED ? '未初期化' : displayScalarValue(before, getScalarType(name));
     const resolutionExplanation = describeVariableIndexResolution(result.arrayAccess);
     if(result.comparison){
       const cValue = result.comparison.conditionMet ? '成立を1' : '不成立を0';
-      addAnalysis(analysis, lineNo, `${analysisPrefix}${escapeHtml(resolutionExplanation)}${describeComparison(result)} C言語では条件の${cValue}として扱うため、<code>${name}</code> に <code>${result.value}</code> を代入しました。`);
+      addAnalysis(analysis, lineNo, `${analysisPrefix}${escapeHtml(resolutionExplanation)}${describeComparison(result)} C言語では条件の${cValue}として扱うため、<code>${name}</code> に <code>${escapeHtml(assigned)}</code> を代入しました。`);
     }else{
-      addAnalysis(analysis, lineNo, `${analysisPrefix}${escapeHtml(resolutionExplanation)}変数 <code>${name}</code> に、<code>${escapeHtml(expr)}</code> の計算結果 <code>${result.value}</code> を代入しました。`);
+      addAnalysis(analysis, lineNo, `${analysisPrefix}${escapeHtml(resolutionExplanation)}変数 <code>${name}</code> に、<code>${escapeHtml(expr)}</code> の計算結果 <code>${escapeHtml(assigned)}</code> を代入しました。`);
     }
 
     if(before === UNINITIALIZED){
       addStep(
         lineNo,
-        `${stepPrefix}${escapeHtml(resolutionExplanation)}${name} の中身に ${result.value} を代入しました。計算：${escapeHtml(result.readable)} = ${result.value}`,
+        `${stepPrefix}${escapeHtml(resolutionExplanation)}${name} の中身に ${escapeHtml(assigned)} を代入しました。計算：${escapeHtml(result.readable)} = ${escapeHtml(assigned)}`,
         true,
         result.arrayAccess ? [makeArrayView(result.arrayAccess)] : []
       );
     }else{
       addStep(
         lineNo,
-        `${stepPrefix}${escapeHtml(resolutionExplanation)}${name} の中身を ${before} から ${result.value} に変えました。計算：${escapeHtml(result.readable)} = ${result.value}`,
+        `${stepPrefix}${escapeHtml(resolutionExplanation)}${name} の中身を ${escapeHtml(beforeDisplay)} から ${escapeHtml(assigned)} に変えました。計算：${escapeHtml(result.readable)} = ${escapeHtml(assigned)}`,
         true,
         result.arrayAccess ? [makeArrayView(result.arrayAccess)] : []
       );
     }
-    return { ok:true, value:result.value, arrayAccess:result.arrayAccess || null };
+    return { ok:true, value:converted.value, arrayAccess:result.arrayAccess || null };
   }
 
   // 許可された場所の ++ / -- / += / -= は、すべてこの共通処理で更新します。
@@ -1536,16 +1762,33 @@ function visualizeCode(){
       return { ok:false };
     }
 
+    const type = getScalarType(name);
     const before = variables[name];
-    const after = before + update.amount;
-    rememberVariable(name, after);
+    const operand = evaluateArithmeticExpression(update.operandExpression || String(Math.abs(update.amount)), variables, null, variableTypes);
+    if(!operand.ok){
+      addHint(hints, lineNo, '更新する値を確認', escapeHtml(operand.error));
+      warningLines.add(lineNo);
+      return { ok:false };
+    }
+    const resultType = promoteNumericType(type, operand.type);
+    const computed = convertScalarValue(before + (update.operator === '-=' || update.operator === '--' ? -operand.value : operand.value), resultType);
+    const converted = computed.ok ? convertScalarValue(computed.value, type) : computed;
+    if(!converted.ok){
+      addHint(hints, lineNo, '更新する値を確認', escapeHtml(converted.error));
+      warningLines.add(lineNo);
+      return { ok:false };
+    }
+    const after = converted.value;
+    setScalarValue(name, after);
+    const beforeDisplay = displayScalarValue(before, type);
+    const afterDisplay = displayScalarValue(after, type);
     const direction = update.amount >= 0 ? '増やし' : '減らし';
     addAnalysis(
       analysis,
       lineNo,
-      `${analysisPrefix}<code>${escapeHtml(update.source)}</code> により、変数 <code>${name}</code> を <code>${Math.abs(update.amount)}</code> ${direction}、<code>${before}</code> から <code>${after}</code> に更新しました。`
+      `${analysisPrefix}<code>${escapeHtml(update.source)}</code> により、変数 <code>${name}</code> を <code>${Math.abs(update.amount)}</code> ${direction}、<code>${escapeHtml(beforeDisplay)}</code> から <code>${escapeHtml(afterDisplay)}</code> に更新しました。`
     );
-    addStep(lineNo, `${stepPrefix}${name} の中身を ${before} から ${after} に変えました。更新：${escapeHtml(update.source)}`);
+    addStep(lineNo, `${stepPrefix}${name} の中身を ${escapeHtml(beforeDisplay)} から ${escapeHtml(afterDisplay)} に変えました。更新：${escapeHtml(update.source)}`);
     return { ok:true, value:after };
   }
 
@@ -1688,7 +1931,7 @@ function visualizeCode(){
           );
         }
 
-        const result = evaluateExpression(expr, variables);
+        const result = evaluateExpression(expr, variables, null, variableTypes);
         if(!result.ok){
           return stopArrayLine(
             '代入する式を計算できません',
@@ -1696,6 +1939,9 @@ function visualizeCode(){
           );
         }
 
+        if(result.type !== 'int'){
+          return stopArrayLine('この配列への代入は未対応', 'int配列には、現在の対応範囲にある整数式だけを代入してください。');
+        }
         location.array.values[location.access.resolvedIndex] = result.value;
         const writeAccess = {
           ...location.access,
@@ -1773,6 +2019,9 @@ function visualizeCode(){
           `変数 <code>${name}</code> が先に <code>int ${name};</code> のように宣言されているか確認してください。`
         );
       }
+      if(getScalarType(name) !== 'int'){
+        return stopScanf('scanfの型が一致しません', '%d で入力できるのはint型の変数だけです。');
+      }
 
       if(scanfValueIndex >= scanfValues.length){
         return stopScanf(
@@ -1791,13 +2040,13 @@ function visualizeCode(){
 
       const inputValue = Number(inputText);
       scanfValueIndex++;
-      rememberVariable(name, inputValue);
+      setScalarValue(name, inputValue);
       addAnalysis(analysis, lineNo, `入力値 <code>${escapeHtml(inputText)}</code> を整数として受け取り、変数 <code>${name}</code> に代入します。`);
       addStep(lineNo, `入力値 ${escapeHtml(inputText)} を整数として受け取り、変数 ${name} に代入しました。`);
       return;
     }
 
-    if(insideIf && !/^int\s+/.test(trimmed) &&
+    if(insideIf && !/^(?:int|float|double|char)\s+/.test(trimmed) &&
        !/^[A-Za-z_]\w*\s*=/.test(trimmed) && !/^printf\s*\(/.test(trimmed) &&
        !/^return\s+0\s*;?$/.test(trimmed)){
       addAnalysis(analysis, lineNo, 'この処理はif側・else側の中では現在未対応のため、実行しません。');
@@ -1857,7 +2106,68 @@ function visualizeCode(){
       return;
     }
 
-    const declMatch = trimmed.match(/^int\s+([A-Za-z_]\w*)\s*(?:=\s*(.+))?;$/);
+    const multipleDeclaration = parseMultipleScalarDeclaration(trimmed);
+    if(multipleDeclaration.matched){
+      if(insideIf || insideLoop){
+        addHint(hints, lineNo, 'この場所の変数宣言は未対応', '変数はmain直下で宣言してください。');
+        warningLines.add(lineNo);
+        return insideLoop ? 'execution-error' : undefined;
+      }
+      if(!multipleDeclaration.ok){
+        addHint(hints, lineNo, '宣言の書き方を確認', escapeHtml(multipleDeclaration.message));
+        warningLines.add(lineNo);
+        return;
+      }
+
+      // 左から仮のtableで評価し、全員が成功して初めて実tableへ確定します。
+      const stagedValues = Object.assign(Object.create(null), variables);
+      const stagedTypes = Object.assign(Object.create(null), variableTypes);
+      const pending = [];
+      const declaredHere = new Set();
+      for(const { name, expr } of multipleDeclaration.declarators){
+        if(declaredHere.has(name) || getSymbolKind(name) === 'array'){
+          addHint(hints, lineNo, '宣言する名前を確認', `${escapeHtml(name)} はこの宣言文で重複しているか、配列名として使用されています。`);
+          warningLines.add(lineNo);
+          return;
+        }
+        declaredHere.add(name);
+        let value = UNINITIALIZED;
+        let result = null;
+        if(expr !== undefined){
+          // 配列を含む複数宣言は今回の移植対象外です。既存の単一宣言経路を維持します。
+          if(containsArrayElementSyntax(codeOutsideStringAndLineComment(expr))){
+            addHint(hints, lineNo, '配列を含む複数宣言は未対応', '配列要素の参照は単一の宣言文で行ってください。');
+            warningLines.add(lineNo);
+            return;
+          }
+          result = evaluateExpression(expr, stagedValues, null, stagedTypes);
+          const converted = result.ok ? convertScalarValue(result.value, multipleDeclaration.type) : result;
+          if(!converted.ok){
+            addHint(hints, lineNo, '式または初期値を確認', escapeHtml(converted.error));
+            warningLines.add(lineNo);
+            return;
+          }
+          value = converted.value;
+        }
+        stagedValues[name] = value;
+        stagedTypes[name] = multipleDeclaration.type;
+        pending.push({ name, expr, result, value });
+      }
+      for(const item of pending){
+        declareScalar(item.name, item.value, multipleDeclaration.type);
+        if(item.expr === undefined){
+          addAnalysis(analysis, lineNo, `${multipleDeclaration.type}型の変数 <code>${item.name}</code> を作りました。まだ値は代入されていません。`);
+          addStep(lineNo, `${item.name} という${multipleDeclaration.type}型の箱を作りました。中身はまだ入っていません。`);
+        }else{
+          const explanation = makeInitialValueExplanation(item.name, item.expr, item.result, multipleDeclaration.type, item.value);
+          addAnalysis(analysis, lineNo, explanation.analysis);
+          addStep(lineNo, explanation.step);
+        }
+      }
+      return;
+    }
+
+    const declMatch = trimmed.match(/^(int|float|double|char)\s+([A-Za-z_]\w*)\s*(?:=\s*(.+))?;$/);
     if(declMatch){
       if(insideIf || insideLoop){
         const scopeLabel = insideLoop ? `${loopLabel}の本体` : 'if側・else側';
@@ -1867,8 +2177,9 @@ function visualizeCode(){
         warningLines.add(lineNo);
         return insideLoop ? 'execution-error' : undefined;
       }
-      const name = declMatch[1];
-      const expr = declMatch[2];
+      const declarationType = declMatch[1];
+      const name = declMatch[2];
+      const expr = declMatch[3];
       if(getSymbolKind(name) === 'array'){
         return stopArrayLine(
           '同じ名前がすでに使われています',
@@ -1876,20 +2187,29 @@ function visualizeCode(){
         );
       }
       if(expr === undefined){
-        rememberVariable(name, UNINITIALIZED);
-        addAnalysis(analysis, lineNo, `整数型の変数 <code>${name}</code> を作りました。まだ値は代入されていません。`);
-        addStep(lineNo, `${name} という整数の箱を作りました。中身はまだ入っていません。`);
+        declareScalar(name, UNINITIALIZED, declarationType);
+        const description = declarationType === 'int' ? '整数型の変数' : `${declarationType}型の変数`;
+        const box = declarationType === 'int' ? '整数の箱' : `${declarationType}型の箱`;
+        addAnalysis(analysis, lineNo, `${description} <code>${name}</code> を作りました。まだ値は代入されていません。`);
+        addStep(lineNo, `${name} という${box}を作りました。中身はまだ入っていません。`);
         return;
       }
 
       const result = evaluateExpression(
         expr,
         variables,
-        hasSupportedArrayRead ? resolveArrayRead : null
+        hasSupportedArrayRead ? resolveArrayRead : null,
+        variableTypes
       );
       if(result.ok){
-        rememberVariable(name, result.value);
-        const explanation = makeInitialValueExplanation(name, expr, result);
+        const converted = convertScalarValue(result.value, declarationType);
+        if(!converted.ok){
+          addHint(hints, lineNo, '初期値を確認', escapeHtml(converted.error));
+          warningLines.add(lineNo);
+          return;
+        }
+        declareScalar(name, converted.value, declarationType);
+        const explanation = makeInitialValueExplanation(name, expr, result, declarationType, converted.value);
         const resolutionExplanation = describeVariableIndexResolution(result.arrayAccess);
         addAnalysis(analysis, lineNo, `${escapeHtml(resolutionExplanation)}${explanation.analysis}`);
         addStep(
@@ -1954,9 +2274,15 @@ function visualizeCode(){
         const result = evaluateExpression(
           arg,
           variables,
-          hasSupportedArrayRead ? resolveArrayRead : null
+          hasSupportedArrayRead ? resolveArrayRead : null,
+          variableTypes
         );
         if(result.ok){
+          if(result.type !== 'int'){
+            ok = false;
+            error = 'Liteのprintfは現在%dでの整数表示だけに対応しています。型付き入出力は未対応です。';
+            break;
+          }
           values.push(result.value);
           results.push(result);
           readableArgs.push(`${escapeHtml(arg)} → ${result.value}`);
@@ -2401,7 +2727,7 @@ function visualizeCode(){
     const parentLoopLabel = context.insideWhile === true ? 'while文' : 'for文';
     const nested = node.depth > 1;
     const lineNo = node.startIndex + 1;
-    const result = evaluateExpression(node.condition, variables);
+    const result = evaluateExpression(node.condition, variables, null, variableTypes);
 
     if(!result.ok){
       const skippedTarget = node.hasElse ? 'if側とelse側の処理' : '中の処理';
@@ -3103,7 +3429,7 @@ function visualizeCode(){
     let enteredBodyCount = 0;
 
     while(true){
-      const conditionResult = evaluateExpression(node.condition, variables);
+      const conditionResult = evaluateExpression(node.condition, variables, null, variableTypes);
       if(!conditionResult.ok){
         const errorPrefix = whileDisplayPrefix('条件判定エラー');
         addAnalysis(analysis, lineNo, `${errorPrefix}while文の条件 <code>${escapeHtml(node.condition)}</code> を評価できませんでした。`);
@@ -3688,7 +4014,7 @@ function visualizeCode(){
     let iterationCount = 0;
     while(true){
       const activeIteration = explanationHistory.beginIteration(iterationCount + 1);
-      const conditionResult = evaluateExpression(node.condition, variables);
+      const conditionResult = evaluateExpression(node.condition, variables, null, variableTypes);
       if(!conditionResult.ok){
         const conditionErrorPrefix = forExplanationPrefix(node, '条件判定エラー', parentLocation);
         addAnalysis(analysis, lineNo, `${conditionErrorPrefix}for文の条件 <code>${escapeHtml(node.condition)}</code> を評価できませんでした。`);
@@ -4109,7 +4435,7 @@ function visualizeCode(){
   }).join('');
 
   const scalarVariableHtml = variableOrder.map(name => {
-    const value = variables[name] === UNINITIALIZED ? '未初期化' : String(variables[name]);
+    const value = scalarDisplay(name);
     return `<div class="variable-chip">${escapeHtml(name)} = ${escapeHtml(value)}</div>`;
   }).join('');
 
@@ -4200,8 +4526,9 @@ function visualizeCode(){
     steps:steps.map(item => ({ ...item })),
     output,
     variables:variableOrder.map(name => [
-      name, variables[name] === UNINITIALIZED ? '未初期化' : String(variables[name])
+      name, scalarDisplay(name)
     ]),
+    variableTypes:{ ...variableTypes },
     hasMain,
     hasWarnings:warningLines.size > 0 || !hasMain || !mainRange?.closed,
     warningText:[...document.querySelectorAll('#hintResult .warning-line')]

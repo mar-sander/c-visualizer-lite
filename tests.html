@@ -3881,6 +3881,104 @@
       };
     }
 
+    // Stage L-TYPE1：Liteの既存描画とbridgeを使って4型の保存・変換を確認します。
+    const typedScalarTests = [];
+    function typedCase(name, statements, variables, types, extra = {}){
+      typedScalarTests.push({
+        name:`L-TYPE1 ${name}`,
+        code:makeMainCode(`    ${statements.split('\n').join('\n    ')}\n    return 0;`),
+        expect:{
+          variables, types,
+          bridgeIncludes:variables.map(text => {
+            const separator = text.indexOf(' = ');
+            return [text.slice(0, separator), text.slice(separator + 3)];
+          }),
+          warningMax:0, ...extra
+        }
+      });
+    }
+    typedCase('4型の未初期化宣言', 'int i;\nfloat f;\ndouble d;\nchar c;',
+      ['i = 未初期化', 'f = 未初期化', 'd = 未初期化', 'c = 未初期化'],
+      {i:'int', f:'float', d:'double', c:'char'});
+    typedCase('float初期化f suffix', 'float x = 1.5f;', ['x = 1.5'], {x:'float'},
+      {stepVariables:[['x','1.5']]});
+    typedCase('float初期化doubleから変換', 'float x = 1.5;', ['x = 1.5'], {x:'float'});
+    typedCase('double初期化', 'double x = 1.5;', ['x = 1.5'], {x:'double'});
+    typedCase('char初期化', "char c = 'A';", ["c = 'A' (65)"], {c:'char'},
+      {stepVariables:[['c',"'A' (65)"]]});
+    typedCase('float加算', 'float x = 1.5f + 2.0f;', ['x = 3.5'], {x:'float'});
+    typedCase('double除算', 'double x = 7.0 / 2.0;', ['x = 3.5'], {x:'double'});
+    typedCase('double混合加算', 'double x = 1 + 2.5;', ['x = 3.5'], {x:'double'});
+    typedCase('float混合加算', 'float x = 1 + 2.5f;', ['x = 3.5'], {x:'float'});
+    typedCase('int除算', 'int x = 7 / 2;', ['x = 3'], {x:'int'});
+    typedCase('負のint除算', 'int x = -7 / 2;', ['x = -3'], {x:'int'});
+    typedCase('int除算からdouble代入', 'double x = 7 / 2;', ['x = 3'], {x:'double'});
+    typedCase('正のint変換', 'int x = 3.8;', ['x = 3'], {x:'int'});
+    typedCase('負のint変換', 'int x = -3.8;', ['x = -3'], {x:'int'});
+    typedCase('整数からfloatとdouble', 'float f = 3;\ndouble d = 3;', ['f = 3', 'd = 3'], {f:'float', d:'double'});
+    typedCase('char整数値へ変換', 'char c = 65.9;', ["c = 'A' (65)"], {c:'char'});
+    typedCase('文字定数はint', "int x = 'A';", ['x = 65'], {x:'int'});
+    typedCase('文字定数の改行escape', "int x = '\\n';", ['x = 10'], {x:'int'});
+    typedCase('charのtab escape', "char c = '\\t';", ["c = '\\t' (9)"], {c:'char'});
+    typedCase('charの復帰escape', "char c = '\\r';", ["c = '\\r' (13)"], {c:'char'});
+    typedCase('charのNUL escape', "char c = '\\0';", ["c = '\\0' (0)"], {c:'char'});
+    typedCase('charの引用符escape', `char c = '\\"';`, [`c = '\\"' (34)`], {c:'char'});
+    typedCase('文字定数のセミコロン', "char c = ';';", ["c = ';' (59)"], {c:'char'});
+    typedCase('文字定数のカンマを含む複数宣言', "char c = ',', d = 'A';",
+      ["c = ',' (44)", "d = 'A' (65)"], {c:'char', d:'char'});
+    typedCase('charとintの加算', "char c = 'A';\nint x = c + 1;", ["c = 'A' (65)", 'x = 66'], {c:'char', x:'int'});
+    typedCase('char同士はintへ昇格', "char a = 'A';\nchar b = 'B';\nint x = a + b;", ['x = 131'], {a:'char', b:'char', x:'int'},
+      {expression:{source:'a + b', variables:{a:65,b:66}, types:{a:'char',b:'char'}, value:131, type:'int'}});
+    typedCase('charとfloat', "char c = 'A';\nfloat x = c + 0.5f;", ['x = 65.5'], {c:'char', x:'float'},
+      {expression:{source:'c + 0.5f', variables:{c:65}, types:{c:'char'}, value:65.5, type:'float'}});
+    typedCase('charとdouble', "char c = 'A';\ndouble x = c + 0.5;", ['x = 65.5'], {c:'char', x:'double'});
+    typedCase('floatとdouble', 'float f = 1.5f;\ndouble x = f + 0.5;', ['x = 2'], {f:'float', x:'double'},
+      {expression:{source:'f + 0.5', variables:{f:1.5}, types:{f:'float'}, value:2, type:'double'}});
+    typedCase('整数剰余', 'int x = 7 % 3;', ['x = 1'], {x:'int'});
+    typedCase('char剰余', "char c = 'A';\nint x = c % 2;", ['x = 1'], {c:'char', x:'int'});
+    typedCase('float更新++', 'float x = 1.5f;\nx++;', ['x = 2.5'], {x:'float'});
+    typedCase('double更新-=', 'double x = 3.5;\nx -= 1;', ['x = 2.5'], {x:'double'});
+    typedCase('char更新++', "char c = 'A';\nc++;", ["c = 'B' (66)"], {c:'char'});
+    typedCase('float複数宣言', 'float a = 1.0f, b = a + 1.0f;', ['a = 1', 'b = 2'], {a:'float', b:'float'});
+    typedCase('double複数宣言', 'double a = 1.0, b = a + 1.0;', ['a = 1', 'b = 2'], {a:'double', b:'double'});
+    typedCase('char複数宣言', "char a = 'A', b = a + 1;", ["a = 'A' (65)", "b = 'B' (66)"], {a:'char', b:'char'});
+    typedCase('int複数未初期化', 'int a, b, c;', ['a = 未初期化', 'b = 未初期化', 'c = 未初期化'], {a:'int', b:'int', c:'int'});
+    typedCase('代入先型維持', 'float f = 1;\nf = 2.5;\nchar c = 65;\nc = 66;', ['f = 2.5', "c = 'B' (66)"], {f:'float', c:'char'});
+    typedCase('double比較はint', 'int x = 1.5 < 2.0;', ['x = 1'], {x:'int'});
+    typedCase('char比較はint', "char c = 'A';\nint x = c == 'A';", ['x = 1'], {c:'char', x:'int'});
+    typedCase('float表示の単精度誤差を抑制', 'float x = 0.1f;', ['x = 0.1'], {x:'float'});
+
+    function rejectedTypedCase(name, statements, variablesExclude = [], extra = {}){
+      typedScalarTests.push({
+        name:`L-TYPE1 ${name}`,
+        code:makeMainCode(`    ${statements.split('\n').join('\n    ')}\n    return 0;`),
+        expect:{ warningMin:1, variablesExclude, ...extra }
+      });
+    }
+    rejectedTypedCase('char範囲128拒否', 'char c = 128;', ['c =']);
+    rejectedTypedCase('char範囲負数拒否', 'char c = -1;', ['c =']);
+    rejectedTypedCase('char上限++は旧値維持', 'char c = 127;\nc++;', [],
+      {types:{c:'char'}, bridgeVariables:[['c','コード値127']]});
+    rejectedTypedCase('float剰余拒否', 'float x = 2.0f % 2;', ['x =']);
+    rejectedTypedCase('複数宣言は途中失敗で全員未登録', 'char a = 65, b = 128;', ['a =', 'b ='],
+      {bridgeVariables:[], types:{}});
+    rejectedTypedCase('複数宣言は未宣言参照で全員未登録', 'double a = 1.0, b = missing + 1;', ['a =', 'b ='],
+      {bridgeVariables:[], types:{}});
+    rejectedTypedCase('charの非対応escape拒否', "char c = '\\x41';", ['c =']);
+    rejectedTypedCase('float配列拒否', 'float a[2];', ['a =']);
+    rejectedTypedCase('char配列拒否', 'char a[2];', ['a =']);
+    rejectedTypedCase('int配列へのfloat代入は未対応', 'int a[1] = {0};\nfloat f = 1.5f;\na[0] = f;', [],
+      {arrays:[{name:'a', values:['0']}]});
+    rejectedTypedCase('typed printf未移植', 'float x = 1.5f;\nprintf("%d", x);', [],
+      {output:'出力はまだありません。'});
+    typedScalarTests.push({
+      name:'L-TYPE1 float内部値はMath.fround',
+      code:makeMainCode('    float x = 0.1f;\n    return 0;'),
+      expect:{variables:['x = 0.1'], types:{x:'float'},
+        expression:{source:'0.1f', value:Math.fround(0.1), type:'float'}}
+    });
+    testCases.push(...typedScalarTests);
+
     function checkCase(testCase){
       const codeInput = document.getElementById('codeInput');
       const scanfInput = document.getElementById('scanfInput');
@@ -3949,6 +4047,42 @@
 
       for(const text of expected.variablesExclude || []){
         if(actual.variables.some(variable => variable.includes(text))) failures.push(`変数に「${text}」を含めない`);
+      }
+
+      // Lite bridgeはUIと履歴へ渡す形式を保ったまま、型metadataを別tableに持ちます。
+      const bridge = window.cVisualizerLiteResult;
+      for(const [name, type] of Object.entries(expected.types || {})){
+        if(bridge.variableTypes?.[name] !== type){
+          failures.push(`${name}の型: 期待「${type}」/ 実際「${bridge.variableTypes?.[name]}」`);
+        }
+      }
+      if(expected.types && Object.keys(expected.types).length === 0 && Object.keys(bridge.variableTypes || {}).length){
+        failures.push('失敗した宣言の型metadataが残っている');
+      }
+      if(expected.bridgeVariables && JSON.stringify(bridge.variables) !== JSON.stringify(expected.bridgeVariables)){
+        failures.push(`Lite RESULT変数: 期待「${JSON.stringify(expected.bridgeVariables)}」/ 実際「${JSON.stringify(bridge.variables)}」`);
+      }
+      for(const pair of expected.bridgeIncludes || []){
+        if(!bridge.variables.some(current => current[0] === pair[0] && current[1] === pair[1])){
+          failures.push(`Lite RESULT変数に「${pair.join(' = ')}」がない`);
+        }
+      }
+      for(const pair of expected.stepVariables || []){
+        if(!bridge.steps.some(step => (step.variablesAtStep || []).some(
+          current => current[0] === pair[0] && current[1] === pair[1]
+        ))) failures.push(`Lite STEP snapshotに「${pair.join(' = ')}」がない`);
+      }
+      if(expected.expression){
+        const expression = evaluateArithmeticExpression(
+          expected.expression.source,
+          expected.expression.variables || Object.create(null),
+          null,
+          expected.expression.types || null
+        );
+        if(!expression.ok || !Object.is(expression.value, expected.expression.value) ||
+          expression.type !== expected.expression.type){
+          failures.push(`型付き式「${expected.expression.source}」の内部値・型が一致しない`);
+        }
       }
 
       if(expected.arrayCount !== undefined && actual.arrays.length !== expected.arrayCount){
