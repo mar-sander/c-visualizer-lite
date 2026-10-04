@@ -514,6 +514,9 @@ function renderValueChange(index){
 
 function renderDecisionStep(decision){
   const card = element('div', 'decision-card');
+  if(decision.depth === 2){
+    card.append(element('div', 'decision-context', 'NESTED IF · 2段目'));
+  }
   const evaluation = element('div', 'decision-evaluation');
   const values = decision.comparison
     ? `${decision.comparison.left.display} ${decision.comparison.operator} ${decision.comparison.right.display}`
@@ -535,10 +538,12 @@ function renderDecisionStep(decision){
 
 function describeDecisionPurpose(decision){
   const variableName = /^[A-Za-z_]\w*$/;
+  const context = decision.depth === 2 ? '外側の分岐の中で、' : '';
+  const action = decision.depth === 2 ? 'さらに調べ' : '調べ';
   if(!decision.comparison){
     const condition = decision.condition.trim();
     const subject = variableName.test(condition) ? `${condition} の値` : `条件式 ${condition}`;
-    return `${subject}が0ではないかを調べ、進む処理を決めています。`;
+    return `${context}${subject}が0ではないかを${action}、進む処理を決めています。`;
   }
 
   const {left, operator, right} = decision.comparison;
@@ -548,7 +553,7 @@ function describeDecisionPurpose(decision){
   };
   const subject = variableName.test(left.source)
     ? `${left.source} の値` : `${left.source} を計算した結果`;
-  return `${subject}が ${right.source} ${meanings[operator]}を調べ、進む処理を決めています。`;
+  return `${context}${subject}が ${right.source} ${meanings[operator]}を${action}、進む処理を決めています。`;
 }
 
 function renderStep(){
