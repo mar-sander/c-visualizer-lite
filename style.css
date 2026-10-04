@@ -1870,7 +1870,7 @@ button:focus-visible,select:focus-visible {
 .decision-card {
   display: grid;
   gap: 7px;
-  margin: 12px 0 3px;
+  margin: 12px 0 12px;
   padding: 10px 12px;
   border: 1px solid var(--line);
   border-radius: 10px;
