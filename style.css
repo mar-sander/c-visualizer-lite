@@ -2439,8 +2439,8 @@ body {
 }
 
 .scanf-accordion {
-  margin-top: 12px;
-  border: 1px solid var(--line);
+  margin: 12px 14px;
+  border: 0px solid var(--line);
   border-radius: 10px;
   background: var(--surface2);
   overflow: hidden
@@ -2507,9 +2507,9 @@ body {
   box-sizing: border-box;
   width: 100%;
   min-height: 68px;
-  margin: 12px 0 14px;
+  margin: 5px 0 14px 0;
   padding: 10px 12px;
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface-inset);
   color: var(--text);
