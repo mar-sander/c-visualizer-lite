@@ -1649,10 +1649,20 @@ button:focus-visible,select:focus-visible {
   font-weight: 700;
 }
 
-/* エラー位置は行番号だけ赤く示します。実行行・カーソル行より優先します。 */
+/* RUN失敗時は、行全体を薄く赤くし、行番号は赤地＋白文字で即座に見つけられるようにします。
+   実行行・カーソル行よりエラー表示を優先します。 */
+
+.CodeMirror-error-line {
+  background: rgb(245 1 0 / 14%) !important;
+}
+
+.CodeMirror-error-gutter {
+  background: #b71919 !important;
+}
 
 .CodeMirror-error-gutter .CodeMirror-linenumber {
-  color: #f50100 !important;
+  color: #ffffff !important;
+  font-weight: 900;
 }
 
 /* 凡例行をなくし、LightをCODE見出し行の右側へ置きます。 */
@@ -2563,4 +2573,87 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .scanf-accordion-body, .scanf-chevron { transition: none }
   .scanf-accordion.is-prompted { animation: none }
+}
+
+
+/* Stage L-UI12: RUN Feedback
+   成功時だけエディタ枠を黄色く発光させ、コード面を細い走査光が一度だけ横切ります。 */
+.editor-frame {
+  --run-frame-base-border: var(--line);
+  position: relative;
+  isolation: isolate;
+}
+
+.editor-frame.is-light {
+  --run-frame-base-border: #b8bbb8;
+}
+
+.editor-frame.is-run-success {
+  animation: run-success-frame 850ms ease-out;
+}
+
+.editor-frame.is-run-success::after {
+  content: "";
+  position: absolute;
+  z-index: 8;
+  top: -12%;
+  bottom: -12%;
+  left: -58%;
+  width: 42%;
+  pointer-events: none;
+  background: linear-gradient(
+    105deg,
+    transparent 0%,
+    rgb(255 224 0 / 0%) 22%,
+    rgb(255 224 0 / 16%) 40%,
+    rgb(255 241 122 / 52%) 50%,
+    rgb(255 224 0 / 16%) 60%,
+    rgb(255 224 0 / 0%) 78%,
+    transparent 100%
+  );
+  transform: skewX(-14deg);
+  animation: run-success-scan 720ms cubic-bezier(.22,.72,.26,1) forwards;
+}
+
+@keyframes run-success-frame {
+  0% {
+    border-color: #ffe000;
+    box-shadow: 0 0 0 1px rgb(255 224 0 / 64%), 0 0 12px rgb(255 224 0 / 44%);
+  }
+  38% {
+    border-color: #fff06a;
+    box-shadow: 0 0 0 1px rgb(255 224 0 / 76%), 0 0 22px rgb(255 224 0 / 52%);
+  }
+  100% {
+    border-color: var(--run-frame-base-border);
+    box-shadow: 0 0 0 1px rgb(255 224 0 / 0%), 0 0 28px rgb(255 224 0 / 0%);
+  }
+}
+
+@keyframes run-success-scan {
+  from { left: -58%; }
+  to { left: 118%; }
+}
+
+/* Light表示でもエラー箇所の意味は同じ。本文側だけ少し薄くして可読性を守ります。 */
+.editor-frame.is-light .CodeMirror-error-line {
+  background: rgb(245 1 0 / 10%) !important;
+}
+
+.editor-frame.is-light .CodeMirror-error-gutter {
+  background: #c62828 !important;
+}
+
+.editor-frame.is-light .CodeMirror-error-gutter .CodeMirror-linenumber {
+  color: #ffffff !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .editor-frame.is-run-success {
+    animation: none;
+  }
+
+  .editor-frame.is-run-success::after {
+    display: none;
+  }
 }

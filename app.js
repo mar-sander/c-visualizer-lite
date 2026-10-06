@@ -2,6 +2,7 @@
 const $ = id => document.getElementById(id);
 const flow = $('flow-content');
 const outputCard = document.querySelector('.output-card');
+const editorFrame = document.querySelector('.editor-frame');
 const editor = CodeMirror.fromTextArea($('code-input'), {
   mode:'text/x-csrc',
   inputStyle:'textarea',
@@ -13,7 +14,7 @@ const editor = CodeMirror.fromTextArea($('code-input'), {
 });
 const editorLightToggle = $('editor-light-toggle');
 editorLightToggle.addEventListener('click', () => {
-  const isLight = document.querySelector('.editor-frame').classList.toggle('is-light');
+  const isLight = editorFrame.classList.toggle('is-light');
   editorLightToggle.setAttribute('aria-checked', String(isLight));
 });
 
@@ -143,6 +144,7 @@ const errorLines = new Set();
 let alignmentCheckPending = false;
 let resultRevealPending = false;
 let resultReveal = null;
+let runSuccessFeedbackTimer = 0;
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 const scanfInput = $('scanfInput');
 const scanfAccordion = $('scanf-accordion');
@@ -212,8 +214,27 @@ function revealResult(node, output){
   update();
 }
 
+// RUN成功時の視覚演出だけを担当します。解析結果や履歴データには影響させません。
+function clearRunSuccessFeedback(){
+  clearTimeout(runSuccessFeedbackTimer);
+  runSuccessFeedbackTimer = 0;
+  editorFrame.classList.remove('is-run-success');
+}
+
+function playRunSuccessFeedback(){
+  clearRunSuccessFeedback();
+  if(reducedMotion.matches) return;
+  // 同じコードを連続RUNした場合でも、毎回アニメーションを最初から再生します。
+  void editorFrame.offsetWidth;
+  editorFrame.classList.add('is-run-success');
+  runSuccessFeedbackTimer = window.setTimeout(clearRunSuccessFeedback, 900);
+}
+
 reducedMotion.addEventListener('change', event => {
-  if(event.matches) cancelResultReveal();
+  if(event.matches){
+    cancelResultReveal();
+    clearRunSuccessFeedback();
+  }
 });
 
 const HISTORY_KEY = 'c-visualizer-lite-history-v1';
@@ -455,7 +476,9 @@ function clearJumpableLines(){
 
 function clearErrorLines(){
   for(const line of errorLines){
-    if(line < editor.lineCount()) editor.removeLineClass(line, 'gutter', 'CodeMirror-error-gutter');
+    if(line >= editor.lineCount()) continue;
+    editor.removeLineClass(line, 'gutter', 'CodeMirror-error-gutter');
+    editor.removeLineClass(line, 'background', 'CodeMirror-error-line');
   }
   errorLines.clear();
 }
@@ -469,6 +492,7 @@ function markErrorLines(warnings){
     if(line < 0 || line >= editor.lineCount() || errorLines.has(line)) continue;
     errorLines.add(line);
     editor.addLineClass(line, 'gutter', 'CodeMirror-error-gutter');
+    editor.addLineClass(line, 'background', 'CodeMirror-error-line');
   }
 }
 
@@ -701,6 +725,7 @@ function showWaiting(request){
 
 function runCode(){
   cancelResultReveal();
+  clearRunSuccessFeedback();
   resultRevealPending = false;
   clearJumpableLines();
   clearErrorLines();
@@ -737,6 +762,7 @@ function runCode(){
     markJumpableLines();
     resultRevealPending = true;
     showResultPage();
+    playRunSuccessFeedback();
     saveHistory(code, 'result', result);
   }catch(error){
     currentSteps = [];
