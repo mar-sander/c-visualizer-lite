@@ -576,9 +576,9 @@
         expect:{ output:'if else { }', outputExcludes:['WRONG'], variables:['value = 2'], warningMax:0, executedIncludes:['value = 2;', 'printf("if else'], executedExcludes:['printf("WRONG'] }
       },
       {
-        name:'内側if〜elseの変数宣言は登録せず後続処理を続行',
+        name:'内側if〜elseの変数宣言を外側ごと事前拒否',
         code:`#include <stdio.h>\n\nint main(void){\n    int value = 0;\n    if(1){\n        if(0){\n            value = 9;\n        }else{\n            int bonus = 5;\n            value = 2;\n            printf("CONTINUE\\n");\n        }\n    }\n    return 0;\n}`,
-        expect:{ output:'CONTINUE', variables:['value = 2'], variablesExclude:['bonus ='], warningMin:1, hintsInclude:['分岐内の変数宣言は未対応'], executedIncludes:['value = 2;', 'printf("CONTINUE'], executedExcludes:['int bonus = 5;', 'value = 9;'] }
+        expect:{ output:'出力はまだありません。', variables:['value = 0'], variablesExclude:['bonus ='], warningMin:1, hintsInclude:['分岐内の変数宣言は未対応'], decisions:[], executedExcludes:['int bonus = 5;', 'value = 2;', 'value = 9;', 'printf("CONTINUE'] }
       },
       {
         name:'構造未対応を含む外側分岐を部分実行しない',
@@ -617,9 +617,9 @@
         }
       },
       {
-        name:'内側ifの変数宣言は登録せず後続処理を続行',
+        name:'内側ifの変数宣言を外側ごと事前拒否',
         code:`#include <stdio.h>\n\nint main(void){\n    int a = 1;\n    int b = 1;\n    if(a > 0){\n        if(b > 0){\n            int result = 1;\n            printf("続行\\n");\n        }\n    }\n    return 0;\n}`,
-        expect:{ output:'続行', variables:['a = 1', 'b = 1'], variablesExclude:['result ='], warningMin:1, hintsInclude:['分岐内の変数宣言は未対応'], executedIncludes:['printf("続行'], executedExcludes:['int result = 1;'] }
+        expect:{ output:'出力はまだありません。', variables:['a = 1', 'b = 1'], variablesExclude:['result ='], warningMin:1, hintsInclude:['分岐内の変数宣言は未対応'], decisions:[], executedExcludes:['int result = 1;', 'printf("続行'] }
       },
       {
         name:'波かっこなしifを安全に停止',
@@ -4058,6 +4058,90 @@
     });
     testCases.push(...conditionalTests);
 
+    // L-COND2：実行された条件だけに階層metadataが付き、未選択側は評価しません。
+    function nestedDecision(condition, depth, result, selected, skipped){
+      return {condition, depth, result, selected, skipped};
+    }
+    function nestedCase(name, statements, decisions, extra = {}){
+      testCases.push({
+        name:`L-COND2 ${name}`,
+        code:makeMainCode(`    ${statements.split('\n').join('\n    ')}\n    return 0;`),
+        expect:{warningMax:0, decisions, ...extra}
+      });
+    }
+    nestedCase('外側true・内側true・int・復帰',
+      'int score = 85;\nint result = 0;\nif(score >= 60){\n    if(score >= 80){\n        result = 2;\n    }\n    result = result + 1;\n}\nprintf("%d", result);',
+      [nestedDecision('score >= 60',1,true,'if',null), nestedDecision('score >= 80',2,true,'if',null)],
+      {variables:['result = 3'], output:'3', stepsInOrder:['score >= 60を判定', 'score >= 80 を判定', 'result の中身を'], executedIncludes:['result = result + 1;', 'printf("%d"']});
+    nestedCase('外側true・内側false・後続処理',
+      'int score = 70;\nint result = 0;\nif(score >= 60){\n    if(score >= 80){\n        result = 9;\n    }\n    result = 1;\n}',
+      [nestedDecision('score >= 60',1,true,'if',null), nestedDecision('score >= 80',2,false,'none','if')],
+      {variables:['result = 1'], noStepsFor:['result = 9;']});
+    nestedCase('外側false・未宣言の内側条件を評価しない',
+      'int score = 45;\nif(score >= 60){\n    if(undefinedValue){\n        printf("WRONG");\n    }\n}\nprintf("AFTER");',
+      [nestedDecision('score >= 60',1,false,'none','if')],
+      {output:'AFTER', hintsExclude:['宣言されていません'], noStepsFor:['if(undefinedValue)', 'printf("WRONG")']});
+    nestedCase('外側else側で内側ifを評価',
+      'int value = 0;\nif(value > 0){\n    value = 1;\n}else{\n    if(value == 0){\n        value = 2;\n    }\n}',
+      [nestedDecision('value > 0',1,false,'else','if'), nestedDecision('value == 0',2,true,'if',null)],
+      {variables:['value = 2'], noStepsFor:['value = 1;']});
+    nestedCase('内側if-elseのif側',
+      'int value = 0;\nif(1){\n    if(1){\n        value = 1;\n    }else{\n        value = 9;\n    }\n}',
+      [nestedDecision('1',1,true,'if',null), nestedDecision('1',2,true,'if','else')],
+      {variables:['value = 1'], noStepsFor:['value = 9;']});
+    nestedCase('内側if-elseのelse側',
+      'int value = 0;\nif(1){\n    if(0){\n        value = 9;\n    }else{\n        value = 2;\n    }\n}',
+      [nestedDecision('1',1,true,'if',null), nestedDecision('0',2,false,'else','if')],
+      {variables:['value = 2'], noStepsFor:['value = 9;']});
+    nestedCase('内側if-elseの別行else',
+      'int value = 0;\nif(1){\n    if(0){\n        value = 9;\n    }\n    else{\n        value = 2;\n    }\n}',
+      [nestedDecision('1',1,true,'if',null), nestedDecision('0',2,false,'else','if')],
+      {variables:['value = 2']});
+    nestedCase('float比較を二段で判定',
+      'float temperature = 36.5f;\nif(temperature < 38.0f){\n    if(temperature >= 36.0f){\n        printf("NORMAL");\n    }\n}',
+      [nestedDecision('temperature < 38.0f',1,true,'if',null), nestedDecision('temperature >= 36.0f',2,true,'if',null)],
+      {output:'NORMAL'});
+    nestedCase('double比較を二段で判定',
+      'double x = 2.5;\nif(x > 0.0){\n    if(x <= 3.0){\n        printf("YES");\n    }\n}',
+      [nestedDecision('x > 0.0',1,true,'if',null), nestedDecision('x <= 3.0',2,true,'if',null)],
+      {output:'YES'});
+    nestedCase('char比較を二段で判定',
+      "char grade = 'A';\nif(grade >= 'A'){\n    if(grade == 'A'){\n        printf(\"TOP\");\n    }\n}",
+      [nestedDecision("grade >= 'A'",1,true,'if',null), nestedDecision("grade == 'A'",2,true,'if',null)],
+      {output:'TOP'});
+    nestedCase('非比較の変数条件を内側で判定',
+      'int value = 1;\nif(1){\n    if(value){\n        printf("YES");\n    }\n}',
+      [nestedDecision('1',1,true,'if',null), nestedDecision('value',2,true,'if',null)],
+      {output:'YES'});
+    nestedCase('非比較の0条件を内側で判定',
+      'if(1){\n    if(0){\n        printf("WRONG");\n    }\n}',
+      [nestedDecision('1',1,true,'if',null), nestedDecision('0',2,false,'none','if')],
+      {noStepsFor:['printf("WRONG")']});
+    nestedCase('未選択else内側条件を評価しない',
+      'if(1){\n    printf("YES");\n}else{\n    if(undefinedValue){\n        printf("WRONG");\n    }\n}',
+      [nestedDecision('1',1,true,'if','else')],
+      {output:'YES', hintsExclude:['宣言されていません'], noStepsFor:['if(undefinedValue)', 'printf("WRONG")']});
+    nestedCase('内側returnでmain終了',
+      'if(1){\n    if(1){\n        return 0;\n    }\n}\nprintf("WRONG");',
+      [nestedDecision('1',1,true,'if',null), nestedDecision('1',2,true,'if',null)],
+      {noStepsFor:['printf("WRONG")']});
+
+    function rejectedNestedCase(name, statements, hint){
+      testCases.push({name:`L-COND2 ${name}`,
+        code:makeMainCode(`    ${statements.split('\n').join('\n    ')}\n    return 0;`),
+        expect:{warningMin:1, hintsInclude:[hint], decisions:[], noStepsFor:['printf("WRONG")']}});
+    }
+    rejectedNestedCase('3階層目を事前拒否',
+      'if(1){\n    if(1){\n        if(1){\n            printf("WRONG");\n        }\n    }\n}', '3階層以上のifは未対応');
+    rejectedNestedCase('else-ifを事前拒否',
+      'if(1){\n    if(1){\n        printf("WRONG");\n    }else if(0){\n        printf("WRONG");\n    }\n}', 'このelse付きif文は未対応');
+    rejectedNestedCase('選択される内側の宣言を事前拒否',
+      'if(1){\n    if(1){\n        int inside = 1;\n        printf("WRONG");\n    }\n}', '分岐内の変数宣言は未対応');
+    rejectedNestedCase('未選択の内側の宣言も事前拒否',
+      'if(0){\n    if(undefinedValue){\n        int inside = 1;\n        printf("WRONG");\n    }\n}', '分岐内の変数宣言は未対応');
+    rejectedNestedCase('未選択の内側else宣言も事前拒否',
+      'if(1){\n    if(1){\n        printf("WRONG");\n    }else{\n        char inside = 65;\n    }\n}', '分岐内の変数宣言は未対応');
+
     function checkCase(testCase){
       const codeInput = document.getElementById('codeInput');
       const scanfInput = document.getElementById('scanfInput');
@@ -4163,6 +4247,9 @@
           for(const key of ['kind', 'condition', 'result', 'selected', 'skipped']){
             const value = key === 'kind' ? 'if' : wanted[key];
             if(decision[key] !== value) failures.push(`判定${index + 1}の${key}: 期待「${value}」/ 実際「${decision[key]}」`);
+          }
+          if(decision.depth !== (wanted.depth ?? 1)){
+            failures.push(`判定${index + 1}のdepth: 期待「${wanted.depth ?? 1}」/ 実際「${decision.depth}」`);
           }
           if(!Array.isArray(step.variablesAtStep) || typeof step.outputAtStep !== 'string'){
             failures.push(`判定${index + 1}のLite snapshotがない`);
@@ -4395,7 +4482,36 @@
         ...[['x','int x = 1;', 'x の値'], ['1','', '条件式 1'], ['0','', '条件式 0']]
           .map(([condition, declaration, subject]) => ({name:`非比較 if(${condition})`,
             body:`${declaration}\nif(${condition}){\n    printf("OK");\n}`,
-            explanation:[subject, '0ではないか', '進む処理を決めています']}))
+            explanation:[subject, '0ではないか', '進む処理を決めています']})),
+        {name:'外側true・内側trueの階層表示',
+          body:'int score = 85;\nif(score >= 60){\n    if(score >= 80){\n        printf("TOP");\n    }\n}',
+          decisionIndex:1, decisionCount:2, depth:2, context:'NESTED IF · 2段目',
+          explanation:['外側の分岐の中で', 'score の値', '80', 'さらに調べ'],
+          values:'85 >= 80', outcome:'成立TRUE', paths:['IF · 選択']},
+        {name:'内側if-elseのfalse側',
+          body:'int score = 70;\nif(score >= 60){\n    if(score >= 80){\n        printf("WRONG");\n    }else{\n        printf("PASS");\n    }\n}',
+          decisionIndex:1, decisionCount:2, depth:2, context:'NESTED IF · 2段目',
+          explanation:['外側の分岐の中で', 'score の値', '80', 'さらに調べ'],
+          values:'70 >= 80', outcome:'不成立FALSE', paths:['IF · 通らない', 'ELSE · 選択']},
+        {name:'外側falseなら内側STEPとjumpなし',
+          body:'int score = 45;\nif(score >= 60){\n    if(undefinedValue){\n        printf("WRONG");\n    }\n}',
+          decisionCount:1, depth:1, unjumpable:'if(undefinedValue)',
+          explanation:['score の値', '60', '以上か'], outcome:'不成立FALSE'},
+        {name:'外側else側の入れ子',
+          body:'int value = 0;\nif(value > 0){\n    value = 1;\n}else{\n    if(value == 0){\n        value = 2;\n    }\n}',
+          decisionIndex:1, decisionCount:2, depth:2, context:'NESTED IF · 2段目',
+          explanation:['外側の分岐の中で', 'value の値', '0', 'さらに調べ'],
+          values:'0 == 0', outcome:'成立TRUE'},
+        {name:'float入れ子比較',
+          body:'float temperature = 36.5f;\nif(temperature < 38.0f){\n    if(temperature >= 36.0f){\n        printf("NORMAL");\n    }\n}',
+          decisionIndex:1, decisionCount:2, depth:2, context:'NESTED IF · 2段目',
+          explanation:['外側の分岐の中で', 'temperature の値', '36.0f', 'さらに調べ'],
+          values:'36.5 >= 36', outcome:'成立TRUE'},
+        {name:'非比較の入れ子条件',
+          body:'int value = 1;\nif(1){\n    if(value){\n        printf("YES");\n    }\n}',
+          decisionIndex:1, decisionCount:2, depth:2, context:'NESTED IF · 2段目',
+          explanation:['外側の分岐の中で', 'value の値', '0ではないか', 'さらに調べ'],
+          outcome:'成立TRUE'}
       ];
       const frame = document.createElement('iframe');
       frame.src = 'index.html';
@@ -4416,10 +4532,13 @@
           const bridge = ui.cVisualizerLiteResult;
           if(bridge.hasWarnings) failures.push('条件の解析で警告が出ました');
           doc.querySelector('.result-flow-button')?.click();
-          const index = bridge.steps.findIndex(step => step.branchDecision);
+          const decisions = bridge.steps.filter(step => step.branchDecision);
+          if(decisions.length !== (testCase.decisionCount ?? 1)) failures.push('判定STEP数が違います');
+          const index = bridge.steps.findIndex(step => step === decisions[testCase.decisionIndex ?? 0]);
           if(index < 0){
             failures.push('判定STEPがありません');
           }else{
+            if(bridge.steps[index].branchDecision.depth !== (testCase.depth ?? 1)) failures.push('階層metadataが違います');
             ui.eval(`activeStep = ${index}; renderStep()`);
             const children = [...doc.getElementById('flow-content').children];
             const order = ['step-top', 'step-track', 'step-code', 'flow-detail', 'decision-card', 'next-line'];
@@ -4432,10 +4551,16 @@
             if(/成立|不成立|TRUE|FALSE|選択|通らない/.test(detail?.querySelector('p')?.textContent || '')) failures.push('説明に判定結果が重複しています');
             if(testCase.values && !doc.querySelector('.decision-values')?.textContent.includes(testCase.values)) failures.push('判定値が違います');
             if(testCase.outcome && doc.querySelector('.decision-outcome')?.textContent !== testCase.outcome) failures.push('判定結果が違います');
+            const context = doc.querySelector('.decision-context');
+            if(testCase.context ? context?.textContent !== testCase.context : context !== null) failures.push('入れ子表示が違います');
             for(const path of testCase.paths || []){
               if(!doc.querySelector('.decision-paths')?.textContent.includes(path)) failures.push(`進路「${path}」がありません`);
             }
             if(doc.querySelector('.value-card')) failures.push('条件STEPに空の変数カードがあります');
+            if(testCase.unjumpable){
+              const line = editor.getValue().split('\n').findIndex(code => code.includes(testCase.unjumpable));
+              if(ui.eval('jumpableLines').has(line)) failures.push('未評価の内側行へジャンプできます');
+            }
             if(testCase.source){
               bridge.steps[index].text = '説明文として使わない';
               ui.eval('renderStep()');

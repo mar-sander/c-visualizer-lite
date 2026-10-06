@@ -2589,9 +2589,9 @@ function visualizeCode(){
           );
         }
 
-        // main直下の正式範囲だけを新しく事前検査します。既存の入れ子ifと
-        // ループ内ifは従来の検査・実行規則を維持します。
-        if(validateSimpleStatement && (options.validateSimpleStatement || depth === 1)){
+        // main直下のif全体（入れ子の両側を含む）を実行前に検査します。
+        // ループ内ifは呼び出し側で指定した従来の検査を使います。
+        if(validateSimpleStatement){
           const validation = validateSimpleStatement(index, structuralCode);
           if(!validation.ok){
             return failure(validation.title, validation.message);
@@ -2805,6 +2805,7 @@ function visualizeCode(){
       const comparison = result.comparison;
       const branchDecision = {
         kind:'if',
+        depth:node.depth,
         condition:node.condition,
         comparison:comparison ? {
           left:{ source:comparison.leftSource, value:comparison.leftValue, display:comparison.leftDisplay },
