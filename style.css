@@ -2657,3 +2657,94 @@ body {
     display: none;
   }
 }
+
+
+/* Stage L-UI12: RUN失敗時のERRORフラッシュ。
+   一瞬だけ画面中央へ状態を出し、その後はエラー行ハイライトへ視線を渡します。 */
+.run-error-flash {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  visibility: hidden;
+  opacity: 0;
+  background: rgb(10 10 10 / 18%);
+}
+
+.run-error-flash span {
+  position: relative;
+  padding: 0.06em 0.18em 0.12em;
+  color: #ff3b38;
+  font-family: "Playfair Display SC", serif;
+  font-size: clamp(56px, 11vw, 128px);
+  font-weight: 700;
+  line-height: .9;
+  letter-spacing: .14em;
+  text-indent: .14em;
+  text-shadow:
+    0 0 8px rgb(245 1 0 / 55%),
+    0 0 26px rgb(245 1 0 / 24%);
+}
+
+.run-error-flash span::after {
+  content: "";
+  position: absolute;
+  left: -8%;
+  right: -8%;
+  top: 52%;
+  height: 1px;
+  background: rgb(255 80 76 / 78%);
+  box-shadow: 0 0 8px rgb(245 1 0 / 48%);
+}
+
+.run-error-flash.is-visible {
+  visibility: visible;
+  animation: run-error-screen 720ms ease-out forwards;
+}
+
+.run-error-flash.is-visible span {
+  animation: run-error-text 720ms cubic-bezier(.2,.74,.2,1) forwards;
+}
+
+@keyframes run-error-screen {
+  0% { opacity: 0; }
+  10% { opacity: 1; }
+  64% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+@keyframes run-error-text {
+  0% {
+    opacity: 0;
+    transform: scale(1.06);
+    filter: blur(2px);
+  }
+  14% {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(0);
+  }
+  66% {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(0);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(.985);
+    filter: blur(.6px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .run-error-flash.is-visible,
+  .run-error-flash.is-visible span {
+    animation: none;
+  }
+
+  .run-error-flash.is-visible {
+    opacity: 1;
+  }
+}

@@ -3,6 +3,7 @@ const $ = id => document.getElementById(id);
 const flow = $('flow-content');
 const outputCard = document.querySelector('.output-card');
 const editorFrame = document.querySelector('.editor-frame');
+const runErrorFlash = $('run-error-flash');
 const editor = CodeMirror.fromTextArea($('code-input'), {
   mode:'text/x-csrc',
   inputStyle:'textarea',
@@ -145,6 +146,7 @@ let alignmentCheckPending = false;
 let resultRevealPending = false;
 let resultReveal = null;
 let runSuccessFeedbackTimer = 0;
+let runErrorFeedbackTimer = 0;
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 const scanfInput = $('scanfInput');
 const scanfAccordion = $('scanf-accordion');
@@ -228,6 +230,23 @@ function playRunSuccessFeedback(){
   void editorFrame.offsetWidth;
   editorFrame.classList.add('is-run-success');
   runSuccessFeedbackTimer = window.setTimeout(clearRunSuccessFeedback, 900);
+}
+
+function clearRunErrorFeedback(){
+  clearTimeout(runErrorFeedbackTimer);
+  runErrorFeedbackTimer = 0;
+  runErrorFlash.classList.remove('is-visible');
+}
+
+function playRunErrorFeedback(){
+  clearRunErrorFeedback();
+  // reduced-motionでも「ERROR」という状態通知自体は残し、動きだけ止めます。
+  void runErrorFlash.offsetWidth;
+  runErrorFlash.classList.add('is-visible');
+  runErrorFeedbackTimer = window.setTimeout(
+    clearRunErrorFeedback,
+    reducedMotion.matches ? 420 : 720
+  );
 }
 
 reducedMotion.addEventListener('change', event => {
@@ -696,6 +715,7 @@ function showResultPage(){
 
 function showFailure(result){
   cancelResultReveal();
+  playRunErrorFeedback();
   const warnings = (result.warningText || []).filter(Boolean);
   markErrorLines(warnings);
   if(!warnings.length) warnings.push('対応範囲で処理の流れを確認できませんでした。入力を見直してください。');
@@ -726,6 +746,7 @@ function showWaiting(request){
 function runCode(){
   cancelResultReveal();
   clearRunSuccessFeedback();
+  clearRunErrorFeedback();
   resultRevealPending = false;
   clearJumpableLines();
   clearErrorLines();
