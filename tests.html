@@ -4759,7 +4759,11 @@
           if(input.closest('.engine-sandbox')) fail('入力欄が非表示sandboxに残っています');
           if(toggle.tagName !== 'BUTTON' || toggle.getAttribute('aria-expanded') !== 'false' ||
             toggle.getAttribute('aria-controls') !== body.id || !body.hasAttribute('inert')) fail('初期アコーディオンの操作・アクセシビリティが違います');
-          if(!input.labels?.length || !input.placeholder.includes('A')) fail('入力欄のlabelまたはplaceholderがありません');
+          if(input.rows !== 2 || !input.getAttribute('aria-label') ||
+            !input.placeholder.includes('scanfで使う入力値') ||
+            !input.placeholder.includes('1回につき1行') ||
+            !input.placeholder.includes('%cでは空白も1文字')) fail('入力欄の高さ・名前・説明が違います');
+          if(doc.querySelector('.scanf-accordion-inner label, .scanf-accordion-inner p')) fail('枠外の説明が残っています');
         });
         record('手動開閉', fail => {
           toggle.click();

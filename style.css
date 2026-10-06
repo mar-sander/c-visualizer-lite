@@ -2502,26 +2502,12 @@ body {
   padding: 0 14px
 }
 
-.scanf-accordion-inner label {
-  display: block;
-  margin-top: 12px;
-  font-size: 12px;
-  font-weight: 700
-}
-
-.scanf-accordion-inner p {
-  margin: 5px 0 10px;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.5
-}
-
 .scanf-accordion-inner textarea {
   display: block;
   box-sizing: border-box;
   width: 100%;
-  min-height: 110px;
-  margin-bottom: 14px;
+  min-height: 68px;
+  margin: 12px 0 14px;
   padding: 10px 12px;
   border: 1px solid var(--line-strong);
   border-radius: 8px;
@@ -2531,6 +2517,12 @@ body {
   font-size: 14px;
   line-height: 1.5;
   resize: vertical
+}
+
+.scanf-accordion-inner textarea::placeholder {
+  color: var(--muted);
+  font-size: 12px;
+  opacity: 1
 }
 
 .scanf-accordion-toggle:focus-visible,
