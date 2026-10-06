@@ -1,6 +1,6 @@
 # C Code Visualizer Lite — 四則演算 学習版
 
-授業用の新UI統合実証版です。`index.html` をブラウザで開くと、C言語の対応範囲で int / float / double / char scalar の基本四則演算、代入、main直下の基本if／if-elseと最大2階層の入れ子if／if-elseの処理STEPを可視化できます。printf・scanfは従来の整数入出力のみ対応します。1行に1つの文を書いてください。Cコンパイラや正誤判定の代わりではありません。
+授業用の新UI統合実証版です。`index.html` をブラウザで開くと、C言語の対応範囲で int / float / double / char scalar の基本四則演算、代入、main直下の基本if／if-elseと最大2階層の入れ子if／if-elseの処理STEPを可視化できます。printfは従来の整数出力、main直下の単一変数scanfは%d／%f／%lf／%cに対応します。INPUT欄ではscanf 1回につき1行を入力します。1行に1つの文を書いてください。Cコンパイラや正誤判定の代わりではありません。
 
 - CODEに書く → RUN → RESULTの出力・最終変数を見る → 「流れを見る」からSTEPをたどる。
 - RUN後は、STEPがあるコード行の行番号から、その行の最初のSTEPへ移動できます。編集すると古い結果は閉じます。

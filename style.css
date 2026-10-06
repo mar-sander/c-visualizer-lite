@@ -2411,3 +2411,164 @@ body {
     flex: none
   }
 }
+
+/* scanf入力は必要なときだけ開き、CODEとFLOWの高さを通常時は増やしません。 */
+.waiting-state {
+  padding: 22px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: var(--surface2)
+}
+
+.waiting-state h3 {
+  margin: 0 0 10px;
+  font-size: 17px;
+  letter-spacing: .06em
+}
+
+.waiting-state p {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6
+}
+
+.waiting-state small {
+  color: var(--accent-yellow);
+  font-size: 11px
+}
+
+.scanf-accordion {
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface2);
+  overflow: hidden
+}
+
+.scanf-accordion-toggle {
+  width: 100%;
+  min-height: 44px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 14px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-align: left;
+  cursor: pointer
+}
+
+.scanf-accordion-toggle small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0
+}
+
+.scanf-chevron {
+  width: 9px;
+  height: 9px;
+  border-right: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
+  transform: rotate(45deg);
+  transition: transform 250ms ease
+}
+
+.scanf-accordion.is-open .scanf-chevron {
+  transform: rotate(225deg)
+}
+
+.scanf-accordion-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows 250ms ease, opacity 220ms ease
+}
+
+.scanf-accordion.is-open .scanf-accordion-body {
+  grid-template-rows: 1fr;
+  opacity: 1
+}
+
+.scanf-accordion-inner {
+  min-height: 0;
+  overflow: hidden;
+  padding: 0 14px
+}
+
+.scanf-accordion-inner label {
+  display: block;
+  margin-top: 12px;
+  font-size: 12px;
+  font-weight: 700
+}
+
+.scanf-accordion-inner p {
+  margin: 5px 0 10px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5
+}
+
+.scanf-accordion-inner textarea {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 110px;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface-inset);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+  resize: vertical
+}
+
+.scanf-accordion-toggle:focus-visible,
+.scanf-accordion-inner textarea:focus-visible {
+  outline: 2px solid var(--accent-yellow);
+  outline-offset: 2px
+}
+
+.scanf-accordion.is-prompted {
+  animation: scanf-prompt 650ms ease-out 1
+}
+
+@keyframes scanf-prompt {
+  35% { border-color: var(--accent-yellow); box-shadow: 0 0 18px rgb(255 230 0 / 20%) }
+  100% { border-color: var(--line); box-shadow: none }
+}
+
+.scanf-step-input {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  max-width: 100%;
+  margin: 2px 0 12px;
+  padding: 5px 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 13px;
+  overflow-wrap: anywhere
+}
+
+.scanf-step-input small {
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: .08em
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scanf-accordion-body, .scanf-chevron { transition: none }
+  .scanf-accordion.is-prompted { animation: none }
+}

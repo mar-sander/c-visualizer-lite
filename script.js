@@ -1495,9 +1495,7 @@ function visualizeCode(){
   const scanfInput = document.getElementById('scanfInput');
   const scanfValues = String(scanfInput?.value || '')
     .replace(/\r\n/g, '\n')
-    .split('\n')
-    .map(value => value.trim())
-    .filter(value => value !== '');
+    .split('\n');
   const lines = code.split('\n');
   const executableLines = codeWithoutComments(code).split('\n');
   const mainRange = findMainExecutionRange(executableLines);
@@ -1524,6 +1522,8 @@ function visualizeCode(){
       .some(line => /^return\s+0\s*;$/.test(line.trim()))
     : false;
   let scanfValueIndex = 0;
+  let successfulScanfCount = 0;
+  let inputRequest = null;
   let stepNo = 1;
 
   for(const executableLine of executableLines){
@@ -1665,10 +1665,11 @@ function visualizeCode(){
     return `${access.indexVariable}の値は${access.resolvedIndex}です。そのため、${access.name}[${access.sourceIndex}]は${access.name}[${access.resolvedIndex}]を表します。`;
   }
 
-  function addStep(lineNo, text, markAsExecuted = true, arrayViews = [], branchDecision = null){
+  function addStep(lineNo, text, markAsExecuted = true, arrayViews = [], branchDecision = null, scanfInputData = null){
     const step = { step:stepNo++, lineNo, text };
     if(arrayViews.length) step.arrayViews = arrayViews;
     if(branchDecision) step.branchDecision = branchDecision;
+    if(scanfInputData) step.scanfInput = scanfInputData;
     // Lite UI用：STEPを記録した瞬間の状態です。後のprintfや代入を遡及させません。
     step.outputAtStep = output;
     step.variablesAtStep = variableOrder.map(name => [
@@ -2009,45 +2010,85 @@ function visualizeCode(){
         );
       }
 
-      const scanfMatch = trimmed.match(/^scanf\s*\(\s*"%d"\s*,\s*&\s*([A-Za-z_]\w*)\s*\)\s*;$/);
+      const scanfMatch = trimmed.match(/^scanf\s*\(\s*"(%d|%c|%f|%lf)"\s*,\s*&\s*([A-Za-z_]\w*)\s*\)\s*;$/);
       if(!scanfMatch){
         return stopScanf(
           'このscanf形式は未対応',
-          '現在は <code>scanf("%d", &amp;変数);</code> の形で、宣言済みのint変数へ整数を1つ入力する場合に対応しています。'
+          '現在は <code>scanf("%d", &amp;int変数);</code>、<code>scanf("%c", &amp;char変数);</code>、<code>scanf("%f", &amp;float変数);</code>、<code>scanf("%lf", &amp;double変数);</code> に対応しています。'
         );
       }
 
-      const name = scanfMatch[1];
+      const specifier = scanfMatch[1];
+      const name = scanfMatch[2];
+      const targetType = { '%d':'int', '%c':'char', '%f':'float', '%lf':'double' }[specifier];
       if(!hasOwnSymbol(variables, name)){
         return stopScanf(
           'scanfの変数が宣言されていません',
           `変数 <code>${name}</code> が先に <code>int ${name};</code> のように宣言されているか確認してください。`
         );
       }
-      if(getScalarType(name) !== 'int'){
-        return stopScanf('scanfの型が一致しません', '%d で入力できるのはint型の変数だけです。');
+      if(getScalarType(name) !== targetType){
+        const message = specifier === '%d'
+          ? '%d で入力できるのはint型の変数だけです。'
+          : `${specifier} で入力できるのは${targetType}型の変数だけです。`;
+        return stopScanf('scanfの型が一致しません', message);
       }
 
-      if(scanfValueIndex >= scanfValues.length){
+      // 数値は空行を読み飛ばし、%cは空白も含めた元の1行をそのまま読みます。
+      let inputIndex = scanfValueIndex;
+      if(specifier !== '%c'){
+        while(inputIndex < scanfValues.length && scanfValues[inputIndex].trim() === '') inputIndex++;
+      }
+      if(inputIndex >= scanfValues.length || (specifier === '%c' && scanfValues[inputIndex] === '')){
+        inputRequest = {
+          kind:'scanf', lineNo, specifier, target:name,
+          expectedType:targetType, ordinal:successfulScanfCount + 1
+        };
+        addAnalysis(analysis, lineNo, `変数 <code>${name}</code> に渡す入力値を待っています。`);
+        addStep(lineNo, 'scanfの入力値を待っています。');
+        return 'scanf-error';
+      }
+
+      const inputText = specifier === '%c' ? scanfValues[inputIndex] : scanfValues[inputIndex].trim();
+      const validInput = specifier === '%d'
+        ? /^[-+]?\d+$/.test(inputText)
+        : specifier === '%c'
+          ? inputText.length === 1 && inputText.charCodeAt(0) <= 127
+        : /^[-+]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(inputText);
+      if(!validInput){
         return stopScanf(
-          'scanfの入力値が足りません',
-          'scanfで使う入力値が足りません。「入力値（scanf用）」に整数を追加してください。'
+          specifier === '%c' ? 'scanfで文字を読み取れません' : specifier === '%d' ? 'scanfで整数を読み取れません' : 'scanfで小数を読み取れません',
+          specifier === '%c'
+            ? '%cでは1行に基本ASCIIの1文字だけを入力してください。引用符や複数文字は受け付けません。'
+            : specifier === '%d'
+            ? 'scanfで整数として読み取れない入力値です。1行に1つ、整数を入力してください。'
+            : 'scanfで数値として読み取れない入力値です。1行に1つ、整数または小数を入力してください。'
         );
       }
 
-      const inputText = scanfValues[scanfValueIndex];
-      if(!/^[-+]?\d+$/.test(inputText)){
-        return stopScanf(
-          'scanfで整数を読み取れません',
-          'scanfで整数として読み取れない入力値です。1行に1つ、整数を入力してください。'
-        );
+      const inputValue = specifier === '%c' ? inputText.charCodeAt(0) : Number(inputText);
+      const converted = convertScalarValue(inputValue, targetType);
+      if(!converted.ok){
+        return stopScanf('scanfの入力値を確認', escapeHtml(converted.error));
       }
-
-      const inputValue = Number(inputText);
-      scanfValueIndex++;
-      setScalarValue(name, inputValue);
-      addAnalysis(analysis, lineNo, `入力値 <code>${escapeHtml(inputText)}</code> を整数として受け取り、変数 <code>${name}</code> に代入します。`);
-      addStep(lineNo, `入力値 ${escapeHtml(inputText)} を整数として受け取り、変数 ${name} に代入しました。`);
+      scanfValueIndex = inputIndex + 1;
+      setScalarValue(name, converted.value);
+      successfulScanfCount++;
+      const scanfInputData = {
+        specifier, target:name, targetType,
+        rawInput:scanfValues[inputIndex],
+        inputDisplay:specifier === '%c' ? displayScalarValue(converted.value, 'char') : inputText,
+        storedDisplay:scalarDisplay(name)
+      };
+      if(specifier === '%c'){
+        const displayed = escapeHtml(displayScalarValue(converted.value, 'char'));
+        addAnalysis(analysis, lineNo, `入力文字 <code>${displayed}</code> をchar型の値として受け取り、変数 <code>${name}</code> に代入します。`);
+        addStep(lineNo, `入力文字 ${displayed} を変数 ${name} に代入しました。`, true, [], null, scanfInputData);
+        return;
+      }
+      const kind = targetType === 'int' ? '整数' : `${targetType}型の値`;
+      addAnalysis(analysis, lineNo, `入力値 <code>${escapeHtml(inputText)}</code> を${kind}として受け取り、変数 <code>${name}</code> に代入します。`);
+      addStep(lineNo, `入力値 ${escapeHtml(inputText)} を${kind}として受け取り、変数 ${name} に代入しました。`, true, [], null, scanfInputData);
       return;
     }
 
@@ -4566,6 +4607,8 @@ function visualizeCode(){
     : `<div class="hint"><b>大きなミスは見つかっていません。</b><br>次は、各STEPを自分の言葉で説明できるか試してみましょう。</div>`;
 
   // 従来のDOM出力と並行して、解析済みの実データをLite画面へ渡します。
+  const hasWarnings = warningLines.size > 0 || !hasMain || !mainRange?.closed;
+  const inputRequired = inputRequest !== null && !hasWarnings;
   window.cVisualizerLiteResult = {
     steps:steps.map(item => ({ ...item })),
     output,
@@ -4574,7 +4617,9 @@ function visualizeCode(){
     ]),
     variableTypes:{ ...variableTypes },
     hasMain,
-    hasWarnings:warningLines.size > 0 || !hasMain || !mainRange?.closed,
+    hasWarnings,
+    inputRequired,
+    inputRequest:inputRequired ? inputRequest : null,
     warningText:[...document.querySelectorAll('#hintResult .warning-line')]
       .map(item => {
         const title = item.querySelector('strong')?.textContent.trim() || '';

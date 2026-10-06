@@ -42,6 +42,20 @@ int main(void){
           <button type="button" id="visualize" class="visualize-button" aria-label="RUN：処理を可視化する">
             <span class="play-icon" aria-hidden="true">▶</span><span>RUN</span>
           </button>
+          <div id="scanf-accordion" class="scanf-accordion">
+            <button type="button" id="scanf-accordion-toggle" class="scanf-accordion-toggle"
+              aria-expanded="false" aria-controls="scanf-accordion-body">
+              <span>INPUT <small>/ scanf</small></span><span class="scanf-chevron" aria-hidden="true"></span>
+            </button>
+            <div id="scanf-accordion-body" class="scanf-accordion-body" aria-hidden="true" inert>
+              <div class="scanf-accordion-inner">
+                <label for="scanfInput">scanfで使う入力値</label>
+                <p>scanf 1回につき1行入力します。%cでは空白も1文字です。</p>
+                <textarea id="scanfInput" rows="4" spellcheck="false"
+                  placeholder="10&#10;A&#10;1.5&#10;2.25"></textarea>
+              </div>
+            </div>
+          </div>
         </section>
         <section class="action-area" aria-label="最終状態サマリー">
           <div class="final-summary" role="status" aria-live="polite">
@@ -94,7 +108,7 @@ int main(void){
   <!-- 既存解析エンジンの入出力先。画面へは解析済みの実データを反映します。 -->
   <div class="engine-sandbox" aria-hidden="true">
     <div id="codeEditor"><pre id="codeLineNumbers"></pre><pre id="codeHighlight"></pre></div>
-    <textarea id="codeInput"></textarea><textarea id="scanfInput"></textarea>
+    <textarea id="codeInput"></textarea>
     <div id="outputResult"></div><div id="variableState"></div>
     <div id="stepResult"></div><div id="codePreview"></div><div id="hintResult"></div>
   </div>

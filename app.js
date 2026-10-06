@@ -133,6 +133,8 @@ secretCodeDialog.addEventListener('close', resetUnlockFeedback);
 let currentSteps = [];
 let finalState = null;
 let resultCode = null;
+let resultScanfInput = null;
+let waitingCode = null;
 let activeStep = -1;
 let currentCursorLine = -1;
 let highlightedLine = -1;
@@ -142,6 +144,29 @@ let alignmentCheckPending = false;
 let resultRevealPending = false;
 let resultReveal = null;
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+const scanfInput = $('scanfInput');
+const scanfAccordion = $('scanf-accordion');
+const scanfAccordionToggle = $('scanf-accordion-toggle');
+const scanfAccordionBody = $('scanf-accordion-body');
+
+function setScanfAccordionOpen(expanded, prompt = false){
+  const wasOpen = scanfAccordion.classList.contains('is-open');
+  scanfAccordion.classList.toggle('is-open', expanded);
+  scanfAccordionToggle.setAttribute('aria-expanded', String(expanded));
+  scanfAccordionBody.setAttribute('aria-hidden', String(!expanded));
+  scanfAccordionBody.toggleAttribute('inert', !expanded);
+  if(!expanded) scanfAccordion.classList.remove('is-prompted');
+  if(prompt && expanded && !wasOpen && !reducedMotion.matches){
+    scanfAccordion.classList.add('is-prompted');
+  }
+}
+
+scanfAccordionToggle.addEventListener('click', () => {
+  setScanfAccordionOpen(!scanfAccordion.classList.contains('is-open'));
+});
+scanfAccordion.addEventListener('animationend', () => {
+  scanfAccordion.classList.remove('is-prompted');
+});
 
 // 表示専用の演出です。解析結果・履歴へ途中の文字列を戻しません。
 function cancelResultReveal(){
@@ -311,6 +336,7 @@ function renderHistory(){
   restore.type = 'button';
   restore.addEventListener('click', () => {
     editor.setValue(entry.code);
+    scanfInput.value = '';
     $('sample-select').value = '';
     invalidateResult();
     $('feedback').textContent = 'コードを戻しました。RUNで確認してください。';
@@ -457,10 +483,11 @@ function markJumpableLines(){
 }
 
 function hasCurrentResult(){
-  return finalState !== null && resultCode === editor.getValue();
+  return finalState !== null && resultCode === editor.getValue() &&
+    resultScanfInput === scanfInput.value;
 }
 
-function invalidateResult(){
+function invalidateResult(message = 'コードが変更されました。RUNで新しい結果を確認してください。'){
   cancelResultReveal();
   resultRevealPending = false;
   clearJumpableLines();
@@ -468,11 +495,13 @@ function invalidateResult(){
   currentSteps = [];
   finalState = null;
   resultCode = null;
+  resultScanfInput = null;
+  waitingCode = null;
   activeStep = -1;
   showFinalSummary(null);
   showExecutionLine(null);
   setOutput('');
-  showIdle('更新を待っています', 'コードが変更されました。RUNで新しい結果を確認してください。');
+  showIdle('更新を待っています', message);
   $('feedback').textContent = '再RUNが必要です。';
 }
 
@@ -556,6 +585,11 @@ function describeDecisionPurpose(decision){
   return `${context}${subject}が ${right.source} ${meanings[operator]}を${action}、進む処理を決めています。`;
 }
 
+function describeScanfPurpose(input){
+  const kind = input.targetType === 'char' ? '1文字' : input.targetType === 'int' ? '整数' : '数値';
+  return `入力された${kind}を${input.targetType}型として受け取り、${input.target} に保存しています。`;
+}
+
 function renderStep(){
   if(!hasCurrentResult() || activeStep < 0) return;
   cancelResultReveal();
@@ -577,9 +611,15 @@ function renderStep(){
     element('small', '', 'コードは何をしてる？'),
     element('p', '', step.branchDecision
       ? describeDecisionPurpose(step.branchDecision)
+      : step.scanfInput
+        ? describeScanfPurpose(step.scanfInput)
       : decodeEngineExplanation(step.text))
   );
   const decision = step.branchDecision ? renderDecisionStep(step.branchDecision) : null;
+  const input = step.scanfInput ? element('div', 'scanf-step-input') : null;
+  if(input){
+    input.append(element('small', '', 'INPUT'), element('span', '', step.scanfInput.inputDisplay));
+  }
   // 判定では値が変わらないので、空の変化カードを重ねません。
   const change = step.branchDecision ? null : renderValueChange(activeStep);
   const nextStep = currentSteps[activeStep + 1];
@@ -588,7 +628,8 @@ function renderStep(){
     element('span', '', '次： '),
     element('strong', '', nextStep ? `${nextStep.lineNo}行目` : 'RESULT')
   );
-  flow.replaceChildren(top, track, code, explanation, ...(decision ? [decision] : []), ...(change ? [change] : []), next);
+  flow.replaceChildren(top, track, code, explanation, ...(decision ? [decision] : []),
+    ...(input ? [input] : []), ...(change ? [change] : []), next);
   $('step-controls').hidden = false;
   $('step-prev').disabled = false;
   $('step-next').disabled = false;
@@ -645,6 +686,19 @@ function showFailure(result){
   return warnings;
 }
 
+function showWaiting(request){
+  const box = element('div', 'waiting-state');
+  box.append(element('h3', '', 'WAITING FOR INPUT'));
+  box.append(element('p', '', `scanfで使用する値を入力して、もう一度RUNしてください。`));
+  box.append(element('small', '', `${request.lineNo}行目 · ${request.specifier} · ${request.target}`));
+  flow.replaceChildren(box);
+  $('step-controls').hidden = true;
+  outputCard.hidden = true;
+  $('feedback').textContent = '';
+  setScanfAccordionOpen(true, true);
+  scanfInput.focus();
+}
+
 function runCode(){
   cancelResultReveal();
   resultRevealPending = false;
@@ -652,15 +706,22 @@ function runCode(){
   clearErrorLines();
   finalState = null;
   resultCode = null;
+  resultScanfInput = null;
+  waitingCode = null;
   activeStep = -1;
   showExecutionLine(null);
   showFinalSummary(null);
   const code = editor.getValue();
   $('codeInput').value = code;
-  $('scanfInput').value = '';
   try{
     visualizeCode();
     const result = window.cVisualizerLiteResult;
+    if(result?.inputRequired && !result.hasWarnings){
+      currentSteps = [];
+      waitingCode = code;
+      showWaiting(result.inputRequest);
+      return;
+    }
     if(!result || result.hasWarnings || !result.steps.length){
       currentSteps = [];
       const failed = result || { warningText:[], output:'' };
@@ -671,6 +732,7 @@ function runCode(){
     currentSteps = result.steps;
     finalState = {output:result.output, variables:result.variables};
     resultCode = code;
+    resultScanfInput = scanfInput.value;
     showFinalSummary(finalState);
     markJumpableLines();
     resultRevealPending = true;
@@ -687,9 +749,14 @@ function runCode(){
 
 editor.on('cursorActivity', updateCursor);
 editor.on('change', () => {
-  if(resultCode !== null || errorLines.size) invalidateResult();
+  if(resultCode !== null || errorLines.size || waitingCode !== null) invalidateResult();
   // 手入力に戻ったことだけを選択欄に反映します。
   if($('sample-select').value) $('sample-select').value = '';
+});
+scanfInput.addEventListener('input', () => {
+  if(resultCode !== null || errorLines.size){
+    invalidateResult('入力値が変更されました。RUNで新しい結果を確認してください。');
+  }
 });
 editor.on('gutterClick', (_editor, line, gutter) => {
   if(gutter !== 'CodeMirror-linenumbers' || !hasCurrentResult()) return;
