@@ -1649,10 +1649,20 @@ button:focus-visible,select:focus-visible {
   font-weight: 700;
 }
 
-/* エラー位置は行番号だけ赤く示します。実行行・カーソル行より優先します。 */
+/* RUN失敗時は、行全体を薄く赤くし、行番号は赤地＋白文字で即座に見つけられるようにします。
+   実行行・カーソル行よりエラー表示を優先します。 */
+
+.CodeMirror-error-line {
+  background: rgb(245 1 0 / 14%) !important;
+}
+
+.CodeMirror-error-gutter {
+  background: #b71919 !important;
+}
 
 .CodeMirror-error-gutter .CodeMirror-linenumber {
-  color: #f50100 !important;
+  color: #ffffff !important;
+  font-weight: 900;
 }
 
 /* 凡例行をなくし、LightをCODE見出し行の右側へ置きます。 */
@@ -2563,4 +2573,206 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .scanf-accordion-body, .scanf-chevron { transition: none }
   .scanf-accordion.is-prompted { animation: none }
+}
+
+
+/* Stage L-UI12: RUN Feedback
+   既存の方眼は固定し、黄色い方眼だけをマスクで左から右へ見せます。 */
+
+.editor-frame {
+  --run-frame-base-border: var(--line);
+  position: relative;
+  isolation: isolate;
+}
+
+.editor-frame.is-light {
+  --run-frame-base-border: #b8bbb8;
+}
+
+.editor-frame.is-run-success {
+  animation: run-success-frame 850ms ease-out;
+}
+
+.editor-frame.is-run-success::after {
+  content: "";
+  position: absolute;
+  z-index: 8;
+  inset: 1px;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgb(255 230 0 / 68%) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(255 230 0 / 78%) 1px, transparent 1px);
+  background-size: 5px 5px;
+  filter: drop-shadow(0 0 2px rgb(255 230 0 / 38%));
+  /* 発光するのは線だけ。マスクの両端を消し、中央へなだらかに集めます。 */
+  --run-sweep-mask: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgb(0 0 0 / 15%) 20%,
+    #000 46%,
+    #000 54%,
+    rgb(0 0 0 / 15%) 80%,
+    transparent 100%
+  );
+  -webkit-mask-image: var(--run-sweep-mask);
+  mask-image: var(--run-sweep-mask);
+  -webkit-mask-size: 36% 100%;
+  mask-size: 36% 100%;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  animation: run-analysis-sweep 700ms ease-in-out forwards;
+}
+
+/* 選択中の行番号背景も成功時だけ透かし、全面の方眼を一続きにします。 */
+.editor-frame.is-run-success .CodeMirror-activeline-gutter {
+  background: transparent;
+}
+
+.editor-frame.is-light.is-run-success::after {
+  background-image:
+    linear-gradient(rgb(171 123 0 / 65%) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(171 123 0 / 65%) 1px, transparent 1px);
+  filter: drop-shadow(0 0 1px rgb(171 123 0 / 26%));
+}
+
+@keyframes run-success-frame {
+  0% {
+    border-color: #ffe000;
+    box-shadow: 0 0 0 1px rgb(255 224 0 / 64%), 0 0 12px rgb(255 224 0 / 44%);
+  }
+  38% {
+    border-color: #fff06a;
+    box-shadow: 0 0 0 1px rgb(255 224 0 / 76%), 0 0 22px rgb(255 224 0 / 52%);
+  }
+  100% {
+    border-color: var(--run-frame-base-border);
+    box-shadow: 0 0 0 1px rgb(255 224 0 / 0%), 0 0 28px rgb(255 224 0 / 0%);
+  }
+}
+
+@keyframes run-analysis-sweep {
+  0% {
+    opacity: 0;
+    -webkit-mask-position: -56.25% 0;
+    mask-position: -56.25% 0;
+  }
+  12% { opacity: 1; }
+  88% { opacity: 1; }
+  100% {
+    opacity: 0;
+    -webkit-mask-position: 156.25% 0;
+    mask-position: 156.25% 0;
+  }
+}
+
+/* Light表示でもエラー箇所の意味は同じ。本文側だけ少し薄くして可読性を守ります。 */
+.editor-frame.is-light .CodeMirror-error-line {
+  background: rgb(245 1 0 / 10%) !important;
+}
+
+.editor-frame.is-light .CodeMirror-error-gutter {
+  background: #c62828 !important;
+}
+
+.editor-frame.is-light .CodeMirror-error-gutter .CodeMirror-linenumber {
+  color: #ffffff !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .editor-frame.is-run-success {
+    animation: none;
+    border-color: #ffe000;
+    box-shadow: 0 0 0 1px rgb(255 224 0 / 55%), 0 0 12px rgb(255 224 0 / 28%);
+  }
+
+  .editor-frame.is-run-success::after {
+    animation: none;
+    opacity: .34;
+    -webkit-mask: none;
+    mask: none;
+  }
+
+  .editor-frame.is-light.is-run-success::after {
+    opacity: .24;
+  }
+}
+
+
+/* Stage L-UI12: RUN失敗時のERRORフラッシュ。
+   一瞬だけ画面中央へ状態を出し、その後はエラー行ハイライトへ視線を渡します。 */
+.run-error-flash {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  visibility: hidden;
+  opacity: 0;
+  background: rgb(10 10 10 / 18%);
+}
+
+.run-error-flash span {
+  position: relative;
+  padding: 0.06em 0.18em 0.12em;
+  color: #ff3b38;
+  font-family: "Playfair Display SC", serif;
+  font-size: clamp(56px, 11vw, 128px);
+  font-weight: 700;
+  line-height: .9;
+  letter-spacing: .14em;
+  text-indent: .14em;
+  text-shadow:
+    0 0 8px rgb(245 1 0 / 55%),
+    0 0 26px rgb(245 1 0 / 24%);
+}
+
+.run-error-flash.is-visible {
+  visibility: visible;
+  animation: run-error-screen 720ms ease-out forwards;
+}
+
+.run-error-flash.is-visible span {
+  animation: run-error-text 720ms cubic-bezier(.2,.74,.2,1) forwards;
+}
+
+@keyframes run-error-screen {
+  0% { opacity: 0; }
+  10% { opacity: 1; }
+  64% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+@keyframes run-error-text {
+  0% {
+    opacity: 0;
+    transform: scale(1.06);
+    filter: blur(2px);
+  }
+  14% {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(0);
+  }
+  66% {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(0);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(.985);
+    filter: blur(.6px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .run-error-flash.is-visible,
+  .run-error-flash.is-visible span {
+    animation: none;
+  }
+
+  .run-error-flash.is-visible {
+    opacity: 1;
+  }
 }

@@ -2,6 +2,8 @@
 const $ = id => document.getElementById(id);
 const flow = $('flow-content');
 const outputCard = document.querySelector('.output-card');
+const editorFrame = document.querySelector('.editor-frame');
+const runErrorFlash = $('run-error-flash');
 const editor = CodeMirror.fromTextArea($('code-input'), {
   mode:'text/x-csrc',
   inputStyle:'textarea',
@@ -13,7 +15,7 @@ const editor = CodeMirror.fromTextArea($('code-input'), {
 });
 const editorLightToggle = $('editor-light-toggle');
 editorLightToggle.addEventListener('click', () => {
-  const isLight = document.querySelector('.editor-frame').classList.toggle('is-light');
+  const isLight = editorFrame.classList.toggle('is-light');
   editorLightToggle.setAttribute('aria-checked', String(isLight));
 });
 
@@ -143,6 +145,9 @@ const errorLines = new Set();
 let alignmentCheckPending = false;
 let resultRevealPending = false;
 let resultReveal = null;
+let runSuccessFeedbackTimer = 0;
+let pendingRunSuccess = null;
+let runErrorFeedbackTimer = 0;
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 const scanfInput = $('scanfInput');
 const scanfAccordion = $('scanf-accordion');
@@ -212,8 +217,49 @@ function revealResult(node, output){
   update();
 }
 
+// RUN成功時の視覚演出だけを担当します。解析結果や履歴データには影響させません。
+function clearRunSuccessFeedback(){
+  clearTimeout(runSuccessFeedbackTimer);
+  runSuccessFeedbackTimer = 0;
+  pendingRunSuccess = null;
+  editorFrame.classList.remove('is-run-success');
+}
+
+function playRunSuccessFeedback(onComplete){
+  clearRunSuccessFeedback();
+  const pending = {onComplete};
+  pendingRunSuccess = pending;
+  // 同じコードを連続RUNした場合も、reduced-motionの静的通知も毎回再表示します。
+  void editorFrame.offsetWidth;
+  editorFrame.classList.add('is-run-success');
+  runSuccessFeedbackTimer = window.setTimeout(() => {
+    // 編集や次のRUNで破棄された演出から、古いRESULTを表示しません。
+    if(pendingRunSuccess !== pending) return;
+    clearRunSuccessFeedback();
+    onComplete();
+  }, reducedMotion.matches ? 240 : 700);
+}
+
+function clearRunErrorFeedback(){
+  clearTimeout(runErrorFeedbackTimer);
+  runErrorFeedbackTimer = 0;
+  runErrorFlash.classList.remove('is-visible');
+}
+
+function playRunErrorFeedback(){
+  clearRunErrorFeedback();
+  // reduced-motionでも「ERROR」という状態通知自体は残し、動きだけ止めます。
+  void runErrorFlash.offsetWidth;
+  runErrorFlash.classList.add('is-visible');
+  runErrorFeedbackTimer = window.setTimeout(
+    clearRunErrorFeedback,
+    reducedMotion.matches ? 420 : 720
+  );
+}
+
 reducedMotion.addEventListener('change', event => {
   if(event.matches) cancelResultReveal();
+  if(pendingRunSuccess) playRunSuccessFeedback(pendingRunSuccess.onComplete);
 });
 
 const HISTORY_KEY = 'c-visualizer-lite-history-v1';
@@ -455,7 +501,9 @@ function clearJumpableLines(){
 
 function clearErrorLines(){
   for(const line of errorLines){
-    if(line < editor.lineCount()) editor.removeLineClass(line, 'gutter', 'CodeMirror-error-gutter');
+    if(line >= editor.lineCount()) continue;
+    editor.removeLineClass(line, 'gutter', 'CodeMirror-error-gutter');
+    editor.removeLineClass(line, 'background', 'CodeMirror-error-line');
   }
   errorLines.clear();
 }
@@ -469,6 +517,7 @@ function markErrorLines(warnings){
     if(line < 0 || line >= editor.lineCount() || errorLines.has(line)) continue;
     errorLines.add(line);
     editor.addLineClass(line, 'gutter', 'CodeMirror-error-gutter');
+    editor.addLineClass(line, 'background', 'CodeMirror-error-line');
   }
 }
 
@@ -489,6 +538,7 @@ function hasCurrentResult(){
 
 function invalidateResult(message = 'コードが変更されました。RUNで新しい結果を確認してください。'){
   cancelResultReveal();
+  clearRunSuccessFeedback();
   resultRevealPending = false;
   clearJumpableLines();
   clearErrorLines();
@@ -672,6 +722,7 @@ function showResultPage(){
 
 function showFailure(result){
   cancelResultReveal();
+  playRunErrorFeedback();
   const warnings = (result.warningText || []).filter(Boolean);
   markErrorLines(warnings);
   if(!warnings.length) warnings.push('対応範囲で処理の流れを確認できませんでした。入力を見直してください。');
@@ -699,8 +750,18 @@ function showWaiting(request){
   scanfInput.focus();
 }
 
+function showAnalysisPending(){
+  setOutput('');
+  showIdle('解析中です', '解析結果を準備しています。');
+  $('step-controls').hidden = true;
+  outputCard.hidden = true;
+  $('feedback').textContent = '';
+}
+
 function runCode(){
   cancelResultReveal();
+  clearRunSuccessFeedback();
+  clearRunErrorFeedback();
   resultRevealPending = false;
   clearJumpableLines();
   clearErrorLines();
@@ -729,15 +790,21 @@ function runCode(){
       saveHistory(code, 'check', failed, warnings);
       return;
     }
-    currentSteps = result.steps;
-    finalState = {output:result.output, variables:result.variables};
-    resultCode = code;
-    resultScanfInput = scanfInput.value;
-    showFinalSummary(finalState);
-    markJumpableLines();
-    resultRevealPending = true;
-    showResultPage();
-    saveHistory(code, 'result', result);
+    const input = scanfInput.value;
+    // 解析は完了済み。成功結果の画面反映だけをSweepの終了まで保留します。
+    showAnalysisPending();
+    playRunSuccessFeedback(() => {
+      if(editor.getValue() !== code || scanfInput.value !== input) return;
+      currentSteps = result.steps;
+      finalState = {output:result.output, variables:result.variables};
+      resultCode = code;
+      resultScanfInput = input;
+      showFinalSummary(finalState);
+      markJumpableLines();
+      resultRevealPending = true;
+      showResultPage();
+      saveHistory(code, 'result', result);
+    });
   }catch(error){
     currentSteps = [];
     const failed = { warningText:['処理を表示できませんでした。コードを確認して、再RUNしてください。'], output:'' };
@@ -749,12 +816,12 @@ function runCode(){
 
 editor.on('cursorActivity', updateCursor);
 editor.on('change', () => {
-  if(resultCode !== null || errorLines.size || waitingCode !== null) invalidateResult();
+  if(resultCode !== null || errorLines.size || waitingCode !== null || pendingRunSuccess) invalidateResult();
   // 手入力に戻ったことだけを選択欄に反映します。
   if($('sample-select').value) $('sample-select').value = '';
 });
 scanfInput.addEventListener('input', () => {
-  if(resultCode !== null || errorLines.size){
+  if(resultCode !== null || errorLines.size || pendingRunSuccess){
     invalidateResult('入力値が変更されました。RUNで新しい結果を確認してください。');
   }
 });
