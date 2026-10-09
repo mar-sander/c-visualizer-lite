@@ -1471,17 +1471,55 @@ function makeInitialValueExplanation(name, expr, result, type = 'int', assignedV
   };
 }
 
-function formatPrintfString(format, values){
+// 対応する指定子だけを左から読み、引数との対応を確定してから出力します。
+function parsePrintfFormat(format){
+  const parts = [];
+  const specifiers = [];
+  let literal = '';
+  for(let index = 0; index < format.length; index++){
+    const char = format[index];
+    if(char === '\\' && index + 1 < format.length){
+      literal += char + format[++index];
+      continue;
+    }
+    if(char !== '%'){
+      literal += char;
+      continue;
+    }
+    if(literal){
+      parts.push({ literal });
+      literal = '';
+    }
+    const match = format.slice(index).match(/^%(?:\.(\d+))?(l)?([dcf])/);
+    if(!match || (match[3] !== 'f' && (match[1] !== undefined || match[2]))){
+      return { ok:false, error:'このprintf書式は現在未対応です。%d、%c、%f、%lfと、小数点以下0～20桁の%.Nf／%.Nlfを使用してください。' };
+    }
+    const precision = match[1] === undefined ? 6 : Number(match[1]);
+    if(match[1] !== undefined && (!Number.isSafeInteger(precision) || precision > 20)){
+      return { ok:false, error:'小数点以下の表示桁数は、Visualizerの安全上限である0～20桁にしてください。これはC言語自体の制限ではありません。' };
+    }
+    const specifier = { type:match[3], precision };
+    specifiers.push(specifier);
+    parts.push({ specifier });
+    index += match[0].length - 1;
+  }
+  if(literal) parts.push({ literal });
+  return { ok:true, parts, specifiers };
+}
+
+function formatPrintfString(parsed, values){
   let index = 0;
-  let text = format.replace(/%d/g, () => {
+  const text = parsed.parts.map(part => {
+    if(part.literal !== undefined) return part.literal
+      .replace(/\\n/g, '\n')
+      .replace(/\\t/g, '\t')
+      .replace(/\\"/g, '"')
+      .replace(/\\\\/g, '\\');
     const value = values[index++];
-    return value !== undefined ? String(value) : '%d';
-  });
-  text = text
-    .replace(/\\n/g, '\n')
-    .replace(/\\t/g, '\t')
-    .replace(/\\"/g, '"')
-    .replace(/\\\\/g, '\\');
+    if(part.specifier.type === 'd') return String(value);
+    if(part.specifier.type === 'c') return String.fromCharCode(value);
+    return value.toFixed(part.specifier.precision);
+  }).join('');
   return { text, usedCount:index };
 }
 
@@ -2307,16 +2345,29 @@ function visualizeCode(){
         return insideLoop ? 'execution-error' : undefined;
       }
 
+      const parsedFormat = parsePrintfFormat(format);
+      if(!parsedFormat.ok){
+        addAnalysis(analysis, lineNo, 'printfの書式を読み取れないため、この行は表示しません。');
+        addHint(hints, lineNo, 'printfの書式を確認', escapeHtml(parsedFormat.error));
+        warningLines.add(lineNo);
+        return insideLoop ? 'execution-error' : undefined;
+      }
+
       const argText = printfMatch[2] || '';
       const args = argText ? splitArgs(argText) : [];
       const values = [];
       const results = [];
-      const readableArgs = [];
       let ok = true;
       let error = '';
       let failedResult = null;
 
-      for(const arg of args){
+      if(args.length !== parsedFormat.specifiers.length){
+        ok = false;
+        error = 'printfの書式指定子と引数の数が一致しません。';
+      }
+
+      for(const [index, arg] of args.entries()){
+        if(!ok) break;
         const result = evaluateExpression(
           arg,
           variables,
@@ -2324,14 +2375,29 @@ function visualizeCode(){
           variableTypes
         );
         if(result.ok){
-          if(result.type !== 'int'){
+          const specifier = parsedFormat.specifiers[index];
+          const integerArgument = result.type === 'int' || result.type === 'char';
+          const typeMatches = specifier.type === 'd' || specifier.type === 'c'
+            ? integerArgument
+            : result.type === 'float' || result.type === 'double';
+          if(!typeMatches){
             ok = false;
-            error = 'Liteのprintfは現在%dでの整数表示だけに対応しています。型付き入出力は未対応です。';
+            error = specifier.type === 'd'
+              ? '%dにはint型またはchar型の値だけを渡してください。'
+              : specifier.type === 'c'
+                ? '%cにはint型またはchar型の値だけを渡してください。'
+                : '%f／%lfにはfloat型またはdouble型の値を渡してください。';
+            failedResult = result;
+            break;
+          }
+          if(specifier.type === 'c' && (!Number.isSafeInteger(result.value) || result.value < 0 || result.value > 127)){
+            ok = false;
+            error = '%cで表示できる文字コードは、Visualizerの安全な対応範囲0～127です。これはC言語自体の制限ではありません。';
+            failedResult = result;
             break;
           }
           values.push(result.value);
           results.push(result);
-          readableArgs.push(`${escapeHtml(arg)} → ${result.value}`);
         }else{
           ok = false;
           error = result.error;
@@ -2341,12 +2407,17 @@ function visualizeCode(){
       }
 
       if(ok){
-        const formatted = formatPrintfString(format, values);
+        const formatted = formatPrintfString(parsedFormat, values);
         output += formatted.text;
         const visibleText = makeVisibleDisplayText(formatted.text);
         let explanation;
         if(args.length){
-          const argDescriptions = args.map((arg, i) => describePrintfArg(arg, values[i]));
+          const argDescriptions = args.map((arg, i) => {
+            const type = parsedFormat.specifiers[i].type;
+            const displayed = type === 'c' ? displayScalarValue(values[i], 'char') : displayScalarValue(values[i], results[i].type);
+            const formatDescription = type === 'c' ? 'を文字として表示' : type === 'd' && results[i].type === 'char' ? 'を整数として表示' : '';
+            return `${describePrintfArg(arg, escapeHtml(displayed))}${formatDescription}`;
+          });
           if(args.length === 1 && results[0].comparison){
             explanation = `${describeComparison(results[0])} 比較結果の <code>${values[0]}</code> をprintfで画面に表示しました。`;
           }else if(args.length === 1){
@@ -2360,16 +2431,15 @@ function visualizeCode(){
         const arrayAccess = results.find(result => result.arrayAccess)?.arrayAccess || null;
         const resolutionExplanation = describeVariableIndexResolution(arrayAccess);
         addAnalysis(analysis, lineNo, `${escapeHtml(resolutionExplanation)}${explanation}`);
+        const charDescriptions = parsedFormat.specifiers
+          .map((specifier, i) => specifier.type === 'c' ? escapeHtml(displayScalarValue(values[i], 'char')) : null)
+          .filter(value => value !== null);
         addStep(
           lineNo,
-          `${escapeHtml(resolutionExplanation)}画面に「${escapeHtml(visibleText)}」を表示しました。`,
+          `${escapeHtml(resolutionExplanation)}画面に「${escapeHtml(visibleText)}」を表示しました。${charDescriptions.length ? ` 文字 ${charDescriptions.join('、')} を出力しました。` : ''}`,
           true,
           arrayAccess ? [makeArrayView(arrayAccess)] : []
         );
-        if((format.match(/%d/g) || []).length !== args.length){
-          addHint(hints, lineNo, 'printfの指定と値の数を確認', '書式指定子 <code>%d</code> の数と、後ろに並べる値の数が合っているか確認してみましょう。');
-          warningLines.add(lineNo);
-        }
       }else{
         if(hasSupportedArrayRead){
           const errorContext = getArrayExpressionErrorContext(failedResult || {});
