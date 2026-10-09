@@ -3969,7 +3969,7 @@
     rejectedTypedCase('char配列拒否', 'char a[2];', ['a =']);
     rejectedTypedCase('int配列へのfloat代入は未対応', 'int a[1] = {0};\nfloat f = 1.5f;\na[0] = f;', [],
       {arrays:[{name:'a', values:['0']}]});
-    rejectedTypedCase('typed printf未移植', 'float x = 1.5f;\nprintf("%d", x);', [],
+    rejectedTypedCase('printfで%dへfloatを渡す型不一致', 'float x = 1.5f;\nprintf("%d", x);', [],
       {output:'出力はまだありません。'});
     typedScalarTests.push({
       name:'L-TYPE1 float内部値はMath.fround',
@@ -3978,6 +3978,46 @@
         expression:{source:'0.1f', value:Math.fround(0.1), type:'float'}}
     });
     testCases.push(...typedScalarTests);
+
+
+    // Stage L-IO2：型付きprintf、型不一致時の安全停止、既存制御構造との共存。
+    const typedPrintfCases = [
+      { name:"授業再現 float加算", body:"float a = 10.7;\nfloat b = 3;\nfloat c = a + b;\nprintf(\"%f\\n\", c);", output:"13.700000", warnings:false },
+      { name:"floatとdouble混合書式", body:"float f = 1.5f;\ndouble d = 2.25;\nprintf(\"%f %lf\", f, d);", output:"1.500000 2.250000", warnings:false },
+      { name:"float 精度2桁", body:"float f = 3.5f;\nprintf(\"%.2f\", f);", output:"3.50", warnings:false },
+      { name:"double 精度0桁", body:"double d = 2.0;\nprintf(\"%.0lf\", d);", output:"2", warnings:false },
+      { name:"char %c", body:"char c = 'A';\nprintf(\"%c\", c);", output:"A", warnings:false },
+      { name:"charを%dで整数表示", body:"char c = 'A';\nprintf(\"%d\", c);", output:"65", warnings:false },
+      { name:"intを%cで文字表示", body:"int c = 66;\nprintf(\"%c\", c);", output:"B", warnings:false },
+      { name:"異なる3型を同時表示", body:"int a = 2;\nfloat b = 1.25f;\nchar c = 'X';\nprintf(\"%d|%.2f|%c\", a, b, c);", output:"2|1.25|X", warnings:false },
+      { name:"%dへfloatを渡すと拒否", body:"float f = 1.25f;\nprintf(\"%d\", f);", output:"出力はまだありません。", warnings:true },
+      { name:"%fへintを渡すと拒否", body:"int n = 3;\nprintf(\"%f\", n);", output:"出力はまだありません。", warnings:true },
+      { name:"表示桁数21は拒否", body:"float f = 1.5f;\nprintf(\"%.21f\", f);", output:"出力はまだありません。", warnings:true },
+      { name:"引数不足は出力しない", body:"int n = 3;\nprintf(\"%d %d\", n);", output:"出力はまだありません。", warnings:true },
+      { name:"不明な指定子は拒否", body:"int n = 3;\nprintf(\"%x\", n);", output:"出力はまだありません。", warnings:true },
+      { name:"%%未対応は維持", body:"printf(\"100%%\");", output:"出力はまだありません。", warnings:true },
+      { name:"scanf float後printf", body:"float t;\nscanf(\"%f\", &t);\nprintf(\"%.1f\", t);", input:"38.2", output:"38.2", warnings:false },
+      { name:"scanf double後printf", body:"double t;\nscanf(\"%lf\", &t);\nprintf(\"%f\", t);", input:"2.25", output:"2.250000", warnings:false },
+      { name:"scanf char後%c%d", body:"char t;\nscanf(\"%c\", &t);\nprintf(\"%c %d\", t, t);", input:"Y", output:"Y 89", warnings:false },
+      { name:"int配列要素%d維持", body:"int a[2] = {10, 20};\nprintf(\"%d\", a[1]);", output:"20", warnings:false },
+      { name:"if分岐内float printf", body:"float f = 1.5f;\nif(f > 1.0f){\n printf(\"%.1f\", f);\n}", output:"1.5", warnings:false },
+      { name:"for本体%d維持", body:"int i;\nfor(i=0;i<3;i++){\n printf(\"%d\",i);\n}", output:"012", warnings:false },
+      { name:"while本体%d維持", body:"int i=0;\nwhile(i<3){\n printf(\"%d\",i);\n i++;\n}", output:"012", warnings:false },
+      { name:"小数点精度上限20", body:"double d=0.5;\nprintf(\"%.20f\",d);", output:"0.50000000000000000000", warnings:false },
+      { name:"文字定数を%c", body:"printf(\"%c\", 'Z');", output:"Z", warnings:false },
+      { name:"比較結果%d維持", body:"float f=3.5f;\nprintf(\"%d\", f > 2.0f);", output:"1", warnings:false },
+      { name:"floatをscanfして%f出力", body:"float f;\nscanf(\"%f\", &f);\nprintf(\"%f\", f);", input:"0.1", output:"0.100000", warnings:false },
+      { name:"doubleを%.2lf出力", body:"double d=1.25;\nprintf(\"%.2lf\", d);", output:"1.25", warnings:false }
+    ];
+    testCases.push(...typedPrintfCases.map(test => ({
+      name:`L-IO2 ${test.name}`,
+      code:makeMainCode(`    ${test.body.split('\n').join('\n    ')}\n    return 0;`),
+      ...(test.input === undefined ? {} : {input:test.input}),
+      expect:{
+        output:test.output,
+        ...(test.warnings ? {warningMin:1} : {warningMax:0})
+      }
+    })));
 
     // Stage L-COND1：条件判定の値と進路を、文章ではなくLite STEPのmetadataで確認します。
     const conditionalTests = [];
@@ -4608,6 +4648,30 @@
         .replace(/'/g, '&#39;');
     }
 
+    // RUN演出が完了し、操作できるRESULTが表示されるまで待ちます。
+    // 演出時間の固定値ではなく、製品画面の状態を検査します。
+    async function waitForUiResult(ui){
+      const deadline = Date.now() + 5000;
+      while(Date.now() < deadline){
+        if(ui.document.querySelector('.result-state') && ui.eval('hasCurrentResult()')) return;
+        if(ui.document.querySelector('.failure-state')){
+          throw new Error(`RUNが失敗しました: ${ui.document.querySelector('.failure-state').textContent}`);
+        }
+        await new Promise(resolve => ui.setTimeout(resolve, 20));
+      }
+      throw new Error('RUN後にRESULTが表示されません（5秒以内）');
+    }
+
+    // display:noneのiframeではfocusを検査できないため、画面外へ配置します。
+    function createUiTestFrame(){
+      const frame = document.createElement('iframe');
+      frame.src = 'index.html';
+      frame.style.cssText = 'position:fixed;left:-10000px;top:0;width:1200px;height:800px;border:0;';
+      frame.setAttribute('title', '製品画面の回帰テスト');
+      document.body.append(frame);
+      return frame;
+    }
+
     // 製品画面を別フレームで動かし、説明と判定カードの両立を確認します。
     async function checkDecisionUiCases(){
       const cases = [
@@ -4656,10 +4720,7 @@
           explanation:['外側の分岐の中で', 'value の値', '0ではないか', 'さらに調べ'],
           outcome:'成立TRUE'}
       ];
-      const frame = document.createElement('iframe');
-      frame.src = 'index.html';
-      frame.hidden = true;
-      document.body.append(frame);
+      const frame = createUiTestFrame();
       try{
         await new Promise((resolve, reject) => {
           frame.addEventListener('load', resolve, {once:true});
@@ -4668,12 +4729,14 @@
         const ui = frame.contentWindow;
         const doc = ui.document;
         const editor = ui.eval('editor');
-        return cases.map(testCase => {
+        const results = [];
+        for(const testCase of cases){
           const failures = [];
           editor.setValue(makeMainCode(`    ${testCase.body.trim().split('\n').join('\n    ')}\n    return 0;`));
           doc.getElementById('visualize').click();
           const bridge = ui.cVisualizerLiteResult;
           if(bridge.hasWarnings) failures.push('条件の解析で警告が出ました');
+          else await waitForUiResult(ui);
           doc.querySelector('.result-flow-button')?.click();
           const decisions = bridge.steps.filter(step => step.branchDecision);
           if(decisions.length !== (testCase.decisionCount ?? 1)) failures.push('判定STEP数が違います');
@@ -4710,9 +4773,10 @@
               if(!doc.querySelector('.flow-detail p')?.textContent.includes(testCase.source)) failures.push('説明がmetadataを使用していません');
             }
           }
-          return {testCase:{name:`L-COND1.1 ${testCase.name}`}, result:{passed:failures.length === 0, failures,
-            actual:{output:'説明とDecision Cardを確認', warningCount:0}}};
-        });
+          results.push({testCase:{name:`L-COND1.1 ${testCase.name}`}, result:{passed:failures.length === 0, failures,
+            actual:{output:'説明とDecision Cardを確認', warningCount:0}}});
+        }
+        return results;
       }catch(error){
         return cases.map(testCase => ({testCase:{name:`L-COND1.1 ${testCase.name}`},
           result:{passed:false, failures:[String(error)], actual:{output:'', warningCount:0}}}));
@@ -4722,14 +4786,11 @@
     }
 
     async function checkScanfUiCases(){
-      const frame = document.createElement('iframe');
-      frame.src = 'index.html';
-      frame.hidden = true;
-      document.body.append(frame);
+      const frame = createUiTestFrame();
       const results = [];
-      const record = (name, check) => {
+      const record = async (name, check) => {
         const failures = [];
-        try{ check(message => failures.push(message)); }
+        try{ await check(message => failures.push(message)); }
         catch(error){ failures.push(String(error)); }
         results.push({testCase:{name:`L-IO1 UI ${name}`},
           result:{passed:failures.length === 0, failures, actual:{output:'製品画面の状態を確認',warningCount:0}}});
@@ -4746,15 +4807,17 @@
         const accordion = doc.getElementById('scanf-accordion');
         const toggle = doc.getElementById('scanf-accordion-toggle');
         const body = doc.getElementById('scanf-accordion-body');
-        const run = (statements, value) => {
+        const run = async (statements, value) => {
           editor.setValue(makeMainCode(`    ${statements.split('\n').join('\n    ')}\n    return 0;`));
           input.value = value;
           input.dispatchEvent(new ui.Event('input', {bubbles:true}));
           doc.getElementById('visualize').click();
-          return ui.cVisualizerLiteResult;
+          const result = ui.cVisualizerLiteResult;
+          if(!result.inputRequired && !result.hasWarnings) await waitForUiResult(ui);
+          return result;
         };
 
-        record('初期閉鎖と単一textarea', fail => {
+        await record('初期閉鎖と単一textarea', async fail => {
           if(doc.querySelectorAll('#scanfInput').length !== 1) fail('scanfInputが重複しています');
           if(input.closest('.engine-sandbox')) fail('入力欄が非表示sandboxに残っています');
           if(toggle.tagName !== 'BUTTON' || toggle.getAttribute('aria-expanded') !== 'false' ||
@@ -4765,34 +4828,38 @@
             !input.placeholder.includes('%cでは空白も1文字')) fail('入力欄の高さ・名前・説明が違います');
           if(doc.querySelector('.scanf-accordion-inner label, .scanf-accordion-inner p')) fail('枠外の説明が残っています');
         });
-        record('手動開閉', fail => {
+        await record('手動開閉', async fail => {
           toggle.click();
           if(toggle.getAttribute('aria-expanded') !== 'true' || body.hasAttribute('inert')) fail('手動で開きません');
           toggle.click();
           if(toggle.getAttribute('aria-expanded') !== 'false' || !body.hasAttribute('inert')) fail('手動で閉じません');
         });
-        record('展開とreduced motionのCSS', fail => {
+        await record('展開とreduced motionのCSS', async fail => {
           const rules = [...doc.styleSheets].flatMap(sheet => [...sheet.cssRules]);
           const css = rules.map(rule => rule.cssText).join('\n');
           if(!css.includes('grid-template-rows: 0fr') || !css.includes('grid-template-rows: 1fr') ||
             !css.includes('250ms') || !css.includes('scanf-prompt')) fail('展開または一度だけの発光CSSがありません');
-          const reduced = rules.filter(rule => rule.conditionText === '(prefers-reduced-motion: reduce)')
-            .map(rule => rule.cssText).join('\n');
-          if(!reduced.includes('.scanf-accordion-body') || !reduced.includes('transition: none') ||
-            !reduced.includes('.scanf-accordion.is-prompted') || !reduced.includes('animation: none')){
+          // CSSOMではanimation:noneが展開されるため、宣言の意味を検査します。
+          const reducedRules = rules.filter(rule => rule.conditionText === '(prefers-reduced-motion: reduce)')
+            .flatMap(rule => [...rule.cssRules]);
+          const noTransition = reducedRules.some(rule => rule.selectorText?.includes('.scanf-accordion-body') &&
+            rule.style.getPropertyValue('transition-property') === 'none');
+          const noAnimation = reducedRules.some(rule => rule.selectorText?.includes('.scanf-accordion.is-prompted') &&
+            rule.style.getPropertyValue('animation-name') === 'none');
+          if(!noTransition || !noAnimation){
             fail('動きを減らす設定がINPUTへ適用されていません');
           }
         });
-        record('scanfなしの通常RUN', fail => {
-          const bridge = run('int x = 3;\nprintf("%d", x);', '');
+        await record('scanfなしの通常RUN', async fail => {
+          const bridge = await run('int x = 3;\nprintf("%d", x);', '');
           if(bridge.inputRequired || !doc.querySelector('.result-state')) fail('scanfなしで通常のRESULTへ進みません');
           if(accordion.classList.contains('is-open')) fail('scanfなしでINPUTが開きました');
         });
 
         const floatBody = 'float temperature;\nscanf("%f", &temperature);\nif(temperature >= 37.5f){\n    printf("FEVER\\n");\n}';
-        record('入力不足WAITING・自動展開・focus', fail => {
+        await record('入力不足WAITING・自動展開・focus', async fail => {
           const before = ui.eval('historyEntries.length');
-          const bridge = run(floatBody, '');
+          const bridge = await run(floatBody, '');
           if(!bridge.inputRequired || bridge.inputRequest?.specifier !== '%f' ||
             bridge.inputRequest?.target !== 'temperature') fail('structured inputRequestが違います');
           if(!doc.querySelector('.waiting-state h3')?.textContent.includes('WAITING FOR INPUT')) fail('WAITINGが表示されません');
@@ -4803,20 +4870,21 @@
           if(doc.activeElement !== input) fail('入力欄へfocusしません');
           if(ui.eval('historyEntries.length') !== before || ui.eval('errorLines.size') !== 0) fail('WAITINGを履歴または赤いエラーへ流しました');
         });
-        record('開いたままのWAITINGは再展開しない', fail => {
+        await record('開いたままのWAITINGは再展開しない', async fail => {
           accordion.classList.remove('is-prompted');
           doc.getElementById('visualize').click();
           if(accordion.classList.contains('is-prompted') || toggle.getAttribute('aria-expanded') !== 'true') fail('再RUNで不要な開閉アニメーションが発生しました');
         });
-        record('不正入力はERRORでありWAITINGではない', fail => {
+        await record('不正入力はERRORでありWAITINGではない', async fail => {
           input.value = 'abc';
           doc.getElementById('visualize').click();
           if(ui.cVisualizerLiteResult.inputRequired || !doc.querySelector('.failure-state') ||
             doc.querySelector('.waiting-state')) fail('不正入力がWAITINGになりました');
         });
-        record('float再RUN・RESULT・入力保持・履歴v1', fail => {
+        await record('float再RUN・RESULT・入力保持・履歴v1', async fail => {
           input.value = '38.0';
           doc.getElementById('visualize').click();
+          await waitForUiResult(ui);
           if(ui.cVisualizerLiteResult.inputRequired || ui.cVisualizerLiteResult.output !== 'FEVER\n' ||
             !doc.querySelector('.result-state')) fail('先頭からの再RUNが完成しません');
           if(input.value !== '38.0' || toggle.getAttribute('aria-expanded') !== 'true') fail('RUN成功後に入力値または開いた状態を失いました');
@@ -4825,7 +4893,7 @@
           if(entry?.kind !== 'result' || !entry.variables.some(pair => pair[0] === 'temperature' && pair[1] === '38') ||
             Object.hasOwn(entry, 'scanfInput')) fail('History v1の表示値またはschemaが違います');
         });
-        record('scanf FLOWの目的・INPUT・変数箱', fail => {
+        await record('scanf FLOWの目的・INPUT・変数箱', async fail => {
           const index = ui.cVisualizerLiteResult.steps.findIndex(step => step.scanfInput);
           ui.eval(`activeStep = ${index}; renderStep()`);
           if(doc.querySelector('.flow-detail p')?.textContent.includes('38.0') ||
@@ -4838,14 +4906,14 @@
           doc.getElementById('step-prev').click();
           if(!doc.querySelector('.scanf-step-input')) fail('前のscanf STEPへ戻れません');
         });
-        record('INPUT編集で古い結果と行ジャンプを無効化', fail => {
+        await record('INPUT編集で古い結果と行ジャンプを無効化', async fail => {
           input.value = '36.8';
           input.dispatchEvent(new ui.Event('input', {bubbles:true}));
           if(ui.eval('hasCurrentResult()') || ui.eval('jumpableLines.size') !== 0 ||
             doc.querySelector('.result-state') || doc.querySelector('.scanf-step-input')) fail('旧RESULTまたはFLOWが残っています');
         });
-        record('先入れcharは1回のRUNで成功', fail => {
-          const bridge = run("char answer;\nscanf(\"%c\", &answer);\nif(answer == 'Y'){\n    printf(\"YES\\n\");\n}", 'Y');
+        await record('先入れcharは1回のRUNで成功', async fail => {
+          const bridge = await run("char answer;\nscanf(\"%c\", &answer);\nif(answer == 'Y'){\n    printf(\"YES\\n\");\n}", 'Y');
           if(bridge.inputRequired || bridge.output !== 'YES\n' ||
             !doc.querySelector('.result-state')?.textContent.includes("answer = 'Y' (89)")) fail('char入力からRESULTへ進みません');
           const index = bridge.steps.findIndex(step => step.scanfInput);
@@ -4853,31 +4921,32 @@
           if(!doc.querySelector('.scanf-step-input')?.textContent.includes("'Y' (89)") ||
             !doc.querySelector('.scalar-variable-history')?.textContent.includes("— → 'Y' (89)")) fail('char INPUTと箱の表示が違います');
         });
-        record('半角スペース入力を見える形で表示', fail => {
-          const bridge = run('char c;\nscanf("%c", &c);', ' ');
+        await record('半角スペース入力を見える形で表示', async fail => {
+          const bridge = await run('char c;\nscanf("%c", &c);', ' ');
           const index = bridge.steps.findIndex(step => step.scanfInput);
           ui.eval(`activeStep = ${index}; renderStep()`);
           if(!doc.querySelector('.scanf-step-input')?.textContent.includes("' ' (32)") ||
             !doc.querySelector('.scalar-variable-history')?.textContent.includes("' ' (32)")) fail('空白入力が不可視になりました');
         });
-        record('4型入力の途中不足から全入力で成功', fail => {
+        await record('4型入力の途中不足から全入力で成功', async fail => {
           const mixed = 'int n;\nchar c;\nfloat f;\ndouble d;\nscanf("%d", &n);\nscanf("%c", &c);\nscanf("%f", &f);\nscanf("%lf", &d);';
-          const waiting = run(mixed, '10');
+          const waiting = await run(mixed, '10');
           if(!waiting.inputRequired || waiting.inputRequest?.ordinal !== 2 ||
             doc.querySelector('.result-state')) fail('2番目のscanfで正しく待機しません');
           input.value = '10\nA\n1.5\n2.25';
           doc.getElementById('visualize').click();
+          await waitForUiResult(ui);
           const steps = ui.cVisualizerLiteResult.steps.filter(step => step.scanfInput);
           if(steps.map(step => step.scanfInput.specifier).join(',') !== '%d,%c,%f,%lf' ||
             !doc.querySelector('.result-state')?.textContent.includes("c = 'A' (65)")) fail('再RUN後の4型消費順が違います');
         });
-        record('WAITING中のコード変更は待機解除', fail => {
-          run('int n;\nscanf("%d", &n);', '');
+        await record('WAITING中のコード変更は待機解除', async fail => {
+          await run('int n;\nscanf("%d", &n);', '');
           editor.setValue(makeMainCode('    int n = 1;\n    return 0;'));
           if(doc.querySelector('.waiting-state') || ui.eval('waitingCode') !== null ||
             !doc.querySelector('.idle-state')) fail('コード編集後にWAITINGが残っています');
         });
-        record('履歴復元は入力を戻さず自動RUNしない', fail => {
+        await record('履歴復元は入力を戻さず自動RUNしない', async fail => {
           doc.getElementById('history-open').click();
           const restore = doc.querySelector('.history-restore');
           if(!restore){ fail('履歴の復元操作がありません'); return; }
@@ -4885,7 +4954,7 @@
           restore.click();
           if(input.value !== '' || doc.querySelector('.result-state') || ui.eval('hasCurrentResult()')) fail('復元で古い入力や実行結果が残りました');
         });
-        record('Light・CodeMirror textarea・SECRET CODE', fail => {
+        await record('Light・CodeMirror textarea・SECRET CODE', async fail => {
           doc.getElementById('editor-light-toggle').click();
           if(doc.getElementById('editor-light-toggle').getAttribute('aria-checked') !== 'true' ||
             editor.getOption('inputStyle') !== 'textarea') fail('LightまたはAndroid入力方式が退行しました');
