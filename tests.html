@@ -4648,6 +4648,30 @@
         .replace(/'/g, '&#39;');
     }
 
+    // RUN演出が完了し、操作できるRESULTが表示されるまで待ちます。
+    // 演出時間の固定値ではなく、製品画面の状態を検査します。
+    async function waitForUiResult(ui){
+      const deadline = Date.now() + 5000;
+      while(Date.now() < deadline){
+        if(ui.document.querySelector('.result-state') && ui.eval('hasCurrentResult()')) return;
+        if(ui.document.querySelector('.failure-state')){
+          throw new Error(`RUNが失敗しました: ${ui.document.querySelector('.failure-state').textContent}`);
+        }
+        await new Promise(resolve => ui.setTimeout(resolve, 20));
+      }
+      throw new Error('RUN後にRESULTが表示されません（5秒以内）');
+    }
+
+    // display:noneのiframeではfocusを検査できないため、画面外へ配置します。
+    function createUiTestFrame(){
+      const frame = document.createElement('iframe');
+      frame.src = 'index.html';
+      frame.style.cssText = 'position:fixed;left:-10000px;top:0;width:1200px;height:800px;border:0;';
+      frame.setAttribute('title', '製品画面の回帰テスト');
+      document.body.append(frame);
+      return frame;
+    }
+
     // 製品画面を別フレームで動かし、説明と判定カードの両立を確認します。
     async function checkDecisionUiCases(){
       const cases = [
@@ -4696,10 +4720,7 @@
           explanation:['外側の分岐の中で', 'value の値', '0ではないか', 'さらに調べ'],
           outcome:'成立TRUE'}
       ];
-      const frame = document.createElement('iframe');
-      frame.src = 'index.html';
-      frame.hidden = true;
-      document.body.append(frame);
+      const frame = createUiTestFrame();
       try{
         await new Promise((resolve, reject) => {
           frame.addEventListener('load', resolve, {once:true});
@@ -4708,12 +4729,14 @@
         const ui = frame.contentWindow;
         const doc = ui.document;
         const editor = ui.eval('editor');
-        return cases.map(testCase => {
+        const results = [];
+        for(const testCase of cases){
           const failures = [];
           editor.setValue(makeMainCode(`    ${testCase.body.trim().split('\n').join('\n    ')}\n    return 0;`));
           doc.getElementById('visualize').click();
           const bridge = ui.cVisualizerLiteResult;
           if(bridge.hasWarnings) failures.push('条件の解析で警告が出ました');
+          else await waitForUiResult(ui);
           doc.querySelector('.result-flow-button')?.click();
           const decisions = bridge.steps.filter(step => step.branchDecision);
           if(decisions.length !== (testCase.decisionCount ?? 1)) failures.push('判定STEP数が違います');
@@ -4750,9 +4773,10 @@
               if(!doc.querySelector('.flow-detail p')?.textContent.includes(testCase.source)) failures.push('説明がmetadataを使用していません');
             }
           }
-          return {testCase:{name:`L-COND1.1 ${testCase.name}`}, result:{passed:failures.length === 0, failures,
-            actual:{output:'説明とDecision Cardを確認', warningCount:0}}};
-        });
+          results.push({testCase:{name:`L-COND1.1 ${testCase.name}`}, result:{passed:failures.length === 0, failures,
+            actual:{output:'説明とDecision Cardを確認', warningCount:0}}});
+        }
+        return results;
       }catch(error){
         return cases.map(testCase => ({testCase:{name:`L-COND1.1 ${testCase.name}`},
           result:{passed:false, failures:[String(error)], actual:{output:'', warningCount:0}}}));
@@ -4762,14 +4786,11 @@
     }
 
     async function checkScanfUiCases(){
-      const frame = document.createElement('iframe');
-      frame.src = 'index.html';
-      frame.hidden = true;
-      document.body.append(frame);
+      const frame = createUiTestFrame();
       const results = [];
-      const record = (name, check) => {
+      const record = async (name, check) => {
         const failures = [];
-        try{ check(message => failures.push(message)); }
+        try{ await check(message => failures.push(message)); }
         catch(error){ failures.push(String(error)); }
         results.push({testCase:{name:`L-IO1 UI ${name}`},
           result:{passed:failures.length === 0, failures, actual:{output:'製品画面の状態を確認',warningCount:0}}});
@@ -4786,15 +4807,17 @@
         const accordion = doc.getElementById('scanf-accordion');
         const toggle = doc.getElementById('scanf-accordion-toggle');
         const body = doc.getElementById('scanf-accordion-body');
-        const run = (statements, value) => {
+        const run = async (statements, value) => {
           editor.setValue(makeMainCode(`    ${statements.split('\n').join('\n    ')}\n    return 0;`));
           input.value = value;
           input.dispatchEvent(new ui.Event('input', {bubbles:true}));
           doc.getElementById('visualize').click();
-          return ui.cVisualizerLiteResult;
+          const result = ui.cVisualizerLiteResult;
+          if(!result.inputRequired && !result.hasWarnings) await waitForUiResult(ui);
+          return result;
         };
 
-        record('初期閉鎖と単一textarea', fail => {
+        await record('初期閉鎖と単一textarea', async fail => {
           if(doc.querySelectorAll('#scanfInput').length !== 1) fail('scanfInputが重複しています');
           if(input.closest('.engine-sandbox')) fail('入力欄が非表示sandboxに残っています');
           if(toggle.tagName !== 'BUTTON' || toggle.getAttribute('aria-expanded') !== 'false' ||
@@ -4805,34 +4828,38 @@
             !input.placeholder.includes('%cでは空白も1文字')) fail('入力欄の高さ・名前・説明が違います');
           if(doc.querySelector('.scanf-accordion-inner label, .scanf-accordion-inner p')) fail('枠外の説明が残っています');
         });
-        record('手動開閉', fail => {
+        await record('手動開閉', async fail => {
           toggle.click();
           if(toggle.getAttribute('aria-expanded') !== 'true' || body.hasAttribute('inert')) fail('手動で開きません');
           toggle.click();
           if(toggle.getAttribute('aria-expanded') !== 'false' || !body.hasAttribute('inert')) fail('手動で閉じません');
         });
-        record('展開とreduced motionのCSS', fail => {
+        await record('展開とreduced motionのCSS', async fail => {
           const rules = [...doc.styleSheets].flatMap(sheet => [...sheet.cssRules]);
           const css = rules.map(rule => rule.cssText).join('\n');
           if(!css.includes('grid-template-rows: 0fr') || !css.includes('grid-template-rows: 1fr') ||
             !css.includes('250ms') || !css.includes('scanf-prompt')) fail('展開または一度だけの発光CSSがありません');
-          const reduced = rules.filter(rule => rule.conditionText === '(prefers-reduced-motion: reduce)')
-            .map(rule => rule.cssText).join('\n');
-          if(!reduced.includes('.scanf-accordion-body') || !reduced.includes('transition: none') ||
-            !reduced.includes('.scanf-accordion.is-prompted') || !reduced.includes('animation: none')){
+          // CSSOMではanimation:noneが展開されるため、宣言の意味を検査します。
+          const reducedRules = rules.filter(rule => rule.conditionText === '(prefers-reduced-motion: reduce)')
+            .flatMap(rule => [...rule.cssRules]);
+          const noTransition = reducedRules.some(rule => rule.selectorText?.includes('.scanf-accordion-body') &&
+            rule.style.getPropertyValue('transition-property') === 'none');
+          const noAnimation = reducedRules.some(rule => rule.selectorText?.includes('.scanf-accordion.is-prompted') &&
+            rule.style.getPropertyValue('animation-name') === 'none');
+          if(!noTransition || !noAnimation){
             fail('動きを減らす設定がINPUTへ適用されていません');
           }
         });
-        record('scanfなしの通常RUN', fail => {
-          const bridge = run('int x = 3;\nprintf("%d", x);', '');
+        await record('scanfなしの通常RUN', async fail => {
+          const bridge = await run('int x = 3;\nprintf("%d", x);', '');
           if(bridge.inputRequired || !doc.querySelector('.result-state')) fail('scanfなしで通常のRESULTへ進みません');
           if(accordion.classList.contains('is-open')) fail('scanfなしでINPUTが開きました');
         });
 
         const floatBody = 'float temperature;\nscanf("%f", &temperature);\nif(temperature >= 37.5f){\n    printf("FEVER\\n");\n}';
-        record('入力不足WAITING・自動展開・focus', fail => {
+        await record('入力不足WAITING・自動展開・focus', async fail => {
           const before = ui.eval('historyEntries.length');
-          const bridge = run(floatBody, '');
+          const bridge = await run(floatBody, '');
           if(!bridge.inputRequired || bridge.inputRequest?.specifier !== '%f' ||
             bridge.inputRequest?.target !== 'temperature') fail('structured inputRequestが違います');
           if(!doc.querySelector('.waiting-state h3')?.textContent.includes('WAITING FOR INPUT')) fail('WAITINGが表示されません');
@@ -4843,20 +4870,21 @@
           if(doc.activeElement !== input) fail('入力欄へfocusしません');
           if(ui.eval('historyEntries.length') !== before || ui.eval('errorLines.size') !== 0) fail('WAITINGを履歴または赤いエラーへ流しました');
         });
-        record('開いたままのWAITINGは再展開しない', fail => {
+        await record('開いたままのWAITINGは再展開しない', async fail => {
           accordion.classList.remove('is-prompted');
           doc.getElementById('visualize').click();
           if(accordion.classList.contains('is-prompted') || toggle.getAttribute('aria-expanded') !== 'true') fail('再RUNで不要な開閉アニメーションが発生しました');
         });
-        record('不正入力はERRORでありWAITINGではない', fail => {
+        await record('不正入力はERRORでありWAITINGではない', async fail => {
           input.value = 'abc';
           doc.getElementById('visualize').click();
           if(ui.cVisualizerLiteResult.inputRequired || !doc.querySelector('.failure-state') ||
             doc.querySelector('.waiting-state')) fail('不正入力がWAITINGになりました');
         });
-        record('float再RUN・RESULT・入力保持・履歴v1', fail => {
+        await record('float再RUN・RESULT・入力保持・履歴v1', async fail => {
           input.value = '38.0';
           doc.getElementById('visualize').click();
+          await waitForUiResult(ui);
           if(ui.cVisualizerLiteResult.inputRequired || ui.cVisualizerLiteResult.output !== 'FEVER\n' ||
             !doc.querySelector('.result-state')) fail('先頭からの再RUNが完成しません');
           if(input.value !== '38.0' || toggle.getAttribute('aria-expanded') !== 'true') fail('RUN成功後に入力値または開いた状態を失いました');
@@ -4865,7 +4893,7 @@
           if(entry?.kind !== 'result' || !entry.variables.some(pair => pair[0] === 'temperature' && pair[1] === '38') ||
             Object.hasOwn(entry, 'scanfInput')) fail('History v1の表示値またはschemaが違います');
         });
-        record('scanf FLOWの目的・INPUT・変数箱', fail => {
+        await record('scanf FLOWの目的・INPUT・変数箱', async fail => {
           const index = ui.cVisualizerLiteResult.steps.findIndex(step => step.scanfInput);
           ui.eval(`activeStep = ${index}; renderStep()`);
           if(doc.querySelector('.flow-detail p')?.textContent.includes('38.0') ||
@@ -4878,14 +4906,14 @@
           doc.getElementById('step-prev').click();
           if(!doc.querySelector('.scanf-step-input')) fail('前のscanf STEPへ戻れません');
         });
-        record('INPUT編集で古い結果と行ジャンプを無効化', fail => {
+        await record('INPUT編集で古い結果と行ジャンプを無効化', async fail => {
           input.value = '36.8';
           input.dispatchEvent(new ui.Event('input', {bubbles:true}));
           if(ui.eval('hasCurrentResult()') || ui.eval('jumpableLines.size') !== 0 ||
             doc.querySelector('.result-state') || doc.querySelector('.scanf-step-input')) fail('旧RESULTまたはFLOWが残っています');
         });
-        record('先入れcharは1回のRUNで成功', fail => {
-          const bridge = run("char answer;\nscanf(\"%c\", &answer);\nif(answer == 'Y'){\n    printf(\"YES\\n\");\n}", 'Y');
+        await record('先入れcharは1回のRUNで成功', async fail => {
+          const bridge = await run("char answer;\nscanf(\"%c\", &answer);\nif(answer == 'Y'){\n    printf(\"YES\\n\");\n}", 'Y');
           if(bridge.inputRequired || bridge.output !== 'YES\n' ||
             !doc.querySelector('.result-state')?.textContent.includes("answer = 'Y' (89)")) fail('char入力からRESULTへ進みません');
           const index = bridge.steps.findIndex(step => step.scanfInput);
@@ -4893,31 +4921,32 @@
           if(!doc.querySelector('.scanf-step-input')?.textContent.includes("'Y' (89)") ||
             !doc.querySelector('.scalar-variable-history')?.textContent.includes("— → 'Y' (89)")) fail('char INPUTと箱の表示が違います');
         });
-        record('半角スペース入力を見える形で表示', fail => {
-          const bridge = run('char c;\nscanf("%c", &c);', ' ');
+        await record('半角スペース入力を見える形で表示', async fail => {
+          const bridge = await run('char c;\nscanf("%c", &c);', ' ');
           const index = bridge.steps.findIndex(step => step.scanfInput);
           ui.eval(`activeStep = ${index}; renderStep()`);
           if(!doc.querySelector('.scanf-step-input')?.textContent.includes("' ' (32)") ||
             !doc.querySelector('.scalar-variable-history')?.textContent.includes("' ' (32)")) fail('空白入力が不可視になりました');
         });
-        record('4型入力の途中不足から全入力で成功', fail => {
+        await record('4型入力の途中不足から全入力で成功', async fail => {
           const mixed = 'int n;\nchar c;\nfloat f;\ndouble d;\nscanf("%d", &n);\nscanf("%c", &c);\nscanf("%f", &f);\nscanf("%lf", &d);';
-          const waiting = run(mixed, '10');
+          const waiting = await run(mixed, '10');
           if(!waiting.inputRequired || waiting.inputRequest?.ordinal !== 2 ||
             doc.querySelector('.result-state')) fail('2番目のscanfで正しく待機しません');
           input.value = '10\nA\n1.5\n2.25';
           doc.getElementById('visualize').click();
+          await waitForUiResult(ui);
           const steps = ui.cVisualizerLiteResult.steps.filter(step => step.scanfInput);
           if(steps.map(step => step.scanfInput.specifier).join(',') !== '%d,%c,%f,%lf' ||
             !doc.querySelector('.result-state')?.textContent.includes("c = 'A' (65)")) fail('再RUN後の4型消費順が違います');
         });
-        record('WAITING中のコード変更は待機解除', fail => {
-          run('int n;\nscanf("%d", &n);', '');
+        await record('WAITING中のコード変更は待機解除', async fail => {
+          await run('int n;\nscanf("%d", &n);', '');
           editor.setValue(makeMainCode('    int n = 1;\n    return 0;'));
           if(doc.querySelector('.waiting-state') || ui.eval('waitingCode') !== null ||
             !doc.querySelector('.idle-state')) fail('コード編集後にWAITINGが残っています');
         });
-        record('履歴復元は入力を戻さず自動RUNしない', fail => {
+        await record('履歴復元は入力を戻さず自動RUNしない', async fail => {
           doc.getElementById('history-open').click();
           const restore = doc.querySelector('.history-restore');
           if(!restore){ fail('履歴の復元操作がありません'); return; }
@@ -4925,7 +4954,7 @@
           restore.click();
           if(input.value !== '' || doc.querySelector('.result-state') || ui.eval('hasCurrentResult()')) fail('復元で古い入力や実行結果が残りました');
         });
-        record('Light・CodeMirror textarea・SECRET CODE', fail => {
+        await record('Light・CodeMirror textarea・SECRET CODE', async fail => {
           doc.getElementById('editor-light-toggle').click();
           if(doc.getElementById('editor-light-toggle').getAttribute('aria-checked') !== 'true' ||
             editor.getOption('inputStyle') !== 'textarea') fail('LightまたはAndroid入力方式が退行しました');
