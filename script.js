@@ -1440,16 +1440,23 @@ function isSimpleIntegerLiteral(expr){
   return /^[-+]?\d+$/.test(String(expr).trim());
 }
 
+// 学習用説明ではCの型名を意味で示し、内部の型情報は変更しません。
+function describeLearningType(type){
+  const labels = { int:'整数型', float:'実数型', double:'実数型', char:'文字型' };
+  return labels[type] || `${type}型`;
+}
+
 function makeInitialValueExplanation(name, expr, result, type = 'int', assignedValue = result.value){
   if(type !== 'int'){
     const value = displayScalarValue(assignedValue, type);
+    const learningType = describeLearningType(type);
     const operation = type === 'char' && /^'(?:\\.|[^'\\])'$/.test(expr.trim())
       ? `<code>${escapeHtml(expr)}</code> に対応するコード値を読み取り、`
       : /^[+-]?(?:\d+\.?\d*|\.\d+)[fF]?$/.test(expr.trim())
         ? '' : `<code>${escapeHtml(expr)}</code> を計算し、`;
     return {
-      analysis:`${type}型の変数 <code>${name}</code> を作り、${operation}<code>${escapeHtml(value)}</code> を代入しました。`,
-      step:`${name} という${type}型の箱を作り、${escapeHtml(value)} を代入しました。`
+      analysis:`${learningType}の変数 <code>${name}</code> を作り、${operation}<code>${escapeHtml(value)}</code> を代入しました。`,
+      step:`${name} という${learningType}の箱を作り、${escapeHtml(value)} を代入しました。`
     };
   }
   if(result.comparison){
@@ -1462,12 +1469,12 @@ function makeInitialValueExplanation(name, expr, result, type = 'int', assignedV
   if(isSimpleIntegerLiteral(expr)){
     return {
       analysis:`整数型の変数 <code>${name}</code> を作り、<code>${result.value}</code> を代入しました。`,
-      step:`${name} という整数の箱を作り、${result.value} を代入しました。`
+      step:`${name} という整数型の箱を作り、${result.value} を代入しました。`
     };
   }
   return {
     analysis:`整数型の変数 <code>${name}</code> を作り、<code>${escapeHtml(expr)}</code> を計算した結果 <code>${result.value}</code> を代入しました。`,
-    step:`${name} という整数の箱を作り、${escapeHtml(result.readable)} の結果である ${result.value} を代入しました。`
+    step:`${name} という整数型の箱を作り、${escapeHtml(result.readable)} の結果である ${result.value} を代入しました。`
   };
 }
 
@@ -2240,8 +2247,8 @@ function visualizeCode(){
       for(const item of pending){
         declareScalar(item.name, item.value, multipleDeclaration.type);
         if(item.expr === undefined){
-          addAnalysis(analysis, lineNo, `${multipleDeclaration.type}型の変数 <code>${item.name}</code> を作りました。まだ値は代入されていません。`);
-          addStep(lineNo, `${item.name} という${multipleDeclaration.type}型の箱を作りました。中身はまだ入っていません。`);
+          addAnalysis(analysis, lineNo, `${describeLearningType(multipleDeclaration.type)}の変数 <code>${item.name}</code> を作りました。まだ値は代入されていません。`);
+          addStep(lineNo, `${item.name} という${describeLearningType(multipleDeclaration.type)}の箱を作りました。中身はまだ入っていません。`);
         }else{
           const explanation = makeInitialValueExplanation(item.name, item.expr, item.result, multipleDeclaration.type, item.value);
           addAnalysis(analysis, lineNo, explanation.analysis);
@@ -2272,8 +2279,9 @@ function visualizeCode(){
       }
       if(expr === undefined){
         declareScalar(name, UNINITIALIZED, declarationType);
-        const description = declarationType === 'int' ? '整数型の変数' : `${declarationType}型の変数`;
-        const box = declarationType === 'int' ? '整数の箱' : `${declarationType}型の箱`;
+        const learningType = describeLearningType(declarationType);
+        const description = `${learningType}の変数`;
+        const box = `${learningType}の箱`;
         addAnalysis(analysis, lineNo, `${description} <code>${name}</code> を作りました。まだ値は代入されていません。`);
         addStep(lineNo, `${name} という${box}を作りました。中身はまだ入っていません。`);
         return;
