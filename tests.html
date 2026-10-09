@@ -3969,7 +3969,7 @@
     rejectedTypedCase('char配列拒否', 'char a[2];', ['a =']);
     rejectedTypedCase('int配列へのfloat代入は未対応', 'int a[1] = {0};\nfloat f = 1.5f;\na[0] = f;', [],
       {arrays:[{name:'a', values:['0']}]});
-    rejectedTypedCase('typed printf未移植', 'float x = 1.5f;\nprintf("%d", x);', [],
+    rejectedTypedCase('printfで%dへfloatを渡す型不一致', 'float x = 1.5f;\nprintf("%d", x);', [],
       {output:'出力はまだありません。'});
     typedScalarTests.push({
       name:'L-TYPE1 float内部値はMath.fround',
@@ -3978,6 +3978,46 @@
         expression:{source:'0.1f', value:Math.fround(0.1), type:'float'}}
     });
     testCases.push(...typedScalarTests);
+
+
+    // Stage L-IO2：型付きprintf、型不一致時の安全停止、既存制御構造との共存。
+    const typedPrintfCases = [
+      { name:"授業再現 float加算", body:"float a = 10.7;\nfloat b = 3;\nfloat c = a + b;\nprintf(\"%f\\n\", c);", output:"13.700000", warnings:false },
+      { name:"floatとdouble混合書式", body:"float f = 1.5f;\ndouble d = 2.25;\nprintf(\"%f %lf\", f, d);", output:"1.500000 2.250000", warnings:false },
+      { name:"float 精度2桁", body:"float f = 3.5f;\nprintf(\"%.2f\", f);", output:"3.50", warnings:false },
+      { name:"double 精度0桁", body:"double d = 2.0;\nprintf(\"%.0lf\", d);", output:"2", warnings:false },
+      { name:"char %c", body:"char c = 'A';\nprintf(\"%c\", c);", output:"A", warnings:false },
+      { name:"charを%dで整数表示", body:"char c = 'A';\nprintf(\"%d\", c);", output:"65", warnings:false },
+      { name:"intを%cで文字表示", body:"int c = 66;\nprintf(\"%c\", c);", output:"B", warnings:false },
+      { name:"異なる3型を同時表示", body:"int a = 2;\nfloat b = 1.25f;\nchar c = 'X';\nprintf(\"%d|%.2f|%c\", a, b, c);", output:"2|1.25|X", warnings:false },
+      { name:"%dへfloatを渡すと拒否", body:"float f = 1.25f;\nprintf(\"%d\", f);", output:"出力はまだありません。", warnings:true },
+      { name:"%fへintを渡すと拒否", body:"int n = 3;\nprintf(\"%f\", n);", output:"出力はまだありません。", warnings:true },
+      { name:"表示桁数21は拒否", body:"float f = 1.5f;\nprintf(\"%.21f\", f);", output:"出力はまだありません。", warnings:true },
+      { name:"引数不足は出力しない", body:"int n = 3;\nprintf(\"%d %d\", n);", output:"出力はまだありません。", warnings:true },
+      { name:"不明な指定子は拒否", body:"int n = 3;\nprintf(\"%x\", n);", output:"出力はまだありません。", warnings:true },
+      { name:"%%未対応は維持", body:"printf(\"100%%\");", output:"出力はまだありません。", warnings:true },
+      { name:"scanf float後printf", body:"float t;\nscanf(\"%f\", &t);\nprintf(\"%.1f\", t);", input:"38.2", output:"38.2", warnings:false },
+      { name:"scanf double後printf", body:"double t;\nscanf(\"%lf\", &t);\nprintf(\"%f\", t);", input:"2.25", output:"2.250000", warnings:false },
+      { name:"scanf char後%c%d", body:"char t;\nscanf(\"%c\", &t);\nprintf(\"%c %d\", t, t);", input:"Y", output:"Y 89", warnings:false },
+      { name:"int配列要素%d維持", body:"int a[2] = {10, 20};\nprintf(\"%d\", a[1]);", output:"20", warnings:false },
+      { name:"if分岐内float printf", body:"float f = 1.5f;\nif(f > 1.0f){\n printf(\"%.1f\", f);\n}", output:"1.5", warnings:false },
+      { name:"for本体%d維持", body:"int i;\nfor(i=0;i<3;i++){\n printf(\"%d\",i);\n}", output:"012", warnings:false },
+      { name:"while本体%d維持", body:"int i=0;\nwhile(i<3){\n printf(\"%d\",i);\n i++;\n}", output:"012", warnings:false },
+      { name:"小数点精度上限20", body:"double d=0.5;\nprintf(\"%.20f\",d);", output:"0.50000000000000000000", warnings:false },
+      { name:"文字定数を%c", body:"printf(\"%c\", 'Z');", output:"Z", warnings:false },
+      { name:"比較結果%d維持", body:"float f=3.5f;\nprintf(\"%d\", f > 2.0f);", output:"1", warnings:false },
+      { name:"floatをscanfして%f出力", body:"float f;\nscanf(\"%f\", &f);\nprintf(\"%f\", f);", input:"0.1", output:"0.100000", warnings:false },
+      { name:"doubleを%.2lf出力", body:"double d=1.25;\nprintf(\"%.2lf\", d);", output:"1.25", warnings:false }
+    ];
+    testCases.push(...typedPrintfCases.map(test => ({
+      name:`L-IO2 ${test.name}`,
+      code:makeMainCode(`    ${test.body.split('\n').join('\n    ')}\n    return 0;`),
+      ...(test.input === undefined ? {} : {input:test.input}),
+      expect:{
+        output:test.output,
+        ...(test.warnings ? {warningMin:1} : {warningMax:0})
+      }
+    })));
 
     // Stage L-COND1：条件判定の値と進路を、文章ではなくLite STEPのmetadataで確認します。
     const conditionalTests = [];
