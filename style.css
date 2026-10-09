@@ -1340,7 +1340,7 @@ button:focus-visible,select:focus-visible {
 
 .result-value {
   max-width: 100%;
-  font: 700 clamp(48px,7vw,78px)/1.1 ui-monospace,Consolas,monospace;
+  font: 500 clamp(48px,7vw,78px)/1.1 ui-monospace,Consolas,monospace;
   overflow-wrap: anywhere;
   color: var(--accent-yellow)
 }
