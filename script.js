@@ -923,11 +923,21 @@ function bracesOutsideString(text){
 function findMainExecutionRange(lines){
   for(let startIndex = 0; startIndex < lines.length; startIndex++){
     const structuralCode = codeOutsideStringAndLineComment(lines[startIndex]).trim();
-    if(!/^int\s+main\s*\([^)]*\)\s*\{\s*$/.test(structuralCode)) continue;
+    const headerMatch = structuralCode.match(/^int\s+main\s*\([^)]*\)\s*(\{)?\s*$/);
+    if(!headerMatch) continue;
+
+    // コメントは呼び出し元で空白化済みです。宣言の次の実コードだけを確認し、
+    // 別の文や関数の波かっこをmainの開始として拾わないようにします。
+    let openIndex = startIndex;
+    if(!headerMatch[1]){
+      openIndex++;
+      while(openIndex < lines.length && lines[openIndex].trim() === '') openIndex++;
+      if(openIndex >= lines.length || lines[openIndex].trim() !== '{') continue;
+    }
 
     let depth = 0;
     let opened = false;
-    for(let endIndex = startIndex; endIndex < lines.length; endIndex++){
+    for(let endIndex = openIndex; endIndex < lines.length; endIndex++){
       for(const brace of bracesOutsideString(lines[endIndex])){
         if(brace === '{'){
           depth++;
@@ -4562,7 +4572,8 @@ function visualizeCode(){
     addHint(hints, null, 'main関数が見当たりません', '学習用の基本的なCプログラムでは、<code>int main(void)</code> などの開始地点を書くことが多いです。');
   }
 
-  if(!hasReturn && !hasReturnInMain){
+  const missingReturnZero = !hasReturn && !hasReturnInMain;
+  if(missingReturnZero){
     addHint(hints, null, 'return 0; が見当たりません', '学習用の基本形として、最後に <code>return 0;</code> を書く形も確認しておきましょう。');
   }
 
@@ -4694,6 +4705,7 @@ function visualizeCode(){
       name, scalarDisplay(name)
     ]),
     variableTypes:{ ...variableTypes },
+    learningHints:{ missingReturnZero },
     hasMain,
     hasWarnings,
     inputRequired,
