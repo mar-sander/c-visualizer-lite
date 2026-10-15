@@ -136,6 +136,7 @@ let currentSteps = [];
 let finalState = null;
 let resultCode = null;
 let resultScanfInput = null;
+let resultInputDirty = false;
 let waitingCode = null;
 let activeStep = -1;
 let currentCursorLine = -1;
@@ -532,7 +533,7 @@ function markJumpableLines(){
 }
 
 function hasCurrentResult(){
-  return finalState !== null && resultCode === editor.getValue() &&
+  return !resultInputDirty && finalState !== null && resultCode === editor.getValue() &&
     resultScanfInput === scanfInput.value;
 }
 
@@ -546,6 +547,7 @@ function invalidateResult(message = 'コードが変更されました。RUNで�
   finalState = null;
   resultCode = null;
   resultScanfInput = null;
+  resultInputDirty = false;
   waitingCode = null;
   activeStep = -1;
   showFinalSummary(null);
@@ -689,26 +691,66 @@ function renderStep(){
   $('feedback').textContent = '';
 }
 
-function showResultPage(){
-  if(!hasCurrentResult()) return;
+// STEPの到達済みsnapshotだけから表示を組み立てます。標準出力やSTEPは変更しません。
+function buildResultTranscript(result){
+  let transcript = '';
+  let previousOutput = '';
+  let afterInput = false;
+
+  function appendOutput(text){
+    if(!text) return;
+    // 入力後の表示補助改行は、printf自身の先頭改行があれば重ねません。
+    if(afterInput && !text.startsWith('\n')) transcript += '\n';
+    transcript += text;
+    afterInput = false;
+  }
+
+  for(const step of result.steps){
+    // 反復説明の省略マーカーにはsnapshotがないため、次の実STEPまで待ちます。
+    const output = step.outputAtStep ?? previousOutput;
+    appendOutput(output.slice(previousOutput.length));
+    previousOutput = output;
+    if(step.scanfInput){
+      if(afterInput) transcript += '\n';
+      const input = step.scanfInput;
+      // %cは引用符・文字コードの補足を付けず、消費した文字そのものを表示します。
+      transcript += input.specifier === '%c' ? input.rawInput : input.inputDisplay;
+      afterInput = true;
+    }
+  }
+  appendOutput(result.output.slice(previousOutput.length));
+  if(afterInput) transcript += '\n';
+  return transcript;
+}
+
+// 完了時と入力待ち時で、同じRESULTとVARIABLESの見た目を使います。
+function createResultState(state, displayOutput){
+  const result = element('div', 'result-state');
+  result.append(element('span', 'result-label', 'RESULT'));
+  result.append(element('output', 'result-value', displayOutput || '出力はまだありません'));
+  const variables = element('div', 'result-variables');
+  variables.append(element('span', 'result-variables-label', 'VARIABLES'));
+  const values = element('div', 'result-variable-values');
+  values.append(...state.variables.map(([name, value]) =>
+    element('span', 'result-variable', `${name} = ${value}`)
+  ));
+  if(!state.variables.length) values.textContent = '変数はありません';
+  variables.append(values);
+  result.append(variables);
+  return result;
+}
+
+function showResultPage(allowPrevious = false){
+  // 入力編集中は前回snapshotの描画だけを許可し、FLOWの有効性とは分けます。
+  if(!hasCurrentResult() &&
+     !(allowPrevious && finalState && resultCode === editor.getValue())) return;
   cancelResultReveal();
   const shouldReveal = resultRevealPending;
   resultRevealPending = false;
   activeStep = -1;
   showExecutionLine(null);
-  const result = element('div', 'result-state');
-  result.append(element('span', 'result-label', 'RESULT'));
-  const resultValue = element('output', 'result-value', finalState.output || '出力はまだありません');
-  result.append(resultValue);
-  const variables = element('div', 'result-variables');
-  variables.append(element('span', 'result-variables-label', 'VARIABLES'));
-  const values = element('div', 'result-variable-values');
-  values.append(...finalState.variables.map(([name, value]) =>
-    element('span', 'result-variable', `${name} = ${value}`)
-  ));
-  if(!finalState.variables.length) values.textContent = '変数はありません';
-  variables.append(values);
-  result.append(variables);
+  const result = createResultState(finalState, finalState.displayOutput);
+  const resultValue = result.querySelector('.result-value');
   if(finalState.learningHints?.missingReturnZero){
     const hint = element('aside', 'result-learning-hint');
     hint.setAttribute('role', 'note');
@@ -722,13 +764,18 @@ function showResultPage(){
   }
   const viewFlow = element('button', 'result-flow-button', '流れを見る →');
   viewFlow.type = 'button';
-  viewFlow.addEventListener('click', () => { activeStep = 0; renderStep(); });
+  viewFlow.disabled = !hasCurrentResult();
+  viewFlow.addEventListener('click', () => {
+    if(!hasCurrentResult()) return;
+    activeStep = 0;
+    renderStep();
+  });
   result.append(viewFlow);
   flow.replaceChildren(result);
   $('step-controls').hidden = true;
   outputCard.hidden = true;
   $('feedback').textContent = '';
-  if(shouldReveal) revealResult(resultValue, finalState.output);
+  if(shouldReveal) revealResult(resultValue, finalState.displayOutput);
 }
 
 function showFailure(result){
@@ -748,12 +795,15 @@ function showFailure(result){
   return warnings;
 }
 
-function showWaiting(request){
+function showWaiting(state){
+  const request = state.inputRequest;
+  const result = createResultState(state, buildResultTranscript(state));
   const box = element('div', 'waiting-state');
   box.append(element('h3', '', 'WAITING FOR INPUT'));
   box.append(element('p', '', `scanfで使用する値を入力して、もう一度RUNしてください。`));
   box.append(element('small', '', `${request.lineNo}行目 · ${request.specifier} · ${request.target}`));
-  flow.replaceChildren(box);
+  result.append(box);
+  flow.replaceChildren(result);
   $('step-controls').hidden = true;
   outputCard.hidden = true;
   $('feedback').textContent = '';
@@ -779,10 +829,12 @@ function runCode(){
   finalState = null;
   resultCode = null;
   resultScanfInput = null;
+  resultInputDirty = false;
   waitingCode = null;
   activeStep = -1;
   showExecutionLine(null);
   showFinalSummary(null);
+  setOutput('');
   const code = editor.getValue();
   $('codeInput').value = code;
   try{
@@ -791,7 +843,7 @@ function runCode(){
     if(result?.inputRequired && !result.hasWarnings){
       currentSteps = [];
       waitingCode = code;
-      showWaiting(result.inputRequest);
+      showWaiting(result);
       return;
     }
     if(!result || result.hasWarnings || !result.steps.length){
@@ -809,6 +861,7 @@ function runCode(){
       currentSteps = result.steps;
       finalState = {
         output:result.output,
+        displayOutput:buildResultTranscript(result),
         variables:result.variables,
         learningHints:{ ...result.learningHints }
       };
@@ -836,8 +889,29 @@ editor.on('change', () => {
   if($('sample-select').value) $('sample-select').value = '';
 });
 scanfInput.addEventListener('input', () => {
-  if(resultCode !== null || errorLines.size || pendingRunSuccess){
-    invalidateResult('入力値が変更されました。RUNで新しい結果を確認してください。');
+  const message = '入力値が変更されました。RUNで結果を更新してください。';
+  const hasPreviousDisplay = flow.querySelector('.result-state') !== null || finalState !== null;
+  if(hasPreviousDisplay){
+    // 表示は最後のRUN時点で固定し、入力を元に戻しても再RUNまでは無効です。
+    cancelResultReveal();
+    clearRunSuccessFeedback();
+    resultRevealPending = false;
+    resultInputDirty = true;
+    clearJumpableLines();
+    showExecutionLine(null);
+    // STEP閲覧中なら、前回RUNのRESULTへ戻してから操作を止めます。
+    if(activeStep >= 0) showResultPage(true);
+    currentSteps = [];
+    activeStep = -1;
+    const viewFlow = flow.querySelector('.result-flow-button');
+    if(viewFlow) viewFlow.disabled = true;
+    $('step-controls').hidden = true;
+    outputCard.hidden = true;
+    $('feedback').textContent = message;
+  }else if(resultCode !== null || errorLines.size || waitingCode !== null || pendingRunSuccess){
+    // まだ表示されていないSweepの結果やERRORには、従来の無効化を適用します。
+    invalidateResult(message);
+    $('feedback').textContent = message;
   }
 });
 editor.on('gutterClick', (_editor, line, gutter) => {
