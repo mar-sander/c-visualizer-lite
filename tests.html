@@ -5442,13 +5442,13 @@
           input.dispatchEvent(new ui.Event('input', {bubbles:true}));
           await new Promise(resolve => ui.setTimeout(resolve, 800));
           if(!doc.querySelector('.result-state .waiting-state') || visible() !== '円の半径？ 2\n円の高さ？ ' ||
-            doc.getElementById('feedback').textContent !== '入力値が変更されました。RUNで結果を更新してください。') fail('前回RESULTの保持または補助メッセージが違います');
+            doc.getElementById('feedback').textContent !== '入力値が変更されました。INPUTまたはRUNで結果を更新してください。') fail('前回RESULTの保持または補助メッセージが違います');
         });
         const editInput = value => {
           input.value = value;
           input.dispatchEvent(new ui.Event('input', {bubbles:true}));
         };
-        const dirtyMessage = '入力値が変更されました。RUNで結果を更新してください。';
+        const dirtyMessage = '入力値が変更されました。INPUTまたはRUNで結果を更新してください。';
         await record('FA1 待機RESULTとVARIABLESを編集前のまま保持', async fail => {
           const result = await run(cylinder, '2');
           const node = doc.querySelector('.result-state');
@@ -5548,6 +5548,213 @@
       return results;
     }
 
+    async function checkInputInjectionUiCases(){
+      const frame = createUiTestFrame();
+      const results = [];
+      const record = async (name, check) => {
+        const failures = [];
+        try{ await check(message => failures.push(message)); }
+        catch(error){ failures.push(String(error)); }
+        results.push({testCase:{name:`L-UI13 ${name}`}, result:{passed:failures.length === 0,
+          failures, actual:{output:'INPUT操作と表示状態を確認',warningCount:0}}});
+      };
+      try{
+        await new Promise((resolve, reject) => {
+          frame.addEventListener('load', resolve, {once:true});
+          frame.addEventListener('error', reject, {once:true});
+        });
+        const ui = frame.contentWindow;
+        const doc = ui.document;
+        const editor = ui.eval('editor');
+        const input = doc.getElementById('scanfInput');
+        const button = doc.getElementById('input-submit');
+        const runButton = doc.getElementById('visualize');
+        const accordion = doc.getElementById('scanf-accordion');
+        const editorFrame = doc.querySelector('.editor-frame');
+        const cylinder = makeMainCode('float r, h, pai = 3.14, taiseki;\nprintf("円の半径？ ");\nscanf("%f", &r);\nprintf("円の高さ？ ");\nscanf("%f", &h);\ntaiseki = r * r * h * pai;\nprintf("半径%f 高さ%f の円柱の体積は %fm^3\\n", r, h, taiseki);\nreturn 0;');
+        const complete = '円の半径？ 2\n円の高さ？ 3\n半径2.000000 高さ3.000000 の円柱の体積は 37.680000m^3\n';
+        const output = () => doc.querySelector('.result-value .result-reveal-final')?.textContent ?? doc.querySelector('.result-value')?.textContent;
+        const edit = value => { input.value = value; input.dispatchEvent(new ui.Event('input', {bubbles:true})); };
+        const setCode = (value = '', code = cylinder) => {
+          editor.setValue(code);
+          edit(value);
+          ui.setScanfAccordionOpen(true);
+        };
+        const wait = async () => {
+          const deadline = Date.now() + 5000;
+          while(Date.now() < deadline){
+            if(!ui.eval('pendingInputInjection || pendingRunSuccess')) return;
+            await new Promise(resolve => ui.setTimeout(resolve, 20));
+          }
+          throw new Error('演出が5秒以内に完了しません');
+        };
+        const delay = ms => new Promise(resolve => ui.setTimeout(resolve, ms));
+        const reduced = ui.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        // 画面外に置くテストiframeでも、座標計算の各分岐を再現できるようにします。
+        const originalButtonRect = button.getBoundingClientRect.bind(button);
+        const originalEditorRect = editorFrame.getBoundingClientRect.bind(editorFrame);
+        const geometry = (offscreen = false) => {
+          button.getBoundingClientRect = () => ({left:80,right:780,top:430,bottom:478,width:700,height:48});
+          editorFrame.getBoundingClientRect = () => ({left:80,right:780,top:offscreen ? -600 : 50,bottom:offscreen ? -340 : 310,width:700,height:260});
+        };
+        await record('INPUT配置・サイズ・セマンティクス', async fail => {
+          if(!button || button.tagName !== 'BUTTON' || button.type !== 'button' || button.textContent !== 'INPUT' ||
+            input.nextElementSibling !== button || !button.closest('.scanf-accordion-inner') || !button.getAttribute('aria-label')) fail('ボタン配置または名前が違います');
+          const css = ui.getComputedStyle(button);
+          const rule = [...doc.styleSheets].flatMap(sheet => [...sheet.cssRules])
+            .find(rule => rule.selectorText === '.input-submit');
+          const touchAction = css.getPropertyValue('touch-action') || rule?.style.getPropertyValue('touch-action');
+          if(parseFloat(css.minHeight) < 44 || touchAction !== 'manipulation') fail('タッチ操作用の指定がありません');
+          if(doc.querySelectorAll('#input-submit').length !== 1) fail('INPUTボタンが重複しています');
+        });
+        await record('閉鎖中は操作不可・開閉で同じボタンを保持', async fail => {
+          ui.setScanfAccordionOpen(false);
+          const before = ui.cVisualizerLiteResult;
+          button.click();
+          if(ui.cVisualizerLiteResult !== before || !doc.getElementById('scanf-accordion-body').hasAttribute('inert') ||
+            doc.getElementById('scanf-accordion-body').getAttribute('aria-hidden') !== 'true') fail('閉鎖中にINPUTが動きました');
+          ui.setScanfAccordionOpen(true);
+          if(doc.getElementById('input-submit') !== button || doc.getElementById('scanf-accordion-body').hasAttribute('inert')) fail('開閉の状態が違います');
+        });
+        await record('RUNは従来のSweepのみ', async fail => {
+          setCode('2\n3');
+          runButton.click();
+          if(!editorFrame.classList.contains('is-run-success') || ui.eval('pendingInputInjection') || doc.querySelector('.input-transfer, .input-injection-surface')) fail('RUN演出が変わりました');
+          await wait();
+          if(output() !== complete) fail('RUNの全入力結果が変わりました');
+        });
+        await record('入力なしINPUTは成功注入せず最初の待機', async fail => {
+          setCode(); button.click();
+          if(ui.eval('pendingInputInjection') || editorFrame.classList.contains('is-input-injecting') || !doc.querySelector('.waiting-state')) fail('未読取を成功扱いにしました');
+          if(output() !== '円の半径？ ' || !doc.querySelector('.waiting-state p').textContent.includes('INPUTを押してください。RUNでも実行できます。')) fail('待機出力または新案内が違います');
+        });
+        await record('有効な1入力はINPUT演出だけを再生', async fail => {
+          geometry(); edit('2'); button.click();
+          if(!ui.eval('pendingInputInjection') || !button.disabled || button.getAttribute('aria-busy') !== 'true' ||
+            !button.classList.contains('is-input-igniting') || !editorFrame.classList.contains('is-input-injecting')) fail('INPUT演出が開始されません');
+          if(editorFrame.classList.contains('is-run-success') || ui.eval('pendingRunSuccess')) fail('RUN演出が混入しました');
+          if(!reduced && (!doc.querySelector('.input-transfer') || doc.querySelectorAll('.input-injection-ray').length !== 4)) fail('転送光または四辺がありません');
+          if(reduced && (doc.querySelector('.input-transfer, .input-injection-surface') || !editorFrame.classList.contains('is-input-reduced'))) fail('reduced-motionで移動を開始しました');
+          await wait();
+          if(output() !== '円の半径？ 2\n円の高さ？ ' || !doc.querySelector('.waiting-state') || button.disabled || button.hasAttribute('aria-busy')) fail('次の待機または演出終了状態が違います');
+        });
+        await record('部分入力は履歴なし・次の入力を待つ', async fail => {
+          const count = ui.eval('historyEntries.length');
+          button.click(); await wait();
+          if(ui.eval('historyEntries.length') !== count || ui.cVisualizerLiteResult.inputRequest.target !== 'h' || ui.eval('hasCurrentResult()')) fail('部分入力を完了扱いにしました');
+        });
+        await record('編集時はRESULTとVARIABLES保持・新しい通知', async fail => {
+          const before = output(); const variables = doc.querySelector('.result-variables').textContent;
+          edit('2\n3');
+          if(output() !== before || doc.querySelector('.result-variables').textContent !== variables ||
+            doc.getElementById('feedback').textContent !== '入力値が変更されました。INPUTまたはRUNで結果を更新してください。') fail('表示保持または案内が違います');
+        });
+        await record('INPUTで全入力完了・正式出力とエコー分離', async fail => {
+          button.click(); await wait();
+          if(output() !== complete || !ui.eval('hasCurrentResult()') || doc.querySelector('.waiting-state') || doc.getElementById('feedback').textContent) fail('最終RESULTへ進みません');
+          if(ui.cVisualizerLiteResult.output !== '円の半径？ 円の高さ？ 半径2.000000 高さ3.000000 の円柱の体積は 37.680000m^3\n') fail('標準出力にエコーが混入しました');
+          const entry = ui.eval('historyEntries[0]');
+          if(entry.kind !== 'result' || entry.output !== ui.cVisualizerLiteResult.output || 'displayOutput' in entry || 'inputAnimation' in entry) fail('履歴schemaが変わりました');
+        });
+        await record('全入力先入れINPUTも同じ結果', async fail => {
+          setCode('2\n3'); button.click(); await wait();
+          if(output() !== complete) fail('先入れINPUTの結果が違います');
+        });
+        await record('不正入力はERROR・注入成功演出なし', async fail => {
+          setCode('abc'); button.click();
+          if(!doc.querySelector('.failure-state') || !doc.getElementById('run-error-flash').classList.contains('is-visible') ||
+            ui.eval('pendingInputInjection || pendingRunSuccess') || editorFrame.classList.contains('is-input-injecting')) fail('不正入力の扱いが違います');
+        });
+        await record('2個目が不正でも注入成功演出なし', async fail => {
+          setCode('2\nabc'); button.click();
+          if(!ui.cVisualizerLiteResult.hasWarnings || !doc.querySelector('.failure-state') || ui.eval('pendingInputInjection')) fail('途中まで有効な不正入力を成功扱いにしました');
+        });
+        await record('連打は1つの解析と演出だけ', async fail => {
+          setCode('2\n3'); button.click();
+          const result = ui.cVisualizerLiteResult; const pending = ui.eval('pendingInputInjection');
+          button.click(); button.dispatchEvent(new ui.Event('click'));
+          if(ui.cVisualizerLiteResult !== result || ui.eval('pendingInputInjection') !== pending) fail('連打で再解析または演出が競合しました');
+          await wait(); if(output() !== complete) fail('連打後の結果が違います');
+        });
+        await record('INPUT中のRUNは注入を破棄してSweepへ', async fail => {
+          setCode('2\n3'); button.click(); runButton.click();
+          if(ui.eval('pendingInputInjection') || doc.querySelector('.input-transfer, .input-injection-surface') ||
+            !editorFrame.classList.contains('is-run-success')) fail('INPUT演出を破棄していません');
+          await wait(); await delay(250);
+          if(output() !== complete || button.disabled) fail('古いINPUTがRUN結果に干渉しました');
+        });
+        await record('Sweep中のINPUTはRUNを破棄して注入へ', async fail => {
+          setCode('2\n3'); runButton.click(); button.click();
+          if(ui.eval('pendingRunSuccess') || editorFrame.classList.contains('is-run-success') || !ui.eval('pendingInputInjection')) fail('RUN演出が重複しました');
+          await wait(); if(output() !== complete) fail('切替後の結果が違います');
+        });
+        await record('INPUT中の入力編集は旧結果を反映しない', async fail => {
+          setCode('2\n3'); button.click(); edit('4\n5');
+          await delay(1000);
+          if(ui.eval('pendingInputInjection') || doc.querySelector('.result-state') || button.disabled || doc.querySelector('.input-transfer, .input-injection-surface')) fail('編集後に旧結果や演出が残りました');
+        });
+        await record('INPUT中のCODE編集は旧結果を反映しない', async fail => {
+          setCode('2\n3'); button.click(); editor.setValue(makeMainCode('printf("NEW");\nreturn 0;'));
+          await delay(1000);
+          if(ui.eval('pendingInputInjection') || doc.querySelector('.result-state') || button.disabled) fail('CODE編集後に旧結果が復活しました');
+        });
+        await record('中断後の新INPUTへ旧timerが干渉しない', async fail => {
+          setCode('2\n3'); button.click(); edit('2'); button.click(); await wait(); await delay(500);
+          if(output() !== '円の半径？ 2\n円の高さ？ ' || !doc.querySelector('.waiting-state')) fail('新しい待機を古い完了が上書きしました');
+        });
+        await record('スクロール・リサイズで転送光だけ除去', async fail => {
+          setCode('2\n3'); button.click();
+          ui.dispatchEvent(new ui.Event('scroll')); ui.dispatchEvent(new ui.Event('resize'));
+          if(doc.querySelector('.input-transfer') || !ui.eval('pendingInputInjection')) fail('座標変更後の転送または解析の扱いが違います');
+          await wait(); if(output() !== complete) fail('転送省略後に結果へ進みません');
+        });
+        await record('エディタ画面外は転送なしの短い演出', async fail => {
+          geometry(true); setCode('2\n3'); button.click();
+          if(doc.querySelector('.input-transfer') || !ui.eval('pendingInputInjection')) fail('画面外へ転送しました');
+          if(!reduced && editorFrame.style.getPropertyValue('--input-injection-delay') !== '60ms') fail('短い演出へ切り替わりません');
+          await wait(); if(output() !== complete) fail('画面外で結果へ進みません');
+        });
+        await record('Light表示とINPUTからのFLOW・STEP往復', async fail => {
+          geometry(); doc.getElementById('editor-light-toggle').click();
+          setCode('2\n3'); button.click();
+          if(!editorFrame.classList.contains('is-light')) fail('Light設定を失いました');
+          await wait(); doc.querySelector('.result-flow-button').click();
+          if(!doc.querySelector('.step-top')) fail('FLOWへ進みません');
+          const length = ui.cVisualizerLiteResult.steps.length;
+          for(let i = 0; i < length; i++) doc.getElementById('step-next').click();
+          if(output() !== complete || ui.eval('resultReveal') !== null) fail('RESULTへ戻ると値やRevealが変化しました');
+        });
+        await record('完了後の編集・削除はINPUT再実行まで操作無効', async fail => {
+          const previous = output(); edit('');
+          if(output() !== previous || !doc.querySelector('.result-flow-button').disabled || ui.eval('hasCurrentResult()')) fail('入力削除で前回表示を失うか操作が有効です');
+          button.click();
+          if(output() !== '円の半径？ ' || !doc.querySelector('.waiting-state')) fail('入力削除後のINPUT待機が違います');
+        });
+        await record('注入中にアコーディオンを閉じても完了・後片付けする', async fail => {
+          setCode('2\n3'); button.click(); ui.setScanfAccordionOpen(false);
+          await wait();
+          if(output() !== complete || button.disabled || button.hasAttribute('aria-busy') ||
+            doc.querySelector('.input-transfer, .input-injection-surface') || editorFrame.classList.contains('is-input-injecting')) fail('閉鎖中の完了または後片付けが違います');
+          const result = ui.cVisualizerLiteResult; button.click();
+          if(ui.cVisualizerLiteResult !== result) fail('閉鎖中に再実行しました');
+        });
+        await record('4型の入力は共通エンジンで解釈', async fail => {
+          setCode('2\n1.5\n2.25\nA', makeMainCode('int n;\nfloat f;\ndouble d;\nchar c;\nscanf("%d", &n);\nscanf("%f", &f);\nscanf("%lf", &d);\nscanf("%c", &c);\nprintf("%d %.1f %.2f %c", n, f, d, c);\nreturn 0;'));
+          button.click(); await wait();
+          if(ui.cVisualizerLiteResult.output !== '2 1.5 2.25 A' || output() !== '2\n1.5\n2.25\nA\n2 1.5 2.25 A') fail('入力型または表示順が違います');
+        });
+        await record('scanfなしは注入演出なし・通常出力維持', async fail => {
+          setCode('', makeMainCode('printf("PLAIN");\nreturn 0;')); button.click();
+          if(ui.eval('pendingInputInjection || pendingRunSuccess') || output() !== 'PLAIN') fail('データなしを注入扱いにしました');
+        });
+        button.getBoundingClientRect = originalButtonRect;
+        editorFrame.getBoundingClientRect = originalEditorRect;
+      }catch(error){
+        results.push({testCase:{name:'L-UI13 初期化'},result:{passed:false,failures:[String(error)],actual:{output:'',warningCount:0}}});
+      }finally{ frame.remove(); }
+      return results;
+    }
+
     async function runAllTests(){
       const results = testCases.map(testCase => ({ testCase, result:checkCase(testCase) }));
       results.push(...await checkDecisionUiCases());
@@ -5555,6 +5762,7 @@
       results.push(...await checkMainCompatibilityUiCases());
       results.push(...await checkReturnHintUiCases());
       results.push(...await checkProgressiveResultUiCases());
+      results.push(...await checkInputInjectionUiCases());
       const passed = results.filter(item => item.result.passed).length;
       const failed = results.length - passed;
 

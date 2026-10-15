@@ -2808,3 +2808,150 @@ body {
     opacity: 1;
   }
 }
+
+/* Stage L-UI13: INPUT Injection。RUNの面・寸法・Sweepとは独立した表示です。 */
+.input-submit {
+  display: block;
+  width: 100%;
+  min-height: 48px;
+  margin: 0 0 14px;
+  padding: 11px 16px;
+  border: 1px solid var(--accent-yellow);
+  border-radius: 8px;
+  background: var(--surface-inset);
+  color: var(--accent-yellow);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: .14em;
+  touch-action: manipulation;
+  cursor: pointer;
+}
+
+.input-submit:hover:not(:disabled) {
+  background: rgb(255 230 0 / 8%);
+}
+
+.input-submit:focus-visible {
+  outline: 2px solid var(--accent-yellow);
+  outline-offset: 2px;
+}
+
+.input-submit:disabled {
+  cursor: wait;
+}
+
+.input-submit.is-input-igniting {
+  animation: input-ignition 300ms ease-out both;
+}
+
+@keyframes input-ignition {
+  0%, 100% { box-shadow: none; }
+  25% { background: rgb(255 230 0 / 18%); box-shadow: 0 0 16px rgb(255 230 0 / 35%); }
+}
+
+.input-transfer {
+  position: fixed;
+  z-index: 30;
+  width: 26px;
+  height: 2px;
+  border-radius: 2px;
+  pointer-events: none;
+  opacity: 0;
+  background: linear-gradient(90deg, transparent, #ffe600 72%, #fff9b8);
+  box-shadow: 0 0 7px rgb(255 230 0 / 55%);
+  animation: input-transfer 300ms cubic-bezier(.35,.05,.4,1) 100ms both;
+}
+
+@keyframes input-transfer {
+  0% { opacity: 0; transform: translate(-50%, -50%) rotate(var(--input-angle)); }
+  15%, 80% { opacity: 1; }
+  100% { opacity: 0; transform: translate(calc(var(--input-dx) - 50%), calc(var(--input-dy) - 50%)) rotate(var(--input-angle)); }
+}
+
+.editor-frame.is-input-injecting {
+  --input-light: #ffe600;
+  animation: input-frame 450ms ease-out var(--input-injection-delay) both;
+}
+
+.editor-frame.is-light.is-input-injecting {
+  --input-light: #ab7b00;
+}
+
+@keyframes input-frame {
+  0% { border-color: var(--run-frame-base-border); box-shadow: none; }
+  15% { border-color: var(--input-light); box-shadow: 0 0 0 1px rgb(255 230 0 / 35%), 0 0 15px rgb(255 230 0 / 30%); }
+  100% { border-color: var(--run-frame-base-border); box-shadow: none; }
+}
+
+.input-injection-surface {
+  position: absolute;
+  z-index: 9;
+  inset: 1px;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.input-injection-ray {
+  position: absolute;
+  display: block;
+  opacity: 0;
+  background: var(--input-light);
+  box-shadow: 0 0 5px rgb(255 230 0 / 32%);
+  animation-duration: 390ms;
+  animation-delay: calc(var(--input-injection-delay) + 60ms);
+  animation-timing-function: cubic-bezier(.2,.6,.4,1);
+  animation-fill-mode: both;
+}
+
+.input-injection-top, .input-injection-bottom {
+  left: 0;
+  width: 100%;
+  height: 1px;
+}
+
+.input-injection-left, .input-injection-right {
+  top: 0;
+  width: 1px;
+  height: 100%;
+}
+
+.input-injection-top { top: 0; animation-name: input-converge-top; }
+.input-injection-bottom { bottom: 0; animation-name: input-converge-bottom; }
+.input-injection-left { left: 0; animation-name: input-converge-left; }
+.input-injection-right { right: 0; animation-name: input-converge-right; }
+
+@keyframes input-converge-top {
+  0% { opacity: 0; transform: translateY(0) scaleX(1); }
+  15% { opacity: .48; }
+  100% { opacity: 0; transform: translateY(var(--input-half-height)) scaleX(.08); }
+}
+@keyframes input-converge-bottom {
+  0% { opacity: 0; transform: translateY(0) scaleX(1); }
+  15% { opacity: .48; }
+  100% { opacity: 0; transform: translateY(calc(-1 * var(--input-half-height))) scaleX(.08); }
+}
+@keyframes input-converge-left {
+  0% { opacity: 0; transform: translateX(0) scaleY(1); }
+  15% { opacity: .48; }
+  100% { opacity: 0; transform: translateX(var(--input-half-width)) scaleY(.08); }
+}
+@keyframes input-converge-right {
+  0% { opacity: 0; transform: translateX(0) scaleY(1); }
+  15% { opacity: .48; }
+  100% { opacity: 0; transform: translateX(calc(-1 * var(--input-half-width))) scaleY(.08); }
+}
+
+/* 設定の途中変更でも移動を即時停止します。短い静的通知だけを残します。 */
+@media (prefers-reduced-motion: reduce) {
+  .input-submit.is-input-igniting { animation: none; box-shadow: 0 0 10px rgb(255 230 0 / 24%); }
+  .editor-frame.is-input-injecting { animation: none; border-color: var(--input-light); box-shadow: 0 0 10px rgb(255 230 0 / 24%); }
+  .input-transfer, .input-injection-surface { display: none; }
+}
+
+.editor-frame.is-input-reduced {
+  animation: none;
+  border-color: var(--input-light);
+  box-shadow: 0 0 10px rgb(255 230 0 / 24%);
+}
