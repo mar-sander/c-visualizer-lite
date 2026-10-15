@@ -4294,6 +4294,108 @@
       {...noWarning, variables:["c = 'Y' (89)"], output:'YES',
         decisions:[{condition:"c == 'Y'",result:true,selected:'if',skipped:null}]});
 
+
+    // L-BUG3：mainの開き波かっこの配置と、return省略時の学習ヒントを保証します。
+    const bug3MissingReturn = 'return 0; が見当たりません';
+    const bug3Body = '    int n = 7 / 2;\n    n += 2;\n    printf("%d", n);';
+    function mainCompatibilityCase(name, code, expect){
+      testCases.push({name:`L-BUG3 ${name}`, code, expect});
+    }
+    for(const [name, header] of [
+      ['従来の同一行', 'int main(void){'],
+      ['次行の波かっこ', 'int main(void)\n{'],
+      ['空行を挟む', 'int main(void)\n\n\n{'],
+      ['行コメントを挟む', 'int main(void) // { 偽の開始\n// }\n{'],
+      ['複数行コメントを挟む', 'int main(void)\n/* {\n } return 0;\n*/\n{'],
+      ['宣言途中のコメント', 'int /* 関数 */ main(void) /* { */\n{ // }'],
+      ['引数なしmain', 'int main()\n{']
+    ]){
+      for(const explicitReturn of [true, false]){
+        const code = `${header}\n${bug3Body}${explicitReturn ? '\n    return 0;' : ''}\n}`;
+        const sourceLines = code.split('\n');
+        const lineOf = text => sourceLines.findIndex(line => line.trim() === text) + 1;
+        mainCompatibilityCase(`${name}・return${explicitReturn ? 'あり' : '省略'}`, code, {
+          output:'5', variables:['n = 5'], types:{n:'int'},
+          warningMax:explicitReturn ? 0 : 1,
+          hintsInclude:explicitReturn ? [] : [bug3MissingReturn],
+          hintsExclude:explicitReturn ? [bug3MissingReturn] : ['main関数が見当たりません'],
+          bridgeFlags:{hasMain:true, hasWarnings:false},
+          stepLineNos:[lineOf('int n = 7 / 2;'), lineOf('n += 2;'), lineOf('printf("%d", n);'),
+            ...(explicitReturn ? [lineOf('return 0;')] : [])],
+          stepsInOrder:['n という整数型の箱', 'n の中身を', '画面に「5」'],
+          analysisByLineIncludes:{[lineOf('n += 2;')]:['更新しました']}
+        });
+      }
+    }
+    for(const [name, comment] of [
+      ['行コメント', '// return 0;'],
+      ['ブロックコメント', '/* return 0; */']
+    ]) mainCompatibilityCase(`${name}中のreturnは実行しない`,
+      `int main(void)\n{\n    int n = 1;\n    ${comment}\n    n += 1;\n    printf("%d", n);\n}`, {
+        output:'2', variables:['n = 2'], hintsInclude:[bug3MissingReturn],
+        bridgeFlags:{hasMain:true, hasWarnings:false}, stepLineNos:[3,5,6],
+        stepsExclude:['プログラムを終了します']
+      });
+    for(const [name, code] of [
+      ['開始波かっこなし', 'int main(void)\nint n = 99;\nprintf("WRONG");\n}'],
+      ['別の文の後の波かっこ', 'int main(void)\nint n = 99;\n{\nprintf("WRONG");\n}'],
+      ['プロトタイプと別関数', 'int main(void);\nint helper(void){\nprintf("WRONG");\nreturn 0;\n}'],
+      ['コメントの開始波かっこだけ', 'int main(void)\n/* { */\n// {\nprintf("WRONG");\n}'],
+      ['文字列の開始波かっこだけ', 'int main(void)\n"{"\nprintf("WRONG");\n}'],
+      ['閉じ波かっこなし', 'int main(void)\n{\nint n = 99;\nprintf("WRONG");'],
+      ['コメント内のmainだけ', '/* int main(void){ */\nint n = 99;\nprintf("WRONG");\n/* } */']
+    ]) mainCompatibilityCase(name, code, {
+      output:'出力はまだありません。', variablesExclude:['n ='],
+      bridgeFlags:{hasWarnings:true}, stepLineNos:[],
+      noStepsFor:['printf("WRONG")']
+    });
+    mainCompatibilityCase('前後の別関数を実行しない',
+      'int before(void){\nprintf("BEFORE");\nreturn 0;\n}\nint main(void)\n\n{\nint n = 5;\nprintf("%d", n);\n}\nint after(void){\nprintf("AFTER");\nreturn 0;\n}', {
+        output:'5', variables:['n = 5'], hintsInclude:[bug3MissingReturn],
+        bridgeFlags:{hasWarnings:false}, stepLineNos:[8,9],
+        noStepsFor:['printf("BEFORE")','printf("AFTER")']
+      });
+    mainCompatibilityCase('文字列とコメントの波かっこを無視',
+      'int main(void)\n/* { } */\n{\nprintf("} \\\" { \\\" }");\n/* }\n { } */\nint n = 4;\nprintf("%d", n);\nreturn 0;\n}\nprintf("WRONG");', {
+        output:'} " { " }4', variables:['n = 4'], warningMax:0,
+        bridgeFlags:{hasWarnings:false}, stepLineNos:[4,7,8,9],
+        noStepsFor:['printf("WRONG")']
+      });
+    for(const keyword of ['if', 'for', 'while']){
+      const header = {if:'if(1)', for:'for(n = 0; n < 1; n++)', while:'while(n < 1)'}[keyword];
+      mainCompatibilityCase(`${keyword}の次行波かっこは拡張しない`,
+        `int main(void)\n{\nint n = 0;\n${header}\n{\nprintf("WRONG");\n}\nprintf("AFTER");\nreturn 0;\n}`, {
+          output:keyword === 'if' ? 'AFTER' : '出力はまだありません。',
+          warningMin:1, noStepsFor:['printf("WRONG")'],
+          bridgeFlags:{hasWarnings:true}
+        });
+    }
+    mainCompatibilityCase('return省略でもscanf失敗後は停止',
+      'int main(void)\n{\nint n = 3;\nscanf("%d", &n);\nprintf("WRONG");\n}', {
+        variables:['n = 3'], output:'出力はまだありません。',
+        hintsInclude:[bug3MissingReturn, '整数として読み取れない'],
+        bridgeFlags:{hasWarnings:true}, noStepsFor:['printf("WRONG")']
+      });
+    testCases[testCases.length - 1].input = 'abc';
+
+
+    // L-BUG3 Final Adjustment 1：既存の解析判定を構造化データとして確認します。
+    for(const [name, body, expected] of [
+      ['省略', '', true],
+      ['明示', 'return 0;', false],
+      ['行コメントだけ', '// return 0;', true],
+      ['ブロックコメントだけ', '/*\nreturn 0;\n*/', true],
+      ['文字列だけ', 'printf("return 0;");', true],
+      ['未選択分岐に明示', 'if(0){\nreturn 0;\n}', false]
+    ]){
+      testCases.push({name:`L-BUG3 RESULT hint metadata ${name}`,
+        code:`int main(void)\n{\nint n = 3;\nprintf("%d", n);\n${body}\n}`,
+        expect:{missingReturnZero:expected, bridgeFlags:{hasWarnings:false}}});
+    }
+    testCases.push({name:'L-BUG3 RESULT hint metadata main外のreturnは数えない',
+      code:'int main(void)\n{\nprintf("OK");\n}\nint helper(void){\nreturn 0;\n}',
+      expect:{missingReturnZero:true, output:'OK', bridgeFlags:{hasWarnings:false}}});
+
     function checkCase(testCase){
       const codeInput = document.getElementById('codeInput');
       const scanfInput = document.getElementById('scanfInput');
@@ -4366,6 +4468,16 @@
 
       // Lite bridgeはUIと履歴へ渡す形式を保ったまま、型metadataを別tableに持ちます。
       const bridge = window.cVisualizerLiteResult;
+      if(expected.missingReturnZero !== undefined &&
+         bridge.learningHints?.missingReturnZero !== expected.missingReturnZero){
+        failures.push('構造化されたreturn省略ヒントの判定が違います');
+      }
+      for(const [key, value] of Object.entries(expected.bridgeFlags || {})){
+        if(bridge[key] !== value) failures.push(`bridge.${key}: 期待${value} / 実際${bridge[key]}`);
+      }
+      if(expected.stepLineNos && JSON.stringify(bridge.steps.map(step => step.lineNo)) !== JSON.stringify(expected.stepLineNos)){
+        failures.push(`STEP行番号: 期待${expected.stepLineNos} / 実際${bridge.steps.map(step => step.lineNo)}`);
+      }
       if(expected.waiting){
         if(bridge.inputRequired !== true || bridge.hasWarnings){
           failures.push('入力不足を警告ではなくWAITINGとして返していない');
@@ -4971,10 +5083,186 @@
       return results;
     }
 
+
+    // L-BUG3：製品のRUNからRESULT、FLOW、行ジャンプまで確認します。
+    async function checkMainCompatibilityUiCases(){
+      const frame = createUiTestFrame();
+      const results = [];
+      try{
+        await new Promise((resolve, reject) => {
+          frame.addEventListener('load', resolve, {once:true});
+          frame.addEventListener('error', () => reject(new Error('製品画面を読み込めません')), {once:true});
+        });
+        const ui = frame.contentWindow;
+        const doc = ui.document;
+        const editor = ui.eval('editor');
+        for(const explicitReturn of [true, false]){
+          const failures = [];
+          try{
+            editor.setValue(`int main(void)\n\n/* { } */\n{\n    int n = 3;\n    n += 2;\n    printf("%d", n);${explicitReturn ? '\n    return 0;' : ''}\n}`);
+            doc.getElementById('visualize').click();
+            await waitForUiResult(ui);
+            const bridge = ui.cVisualizerLiteResult;
+            const resultText = doc.querySelector('.result-state').textContent;
+            if(bridge.hasWarnings || bridge.output !== '5' || !resultText.includes('n = 5')){
+              failures.push('RUNまたはRESULT・最終変数が一致しません');
+            }
+            if(doc.getElementById('hintResult').textContent.includes(bug3MissingReturn) === explicitReturn){
+              failures.push('return省略ヒントの有無が違います');
+            }
+            doc.querySelector('.result-flow-button').click();
+            const updateIndex = bridge.steps.findIndex(step => step.lineNo === 6);
+            if(updateIndex < 0 || !ui.eval('jumpableLines').has(5)){
+              failures.push('6行目の更新STEPまたは行ジャンプがありません');
+            }else{
+              ui.eval(`activeStep = ${updateIndex}; renderStep()`);
+              if(!doc.querySelector('.step-code')?.textContent.includes('n += 2;') ||
+                 !doc.querySelector('.flow-detail')?.textContent.includes('5')){
+                failures.push('FLOWのコード行・変数更新表示が一致しません');
+              }
+              if(bridge.steps[updateIndex].variablesAtStep.find(item => item[0] === 'n')?.[1] !== '5'){
+                failures.push('STEPの変数snapshotが一致しません');
+              }
+            }
+          }catch(error){ failures.push(String(error)); }
+          results.push({testCase:{name:`L-BUG3 UI 次行main・return${explicitReturn ? 'あり' : '省略'}`},
+            result:{passed:failures.length === 0, failures, actual:{output:'RESULT／FLOW／STEP／行ジャンプを確認', warningCount:0}}});
+        }
+        const failures = [];
+        editor.setValue('int main(void)\nint n = 99;\nprintf("WRONG");\n}');
+        doc.getElementById('visualize').click();
+        if(!doc.querySelector('.failure-state') || doc.querySelector('.result-state') ||
+           ui.cVisualizerLiteResult.steps.length || ui.cVisualizerLiteResult.output){
+          failures.push('開始波かっこなしをRUN成功として扱いました');
+        }
+        results.push({testCase:{name:'L-BUG3 UI 開始波かっこなしはERROR'},
+          result:{passed:failures.length === 0, failures, actual:{output:'不正mainの実行防止を確認', warningCount:0}}});
+      }catch(error){
+        results.push({testCase:{name:'L-BUG3 UI 初期化'},
+          result:{passed:false, failures:[String(error)], actual:{output:'', warningCount:0}}});
+      }finally{
+        frame.remove();
+      }
+      return results;
+    }
+
+
+    async function checkReturnHintUiCases(){
+      const results = [];
+      const frame = createUiTestFrame();
+      const record = async (name, check) => {
+        const failures = [];
+        try{ await check(message => failures.push(message)); }
+        catch(error){ failures.push(String(error)); }
+        results.push({testCase:{name:`L-BUG3 RESULT hint UI ${name}`},
+          result:{passed:failures.length === 0, failures,
+            actual:{output:'ヒント表示と画面遷移を確認', warningCount:0}}});
+      };
+      try{
+        await new Promise((resolve, reject) => {
+          frame.addEventListener('load', resolve, {once:true});
+          frame.addEventListener('error', () => reject(new Error('製品画面を読み込めません')), {once:true});
+        });
+        const ui = frame.contentWindow;
+        const doc = ui.document;
+        const editor = ui.eval('editor');
+        const omitted = 'int main(void)\n{\nint n = 3;\nn += 2;\nprintf("%d", n);\n}';
+        const explicit = omitted.replace('\n}', '\nreturn 0;\n}');
+        const run = async (code, input = '') => {
+          editor.setValue(code);
+          doc.getElementById('scanfInput').value = input;
+          doc.getElementById('visualize').click();
+          if(!ui.cVisualizerLiteResult.hasWarnings && !ui.cVisualizerLiteResult.inputRequired){
+            await waitForUiResult(ui);
+          }
+        };
+        const hint = () => doc.querySelector('.result-learning-hint');
+        await record('省略時の文言・順序・通常成功', async fail => {
+          await run(omitted);
+          const card = hint();
+          if(!card || card.querySelector('strong')?.textContent !== '学習のヒント' ||
+             card.querySelector('p')?.textContent !== 'return 0; がありません。main関数の最後に書く基本形も確認してみましょう。') fail('ヒント文言が違います');
+          if(card?.previousElementSibling?.className !== 'result-variables' ||
+             card?.nextElementSibling?.className !== 'result-flow-button') fail('VARIABLESとボタンの間にありません');
+          if(ui.cVisualizerLiteResult.hasWarnings || ui.cVisualizerLiteResult.output !== '5' ||
+             !doc.querySelector('.result-variable')?.textContent.includes('n = 5')) fail('RUN成功・出力・変数が退行しました');
+          if(card?.getAttribute('role') !== 'note' || card.querySelector('[role="alert"]')) fail('学習用補足として表示されていません');
+        });
+        await record('明示ありへ再RUNすると消える', async fail => {
+          await run(explicit);
+          if(hint() || !doc.querySelector('.result-state')) fail('明示ありでもヒントが残っています');
+        });
+        await record('コメント中だけなら表示', async fail => {
+          await run(omitted.replace('\n}', '\n// return 0;\n/* return 0; */\n}'));
+          if(!hint()) fail('コメント内returnを実行文として扱いました');
+        });
+        await record('文字列中だけなら表示', async fail => {
+          await run(omitted.replace('printf("%d", n);', 'printf("return 0;");'));
+          if(!hint() || ui.cVisualizerLiteResult.output !== 'return 0;') fail('文字列内returnを実行文として扱いました');
+        });
+        await record('FLOWからRESULTへ戻っても一枚だけ表示', async fail => {
+          doc.querySelector('.result-flow-button').click();
+          if(hint()) fail('STEP中にRESULT用ヒントが残りました');
+          const count = ui.cVisualizerLiteResult.steps.length;
+          for(let index = 0; index < count; index++) doc.getElementById('step-next').click();
+          if(doc.querySelectorAll('.result-learning-hint').length !== 1) fail('RESULT再表示で消失または重複しました');
+          if(ui.eval('resultRevealPending') || ui.eval('resultReveal') !== null) fail('RESULT再表示でRevealを再実行しました');
+        });
+        await record('エンジンDOMの文言に依存せず成功snapshotを表示', async fail => {
+          doc.getElementById('hintResult').textContent = '';
+          ui.cVisualizerLiteResult.learningHints.missingReturnZero = false;
+          ui.showResultPage();
+          if(!hint()) fail('表示が保存済み構造化判定から変化しました');
+        });
+        await record('コード編集で旧ヒントを解除し再RUNで再判定', async fail => {
+          editor.setValue(explicit);
+          if(hint() || doc.querySelector('.result-state')) fail('編集後に旧ヒントが残りました');
+          doc.getElementById('visualize').click();
+          await waitForUiResult(ui);
+          if(hint()) fail('再RUNで古い判定が残りました');
+        });
+        await record('ERRORには表示しない', async fail => {
+          await run(omitted.replace('int n = 3;', 'int n = 3;').replace('printf("%d", n);', 'scanf("%d", &n);'), 'abc');
+          if(!doc.querySelector('.failure-state') || hint()) fail('ERRORの表示条件が違います');
+        });
+        const scanCode = 'int main(void)\n{\nint n;\nscanf("%d", &n);\nprintf("%d", n);\n}';
+        await record('WAITINGには表示しない', async fail => {
+          await run(scanCode);
+          if(!doc.querySelector('.waiting-state') || hint()) fail('WAITINGにヒントが出ました');
+        });
+        await record('入力後再RUNで成功ヒントを表示', async fail => {
+          await run(scanCode, '8');
+          if(!hint() || ui.cVisualizerLiteResult.output !== '8') fail('入力後の成功RESULTにヒントがありません');
+        });
+        for(const [name, target, other, expected] of [
+          ['省略コード', omitted, explicit, true],
+          ['明示コード', explicit, omitted, false]
+        ]) await record(`履歴復元・${name}`, async fail => {
+          await run(target);
+          await run(other);
+          ui.eval(`selectedHistoryId = historyEntries.find(entry => entry.code === ${JSON.stringify(target)}).id`);
+          doc.getElementById('history-open').click();
+          doc.querySelector('.history-restore').click();
+          if(editor.getValue() !== target || hint() || doc.querySelector('.result-state')) fail('履歴復元直後に旧RESULTが残りました');
+          doc.getElementById('visualize').click();
+          await waitForUiResult(ui);
+          if(Boolean(hint()) !== expected) fail('復元後RUNの判定が古いままです');
+          const stored = JSON.parse(ui.localStorage.getItem('c-visualizer-lite-history-v1'));
+          if(stored.version !== 1 || stored.entries.some(entry => 'learningHints' in entry)) fail('履歴schemaが変更されました');
+        });
+      }catch(error){
+        results.push({testCase:{name:'L-BUG3 RESULT hint UI 初期化'},
+          result:{passed:false, failures:[String(error)], actual:{output:'',warningCount:0}}});
+      }finally{ frame.remove(); }
+      return results;
+    }
+
     async function runAllTests(){
       const results = testCases.map(testCase => ({ testCase, result:checkCase(testCase) }));
       results.push(...await checkDecisionUiCases());
       results.push(...await checkScanfUiCases());
+      results.push(...await checkMainCompatibilityUiCases());
+      results.push(...await checkReturnHintUiCases());
       const passed = results.filter(item => item.result.passed).length;
       const failed = results.length - passed;
 

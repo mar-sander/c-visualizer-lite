@@ -709,6 +709,17 @@ function showResultPage(){
   if(!finalState.variables.length) values.textContent = '変数はありません';
   variables.append(values);
   result.append(variables);
+  if(finalState.learningHints?.missingReturnZero){
+    const hint = element('aside', 'result-learning-hint');
+    hint.setAttribute('role', 'note');
+    const message = element('p');
+    message.append(
+      element('code', '', 'return 0;'),
+      document.createTextNode(' がありません。main関数の最後に書く基本形も確認してみましょう。')
+    );
+    hint.append(element('strong', '', '学習のヒント'), message);
+    result.append(hint);
+  }
   const viewFlow = element('button', 'result-flow-button', '流れを見る →');
   viewFlow.type = 'button';
   viewFlow.addEventListener('click', () => { activeStep = 0; renderStep(); });
@@ -796,7 +807,11 @@ function runCode(){
     playRunSuccessFeedback(() => {
       if(editor.getValue() !== code || scanfInput.value !== input) return;
       currentSteps = result.steps;
-      finalState = {output:result.output, variables:result.variables};
+      finalState = {
+        output:result.output,
+        variables:result.variables,
+        learningHints:{ ...result.learningHints }
+      };
       resultCode = code;
       resultScanfInput = input;
       showFinalSummary(finalState);
