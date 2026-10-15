@@ -149,8 +149,11 @@ let resultReveal = null;
 let runSuccessFeedbackTimer = 0;
 let pendingRunSuccess = null;
 let runErrorFeedbackTimer = 0;
+let inputInjectionTimer = 0;
+let pendingInputInjection = null;
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 const scanfInput = $('scanfInput');
+const inputSubmit = $('input-submit');
 const scanfAccordion = $('scanf-accordion');
 const scanfAccordionToggle = $('scanf-accordion-toggle');
 const scanfAccordionBody = $('scanf-accordion-body');
@@ -241,6 +244,83 @@ function playRunSuccessFeedback(onComplete){
   }, reducedMotion.matches ? 240 : 700);
 }
 
+// INPUT専用の表示処理です。解析値は持たず、終了時の画面反映だけを予約します。
+function clearInputInjection(){
+  clearTimeout(inputInjectionTimer);
+  inputInjectionTimer = 0;
+  if(pendingInputInjection){
+    pendingInputInjection.packet?.remove();
+    pendingInputInjection.surface?.remove();
+  }
+  pendingInputInjection = null;
+  inputSubmit.disabled = false;
+  inputSubmit.removeAttribute('aria-busy');
+  inputSubmit.classList.remove('is-input-igniting');
+  editorFrame.classList.remove('is-input-injecting', 'is-input-reduced');
+  editorFrame.style.removeProperty('--input-injection-delay');
+}
+
+function hideInputTransfer(){
+  // スクロールやリサイズ後に、以前の画面座標を使った光を残しません。
+  pendingInputInjection?.packet?.remove();
+}
+window.addEventListener('scroll', hideInputTransfer, {capture:true, passive:true});
+window.addEventListener('resize', hideInputTransfer);
+
+function playInputInjection(onComplete){
+  clearInputInjection();
+  const pending = {onComplete, packet:null, surface:null};
+  pendingInputInjection = pending;
+  inputSubmit.disabled = true;
+  inputSubmit.setAttribute('aria-busy', 'true');
+  const source = inputSubmit.getBoundingClientRect();
+  const target = editorFrame.getBoundingClientRect();
+  const startX = source.left + source.width / 2;
+  const startY = source.top - 3;
+  const endX = Math.min(target.right - 12, Math.max(target.left + 12, startX));
+  const endY = target.bottom - 3;
+  const centerY = target.top + target.height / 2;
+  const canTransfer = source.width > 0 && target.width > 24 && target.height > 0 &&
+    startX >= 0 && startX <= window.innerWidth && startY >= 0 && startY <= window.innerHeight &&
+    endX >= 0 && endX <= window.innerWidth && endY >= 0 && endY <= window.innerHeight &&
+    centerY >= 0 && centerY <= window.innerHeight &&
+    Math.hypot(endX - startX, endY - startY) < window.innerHeight * .8;
+  const duration = reducedMotion.matches ? 240 : canTransfer ? 900 : 540;
+  editorFrame.style.setProperty('--input-injection-delay', canTransfer ? '400ms' : '60ms');
+
+  if(!reducedMotion.matches){
+    const surface = element('div', 'input-injection-surface');
+    surface.setAttribute('aria-hidden', 'true');
+    surface.style.setProperty('--input-half-width', `${target.width / 2}px`);
+    surface.style.setProperty('--input-half-height', `${target.height / 2}px`);
+    for(const side of ['top', 'right', 'bottom', 'left']){
+      surface.append(element('span', `input-injection-ray input-injection-${side}`));
+    }
+    editorFrame.append(surface);
+    pending.surface = surface;
+    if(canTransfer){
+      const packet = element('div', 'input-transfer');
+      packet.setAttribute('aria-hidden', 'true');
+      packet.style.left = `${startX}px`;
+      packet.style.top = `${startY}px`;
+      packet.style.setProperty('--input-dx', `${endX - startX}px`);
+      packet.style.setProperty('--input-dy', `${endY - startY}px`);
+      packet.style.setProperty('--input-angle', `${Math.atan2(endY - startY, endX - startX)}rad`);
+      document.body.append(packet);
+      pending.packet = packet;
+    }
+  }
+  void inputSubmit.offsetWidth;
+  inputSubmit.classList.add('is-input-igniting');
+  editorFrame.classList.add('is-input-injecting');
+  editorFrame.classList.toggle('is-input-reduced', reducedMotion.matches);
+  inputInjectionTimer = window.setTimeout(() => {
+    if(pendingInputInjection !== pending) return;
+    clearInputInjection();
+    onComplete();
+  }, duration);
+}
+
 function clearRunErrorFeedback(){
   clearTimeout(runErrorFeedbackTimer);
   runErrorFeedbackTimer = 0;
@@ -261,6 +341,7 @@ function playRunErrorFeedback(){
 reducedMotion.addEventListener('change', event => {
   if(event.matches) cancelResultReveal();
   if(pendingRunSuccess) playRunSuccessFeedback(pendingRunSuccess.onComplete);
+  if(pendingInputInjection) playInputInjection(pendingInputInjection.onComplete);
 });
 
 const HISTORY_KEY = 'c-visualizer-lite-history-v1';
@@ -540,6 +621,7 @@ function hasCurrentResult(){
 function invalidateResult(message = 'コードが変更されました。RUNで新しい結果を確認してください。'){
   cancelResultReveal();
   clearRunSuccessFeedback();
+  clearInputInjection();
   resultRevealPending = false;
   clearJumpableLines();
   clearErrorLines();
@@ -800,7 +882,7 @@ function showWaiting(state){
   const result = createResultState(state, buildResultTranscript(state));
   const box = element('div', 'waiting-state');
   box.append(element('h3', '', 'WAITING FOR INPUT'));
-  box.append(element('p', '', `scanfで使用する値を入力して、もう一度RUNしてください。`));
+  box.append(element('p', '', `scanfで使用する値を入力し、INPUTを押してください。RUNでも実行できます。`));
   box.append(element('small', '', `${request.lineNo}行目 · ${request.specifier} · ${request.target}`));
   result.append(box);
   flow.replaceChildren(result);
@@ -820,9 +902,20 @@ function showAnalysisPending(){
 }
 
 function runCode(){
+  executeCode('run');
+}
+
+function submitInput(){
+  if(inputSubmit.disabled || !scanfAccordion.classList.contains('is-open')) return;
+  executeCode('input');
+}
+
+// 解析と結果の確定は共通です。起点の操作に応じて表示専用の演出だけを選びます。
+function executeCode(action){
   cancelResultReveal();
   clearRunSuccessFeedback();
   clearRunErrorFeedback();
+  clearInputInjection();
   resultRevealPending = false;
   clearJumpableLines();
   clearErrorLines();
@@ -840,10 +933,20 @@ function runCode(){
   try{
     visualizeCode();
     const result = window.cVisualizerLiteResult;
+    const input = scanfInput.value;
+    const isSameInput = () => editor.getValue() === code && scanfInput.value === input;
+    const consumedInput = result?.steps.some(step => step.scanfInput);
     if(result?.inputRequired && !result.hasWarnings){
       currentSteps = [];
-      waitingCode = code;
-      showWaiting(result);
+      const showPartialResult = () => {
+        if(!isSameInput()) return;
+        waitingCode = code;
+        showWaiting(result);
+      };
+      if(action === 'input' && consumedInput){
+        showAnalysisPending();
+        playInputInjection(showPartialResult);
+      }else showPartialResult();
       return;
     }
     if(!result || result.hasWarnings || !result.steps.length){
@@ -853,11 +956,8 @@ function runCode(){
       saveHistory(code, 'check', failed, warnings);
       return;
     }
-    const input = scanfInput.value;
-    // 解析は完了済み。成功結果の画面反映だけをSweepの終了まで保留します。
-    showAnalysisPending();
-    playRunSuccessFeedback(() => {
-      if(editor.getValue() !== code || scanfInput.value !== input) return;
+    const showCompleteResult = () => {
+      if(!isSameInput()) return;
       currentSteps = result.steps;
       finalState = {
         output:result.output,
@@ -872,8 +972,16 @@ function runCode(){
       resultRevealPending = true;
       showResultPage();
       saveHistory(code, 'result', result);
-    });
+    };
+    if(action === 'run'){
+      showAnalysisPending();
+      playRunSuccessFeedback(showCompleteResult);
+    }else if(consumedInput){
+      showAnalysisPending();
+      playInputInjection(showCompleteResult);
+    }else showCompleteResult();
   }catch(error){
+    clearInputInjection();
     currentSteps = [];
     const failed = { warningText:['処理を表示できませんでした。コードを確認して、再RUNしてください。'], output:'' };
     const warnings = showFailure(failed);
@@ -884,17 +992,18 @@ function runCode(){
 
 editor.on('cursorActivity', updateCursor);
 editor.on('change', () => {
-  if(resultCode !== null || errorLines.size || waitingCode !== null || pendingRunSuccess) invalidateResult();
+  if(resultCode !== null || errorLines.size || waitingCode !== null || pendingRunSuccess || pendingInputInjection) invalidateResult();
   // 手入力に戻ったことだけを選択欄に反映します。
   if($('sample-select').value) $('sample-select').value = '';
 });
 scanfInput.addEventListener('input', () => {
-  const message = '入力値が変更されました。RUNで結果を更新してください。';
+  const message = '入力値が変更されました。INPUTまたはRUNで結果を更新してください。';
   const hasPreviousDisplay = flow.querySelector('.result-state') !== null || finalState !== null;
   if(hasPreviousDisplay){
     // 表示は最後のRUN時点で固定し、入力を元に戻しても再RUNまでは無効です。
     cancelResultReveal();
     clearRunSuccessFeedback();
+    clearInputInjection();
     resultRevealPending = false;
     resultInputDirty = true;
     clearJumpableLines();
@@ -908,7 +1017,7 @@ scanfInput.addEventListener('input', () => {
     $('step-controls').hidden = true;
     outputCard.hidden = true;
     $('feedback').textContent = message;
-  }else if(resultCode !== null || errorLines.size || waitingCode !== null || pendingRunSuccess){
+  }else if(resultCode !== null || errorLines.size || waitingCode !== null || pendingRunSuccess || pendingInputInjection){
     // まだ表示されていないSweepの結果やERRORには、従来の無効化を適用します。
     invalidateResult(message);
     $('feedback').textContent = message;
@@ -929,6 +1038,7 @@ $('sample-select').addEventListener('change', event => {
   event.target.value = Object.keys(sampleBody).find(key => sampleBody[key] === body);
 });
 $('visualize').addEventListener('click', runCode);
+inputSubmit.addEventListener('click', submitInput);
 $('history-open').addEventListener('click', () => {
   renderHistory();
   historyDialog.showModal();
