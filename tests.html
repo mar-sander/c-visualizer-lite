@@ -4975,8 +4975,8 @@
           if(!bridge.inputRequired || bridge.inputRequest?.specifier !== '%f' ||
             bridge.inputRequest?.target !== 'temperature') fail('structured inputRequestが違います');
           if(!doc.querySelector('.waiting-state h3')?.textContent.includes('WAITING FOR INPUT')) fail('WAITINGが表示されません');
-          if(doc.querySelector('.result-state') || doc.querySelector('.result-flow-button') ||
-            doc.querySelector('.failure-state')) fail('WAITINGへRESULTやERRORが混入しました');
+          if(!doc.querySelector('.result-state .waiting-state') || doc.querySelector('.result-flow-button') ||
+            doc.querySelector('.failure-state')) fail('部分RESULTまたは待機中の操作制限が違います');
           if(!doc.getElementById('step-controls').hidden || !doc.querySelector('.output-card').hidden) fail('STEPまたは出力カードが見えています');
           if(toggle.getAttribute('aria-expanded') !== 'true' || !accordion.classList.contains('is-prompted')) fail('自動展開または一度だけの視線誘導がありません');
           if(doc.activeElement !== input) fail('入力欄へfocusしません');
@@ -5022,7 +5022,8 @@
           input.value = '36.8';
           input.dispatchEvent(new ui.Event('input', {bubbles:true}));
           if(ui.eval('hasCurrentResult()') || ui.eval('jumpableLines.size') !== 0 ||
-            doc.querySelector('.result-state') || doc.querySelector('.scanf-step-input')) fail('旧RESULTまたはFLOWが残っています');
+            !doc.querySelector('.result-state') || doc.querySelector('.scanf-step-input') ||
+            !doc.querySelector('.result-flow-button')?.disabled) fail('前回RESULTの保持またはFLOWの無効化が違います');
         });
         await record('先入れcharは1回のRUNで成功', async fail => {
           const bridge = await run("char answer;\nscanf(\"%c\", &answer);\nif(answer == 'Y'){\n    printf(\"YES\\n\");\n}", 'Y');
@@ -5044,7 +5045,7 @@
           const mixed = 'int n;\nchar c;\nfloat f;\ndouble d;\nscanf("%d", &n);\nscanf("%c", &c);\nscanf("%f", &f);\nscanf("%lf", &d);';
           const waiting = await run(mixed, '10');
           if(!waiting.inputRequired || waiting.inputRequest?.ordinal !== 2 ||
-            doc.querySelector('.result-state')) fail('2番目のscanfで正しく待機しません');
+            !doc.querySelector('.result-state .waiting-state')) fail('2番目のscanfで正しく待機しません');
           input.value = '10\nA\n1.5\n2.25';
           doc.getElementById('visualize').click();
           await waitForUiResult(ui);
@@ -5257,12 +5258,303 @@
       return results;
     }
 
+    async function checkProgressiveResultUiCases(){
+      const frame = createUiTestFrame();
+      const results = [];
+      const record = async (name, check) => {
+        const failures = [];
+        try{ await check(message => failures.push(message)); }
+        catch(error){ failures.push(String(error)); }
+        results.push({testCase:{name:`L-IO3 ${name}`},
+          result:{passed:failures.length === 0, failures,
+            actual:{output:'表示用transcriptと標準出力を個別に確認',warningCount:0}}});
+      };
+      try{
+        await new Promise((resolve, reject) => {
+          frame.addEventListener('load', resolve, {once:true});
+          frame.addEventListener('error', reject, {once:true});
+        });
+        const ui = frame.contentWindow;
+        const doc = ui.document;
+        const editor = ui.eval('editor');
+        const input = doc.getElementById('scanfInput');
+        const button = doc.getElementById('visualize');
+        const cylinder = makeMainCode([
+          'float r, h, pai = 3.14, taiseki;',
+          'printf("円の半径？ ");',
+          'scanf("%f", &r);',
+          'printf("円の高さ？ ");',
+          'scanf("%f", &h);',
+          'taiseki = r * r * h * pai;',
+          'printf("半径%f 高さ%f の円柱の体積は %fm^3\\n", r, h, taiseki);',
+          'return 0;'
+        ].join('\n'));
+        const finalPrint = '半径2.000000 高さ3.000000 の円柱の体積は 37.680000m^3\n';
+        const finalDisplay = '円の半径？ 2\n円の高さ？ 3\n' + finalPrint;
+        const transcript = result => ui.buildResultTranscript(result);
+        const visible = () => {
+          const node = doc.querySelector('.result-value');
+          return node?.querySelector('.result-reveal-final')?.textContent ?? node?.textContent;
+        };
+        const run = async (code = cylinder, value = '') => {
+          editor.setValue(code);
+          input.value = value;
+          input.dispatchEvent(new ui.Event('input', {bubbles:true}));
+          button.click();
+          const result = ui.cVisualizerLiteResult;
+          if(!result.inputRequired && !result.hasWarnings) await waitForUiResult(ui);
+          return result;
+        };
+        const checkOutput = (fail, result, display, stdout) => {
+          if(transcript(result) !== display) fail(`transcript: ${JSON.stringify(transcript(result))}`);
+          if(visible() !== display) fail(`RESULT: ${JSON.stringify(visible())}`);
+          if(result.output !== stdout) fail(`標準出力: ${JSON.stringify(result.output)}`);
+        };
+        await record('状態A・入力なし・先読みなし', async fail => {
+          const result = await run();
+          checkOutput(fail, result, '円の半径？ ', '円の半径？ ');
+          if(!result.inputRequired || result.inputRequest.target !== 'r') fail('最初のscanfで待機しません');
+          if(result.steps.some(step => step.scanfInput) || result.variables.find(([n]) => n === 'h')[1] !== '未初期化') fail('未実行scanfを実行しました');
+        });
+        await record('状態B・1個入力・次のpromptまで', async fail => {
+          const result = await run(cylinder, '2');
+          checkOutput(fail, result, '円の半径？ 2\n円の高さ？ ', '円の半径？ 円の高さ？ ');
+          if(!result.inputRequired || result.inputRequest.target !== 'h' || result.steps.filter(step => step.scanfInput).length !== 1) fail('2個目のscanfで停止しません');
+          if(result.variables.find(([n]) => n === 'taiseki')[1] !== '未初期化') fail('体積を先読み計算しました');
+        });
+        await record('状態C・追加入力して再RUN', async fail => {
+          input.value += '\n3';
+          input.dispatchEvent(new ui.Event('input', {bubbles:true}));
+          button.click();
+          await waitForUiResult(ui);
+          checkOutput(fail, ui.cVisualizerLiteResult, finalDisplay, '円の半径？ 円の高さ？ ' + finalPrint);
+          if(input.value !== '2\n3' || doc.querySelector('.waiting-state')) fail('入力保持または待機解除が違います');
+        });
+        await record('最初から全入力で同じ結果', async fail => {
+          const result = await run(cylinder, '2\n3');
+          checkOutput(fail, result, finalDisplay, '円の半径？ 円の高さ？ ' + finalPrint);
+        });
+        await record('入力値を変更して先頭から再解析', async fail => {
+          const result = await run(cylinder, '4\n5');
+          checkOutput(fail, result, '円の半径？ 4\n円の高さ？ 5\n半径4.000000 高さ5.000000 の円柱の体積は 251.200012m^3\n',
+            '円の半径？ 円の高さ？ 半径4.000000 高さ5.000000 の円柱の体積は 251.200012m^3\n');
+        });
+        await record('後半入力を削除すると2個目で待機', async fail => {
+          const result = await run(cylinder, '2');
+          checkOutput(fail, result, '円の半径？ 2\n円の高さ？ ', '円の半径？ 円の高さ？ ');
+          if(result.inputRequest?.ordinal !== 2) fail('待機位置が違います');
+        });
+        await record('全入力削除で最初の待機へ戻る', async fail => {
+          const result = await run();
+          checkOutput(fail, result, '円の半径？ ', '円の半径？ ');
+        });
+        for(const [type, specifier, value, stdout] of [
+          ['int', '%d', '+002', '2'], ['float', '%f', '2', '2.000000'],
+          ['double', '%lf', '-0.50', '-0.500000'], ['char', '%c', 'A', 'A'],
+          ['char', '%c', ' ', ' '], ['char', '%c', '\t', '\t'],
+          ['char', '%c', '<', '<'], ['float', '%f', '  2.50  ', '2.500000']
+        ]) await record(`${specifier}・入力${JSON.stringify(value)}のエコー`, async fail => {
+          const format = specifier === '%lf' ? '%f' : specifier;
+          const code = makeMainCode(`${type} n;\nprintf("Q: ");\nscanf("${specifier}", &n);\nprintf("${format}", n);\nreturn 0;`);
+          const result = await run(code, value);
+          checkOutput(fail, result, `Q: ${specifier === '%c' ? value : value.trim()}\n${stdout}`, `Q: ${stdout}`);
+        });
+        for(const [name, before, after, expected] of [
+          ['前後とも改行なし', 'Q: ', 'END', 'Q: 7\nEND'],
+          ['promptの改行を維持', 'Q:\\n', 'END', 'Q:\n7\nEND'],
+          ['後続の改行と重ねない', 'Q: ', '\\nEND', 'Q: 7\nEND'],
+          ['プログラム由来の空行を維持', 'Q: ', '\\n\\nEND', 'Q: 7\n\nEND'],
+          ['空printfで補助改行を消費しない', 'Q: ', '', 'Q: 7\n']
+        ]) await record(name, async fail => {
+          const result = await run(makeMainCode(`int n;\nprintf("${before}");\nscanf("%d", &n);\nprintf("${after}");\nreturn 0;`), '7');
+          checkOutput(fail, result, expected, before.replaceAll('\\n', '\n') + after.replaceAll('\\n', '\n'));
+        });
+        await record('直前printfなし・連続scanf・余剰入力は非表示', async fail => {
+          const result = await run(makeMainCode('int a, b;\nscanf("%d", &a);\nscanf("%d", &b);\nreturn 0;'), '1\n2\n999');
+          checkOutput(fail, result, '1\n2\n', '');
+        });
+        await record('数値の空行を読み飛ばし消費分だけ表示', async fail => {
+          const result = await run(makeMainCode('int n;\nscanf("%d", &n);\nreturn 0;'), '\n\n7\n8');
+          checkOutput(fail, result, '7\n', '');
+        });
+        await record('scanfなしは従来標準出力と完全一致', async fail => {
+          const result = await run(makeMainCode('printf("  A\\n\\nB ");\nreturn 0;'));
+          checkOutput(fail, result, '  A\n\nB ', '  A\n\nB ');
+        });
+        for(const [name, loop] of [
+          ['for', 'int i;\nfor(i = 0; i < 10; i++){\nprintf("X");\n}'],
+          ['while', 'int i = 0;\nwhile(i < 10){\nprintf("X");\ni++;\n}']
+        ]) await record(`入力後の${name}圧縮STEPでも出力順を維持`, async fail => {
+          const result = await run(makeMainCode(`int n;\nprintf("Q: ");\nscanf("%d", &n);\n${loop}\nreturn 0;`), '7');
+          checkOutput(fail, result, 'Q: 7\nXXXXXXXXXX', 'Q: XXXXXXXXXX');
+        });
+        await record('複数行printfの対応範囲は広げない', async fail => {
+          const code = cylinder.replace(', r, h, taiseki);', ',\n r, h, taiseki);');
+          const result = await run(code, '2\n3');
+          if(!result.hasWarnings || result.inputRequired || !doc.querySelector('.failure-state')) fail('既存の複数行制限を変更しました');
+        });
+        await record('不正入力はERROR・正常待機にしない', async fail => {
+          const result = await run(cylinder, 'abc');
+          if(result.inputRequired || !result.hasWarnings || !doc.querySelector('.failure-state') || doc.querySelector('.result-state, .waiting-state')) fail('不正入力の表示が違います');
+          if(transcript(result) !== '円の半径？ ' || result.output !== '円の半径？ ') fail('失敗した入力をエコーしました');
+        });
+        await record('型不一致は従来エラー', async fail => {
+          const result = await run(makeMainCode('int n;\nscanf("%f", &n);\nreturn 0;'), '2');
+          if(!result.hasWarnings || result.inputRequired || transcript(result) !== '') fail('型不一致を読み取りました');
+        });
+        for(const [name, block] of [
+          ['if', 'if(1){\nscanf("%d", &n);\n}'],
+          ['for', 'int i;\nfor(i = 0; i < 1; i++){\nscanf("%d", &n);\n}'],
+          ['while', 'while(n < 1){\nscanf("%d", &n);\n}']
+        ]) await record(`${name}内部scanfは未対応のまま`, async fail => {
+          const result = await run(makeMainCode(`int n = 0;\n${block}\nreturn 0;`), '8');
+          if(!result.hasWarnings || result.inputRequired || result.steps.some(step => step.scanfInput)) fail('未対応scanfを実行しました');
+        });
+        await record('待機時はSTEP無効・履歴保存なし・自動展開', async fail => {
+          const before = ui.eval('JSON.stringify(historyEntries)');
+          await run(cylinder, '2');
+          if(ui.eval('JSON.stringify(historyEntries)') !== before || ui.eval('hasCurrentResult()') || ui.eval('currentSteps.length') || doc.querySelector('.result-flow-button')) fail('入力待ちを完了として扱いました');
+          if(!doc.getElementById('step-controls').hidden || doc.getElementById('scanf-accordion-toggle').getAttribute('aria-expanded') !== 'true' || doc.activeElement !== input) fail('待機時操作が違います');
+        });
+        await record('FLOWのoutputAtStepと元resultは変更しない', async fail => {
+          const result = await run(cylinder, '2\n3');
+          const snapshot = JSON.stringify(result);
+          transcript(result);
+          if(JSON.stringify(result) !== snapshot) fail('表示生成でresultを変更しました');
+          const index = result.steps.findIndex(step => step.scanfInput);
+          ui.eval(`activeStep = ${index}; renderStep()`);
+          if(doc.getElementById('output-value').textContent !== '円の半径？ ' || !doc.querySelector('.scanf-step-input')) fail('STEPにエコーが混入しました');
+          ui.showResultPage();
+          if(visible() !== finalDisplay || ui.eval('resultReveal') !== null) fail('RESULT往復で内容またはRevealが変化しました');
+          const stored = JSON.parse(ui.localStorage.getItem('c-visualizer-lite-history-v1'));
+          if(stored.version !== 1 || stored.entries[0].output !== result.output || 'displayOutput' in stored.entries[0]) fail('履歴の標準出力またはschemaが変化しました');
+        });
+        await record('return省略ヒントは完了時のみ', async fail => {
+          const code = cylinder.replace('return 0;', '');
+          await run(code);
+          if(doc.querySelector('.result-learning-hint')) fail('待機中に学習ヒントを表示しました');
+          await run(code, '2\n3');
+          if(!doc.querySelector('.result-learning-hint')) fail('完了後の学習ヒントがありません');
+        });
+        await record('待機中の入力編集で前回RESULTを保持', async fail => {
+          await run(cylinder, '2');
+          input.value = '9';
+          input.dispatchEvent(new ui.Event('input', {bubbles:true}));
+          await new Promise(resolve => ui.setTimeout(resolve, 800));
+          if(!doc.querySelector('.result-state .waiting-state') || visible() !== '円の半径？ 2\n円の高さ？ ' ||
+            doc.getElementById('feedback').textContent !== '入力値が変更されました。RUNで結果を更新してください。') fail('前回RESULTの保持または補助メッセージが違います');
+        });
+        const editInput = value => {
+          input.value = value;
+          input.dispatchEvent(new ui.Event('input', {bubbles:true}));
+        };
+        const dirtyMessage = '入力値が変更されました。RUNで結果を更新してください。';
+        await record('FA1 待機RESULTとVARIABLESを編集前のまま保持', async fail => {
+          const result = await run(cylinder, '2');
+          const node = doc.querySelector('.result-state');
+          const variables = doc.querySelector('.result-variables').textContent;
+          const snapshot = JSON.stringify(result);
+          const history = ui.eval('JSON.stringify(historyEntries)');
+          editInput('2\n3');
+          if(doc.querySelector('.result-state') !== node || visible() !== '円の半径？ 2\n円の高さ？ ' ||
+            doc.querySelector('.result-variables').textContent !== variables) fail('編集で表示内容またはDOMを変更しました');
+          if(JSON.stringify(ui.cVisualizerLiteResult) !== snapshot || ui.eval('JSON.stringify(historyEntries)') !== history) fail('編集だけで解析または履歴を更新しました');
+          if(doc.getElementById('feedback').textContent !== dirtyMessage || ui.eval('hasCurrentResult()')) fail('再RUN待ちの判定または通知が違います');
+        });
+        await record('FA1 再RUNで新結果に更新し補助メッセージ解除', async fail => {
+          button.click();
+          await waitForUiResult(ui);
+          checkOutput(fail, ui.cVisualizerLiteResult, finalDisplay, '円の半径？ 円の高さ？ ' + finalPrint);
+          if(doc.getElementById('feedback').textContent || doc.querySelector('.result-flow-button').disabled) fail('再RUN後に編集状態が残りました');
+        });
+        await record('FA1 完了RESULTとVARIABLESも変更・削除で保持', async fail => {
+          const output = visible();
+          const variables = doc.querySelector('.result-variables').textContent;
+          for(const value of ['4\n5', '2', '', '2\n3']){
+            editInput(value);
+            if(visible() !== output || doc.querySelector('.result-variables').textContent !== variables) fail('入力編集で前回表示を変更しました');
+            if(ui.eval('hasCurrentResult()') || !doc.querySelector('.result-flow-button').disabled ||
+              ui.eval('jumpableLines.size') || ui.eval('currentSteps.length')) fail('古い解析結果の操作が有効です');
+          }
+          if(doc.getElementById('feedback').textContent !== dirtyMessage) fail('編集メッセージがありません');
+        });
+        await record('FA1 無効なFLOWボタン・行ジャンプで前回表示を動かさない', async fail => {
+          const output = visible();
+          const button = doc.querySelector('.result-flow-button');
+          button.click();
+          button.dispatchEvent(new ui.Event('click'));
+          ui.eval('renderStep()');
+          if(visible() !== output || doc.querySelector('.step-top') || ui.eval('activeStep') !== -1) fail('古いSTEPへ移動しました');
+        });
+        await record('FA1 STEP閲覧中の入力編集は前回RESULTへ戻す', async fail => {
+          await run(cylinder, '2\n3');
+          doc.querySelector('.result-flow-button').click();
+          if(!doc.querySelector('.step-top')) fail('STEPを開けません');
+          editInput('8\n9');
+          if(visible() !== finalDisplay || !doc.querySelector('.result-flow-button')?.disabled ||
+            !doc.getElementById('step-controls').hidden || !doc.querySelector('.output-card').hidden) fail('前回RESULTへ戻して操作を止めていません');
+        });
+        await record('FA1 保持中のコード編集は従来どおり表示を無効化', async fail => {
+          editor.setValue(makeMainCode('printf("NEW");\nreturn 0;'));
+          if(doc.querySelector('.result-state') || !doc.querySelector('.idle-state') || ui.eval('finalState') !== null) fail('CODE編集後も旧表示が残りました');
+        });
+        await record('FA1 Reveal中の入力編集は最終文字列を保持して演出停止', async fail => {
+          await run(cylinder, '2\n3');
+          editInput('4\n5');
+          if(visible() !== finalDisplay || ui.eval('resultReveal') !== null) fail('前回文字列を確定していません');
+          await new Promise(resolve => ui.setTimeout(resolve, 750));
+          if(visible() !== finalDisplay || doc.getElementById('feedback').textContent !== dirtyMessage) fail('古い演出が表示または通知へ干渉しました');
+        });
+        await record('FA1 再RUNして入力待ちに戻った後も表示を保持', async fail => {
+          editInput('2');
+          button.click();
+          if(visible() !== '円の半径？ 2\n円の高さ？ ' || !doc.querySelector('.waiting-state') ||
+            doc.getElementById('feedback').textContent) fail('新しい入力待ちへ更新しません');
+          editInput('');
+          if(visible() !== '円の半径？ 2\n円の高さ？ ' || doc.getElementById('feedback').textContent !== dirtyMessage) fail('削除で前回RESULTを失いました');
+          button.click();
+          if(visible() !== '円の半径？ ' || doc.getElementById('feedback').textContent) fail('削除後のRUN結果が違います');
+        });
+        await record('Sweep中の入力編集で旧RESULT復活なし', async fail => {
+          editor.setValue(cylinder);
+          input.value = '2\n3';
+          button.click();
+          if(!doc.querySelector('.editor-frame.is-run-success')) fail('Analysis Sweepがありません');
+          input.value = '8\n9';
+          input.dispatchEvent(new ui.Event('input', {bubbles:true}));
+          await new Promise(resolve => ui.setTimeout(resolve, 850));
+          if(doc.querySelector('.result-state') || ui.eval('pendingRunSuccess') || ui.eval('resultReveal')) fail('古い結果が復活しました');
+        });
+        await record('Reveal中のコード編集で旧RESULT復活なし', async fail => {
+          await run(cylinder, '2\n3');
+          editor.setValue(makeMainCode('printf("NEW");\nreturn 0;'));
+          await new Promise(resolve => ui.setTimeout(resolve, 750));
+          if(doc.querySelector('.result-state') || ui.eval('resultReveal')) fail('古いRevealが復活しました');
+        });
+        await record('連続RUNで最後の待機だけを維持', async fail => {
+          editor.setValue(cylinder);
+          input.value = '2\n3';
+          button.click();
+          input.value = '';
+          button.click();
+          await new Promise(resolve => ui.setTimeout(resolve, 850));
+          checkOutput(fail, ui.cVisualizerLiteResult, '円の半径？ ', '円の半径？ ');
+          if(!doc.querySelector('.waiting-state')) fail('古い完了結果が待機を上書きしました');
+        });
+      }catch(error){
+        results.push({testCase:{name:'L-IO3 UI 初期化'},
+          result:{passed:false, failures:[String(error)], actual:{output:'',warningCount:0}}});
+      }finally{ frame.remove(); }
+      return results;
+    }
+
     async function runAllTests(){
       const results = testCases.map(testCase => ({ testCase, result:checkCase(testCase) }));
       results.push(...await checkDecisionUiCases());
       results.push(...await checkScanfUiCases());
       results.push(...await checkMainCompatibilityUiCases());
       results.push(...await checkReturnHintUiCases());
+      results.push(...await checkProgressiveResultUiCases());
       const passed = results.filter(item => item.result.passed).length;
       const failed = results.length - passed;
 
