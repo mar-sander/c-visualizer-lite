@@ -5822,6 +5822,35 @@
           ui = await load();
           if(options().length !== 10) fail('既存解放済み環境へ追加されません');
         });
+        await record('既存解放済みでも毎回アンロック演出を再生', fail => {
+          const dialog = ui.document.getElementById('secret-code-dialog');
+          const success = ui.document.getElementById('secret-code-success');
+          for(let trial = 0; trial < 2; trial++){
+            ui.document.getElementById('secret-code-open').click();
+            ui.document.getElementById('secret-code-input').value = 'getsample';
+            ui.document.getElementById('secret-code-form').dispatchEvent(new ui.Event('submit', {bubbles:true,cancelable:true}));
+            if(!dialog.open || !dialog.classList.contains('is-unlocking') || success.hidden ||
+               success.textContent.trim() !== 'SAMPLE UNLOCKED') fail(`${trial + 1}回目の成功演出が表示されません`);
+            const animation = ui.getComputedStyle(dialog).animationName;
+            if(ui.matchMedia('(prefers-reduced-motion: reduce)').matches){
+              if(animation !== 'none') fail('reduced-motionで動作アニメーションが残っています');
+            }else if(!animation.includes('unlock-frame-pulse')) fail('通常表示で成功アニメーションがありません');
+            if(options().length !== 10 || new Set(options().map(option => option.value)).size !== 10) fail('SAMPLE選択肢が重複しました');
+            dialog.close();
+          }
+          if(ui.eval('unlockFeedbackTimer') !== 0 || dialog.classList.contains('is-unlocking')) fail('演出タイマーの後片付けに失敗しました');
+        });
+        await record('無効なSECRET CODEでは演出を再生しない', fail => {
+          const doc = ui.document;
+          const dialog = doc.getElementById('secret-code-dialog');
+          doc.getElementById('secret-code-open').click();
+          doc.getElementById('secret-code-input').value = 'wrong-code';
+          doc.getElementById('secret-code-form').dispatchEvent(new ui.Event('submit', {bubbles:true,cancelable:true}));
+          if(!dialog.open || dialog.classList.contains('is-unlocking') ||
+            !doc.getElementById('secret-code-success').hidden ||
+            doc.getElementById('secret-code-error').hidden) fail('無効コードのエラー判定が変化しました');
+          dialog.close();
+        });
         const doc = ui.document;
         const editor = ui.eval('editor');
         const select = doc.getElementById('sample-select');

@@ -160,16 +160,12 @@ $('secret-code-form').addEventListener('submit', event => {
     $('secret-code-error').hidden = false;
     return;
   }
-  const isNewUnlock = !unlockedIds.has(unlockId);
   unlockedIds.add(unlockId);
   persistUnlocks();
   renderUnlockedSamples();
   secretCodeInput.value = '';
-  if(isNewUnlock){
-    showUnlockFeedback(unlockId);
-  }else{
-    secretCodeDialog.close();
-  }
+  // 正しいSECRET CODEなら、解放済みでも成功演出を毎回再生する。
+  showUnlockFeedback(unlockId);
 });
 secretCodeDialog.addEventListener('click', event => {
   const rect = secretCodeDialog.getBoundingClientRect();
