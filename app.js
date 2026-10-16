@@ -25,7 +25,52 @@ const sampleBody = {
   mul:['int a = 10;', 'int b = 3;', 'int c = a * b;', 'printf("%d\\n", c);'],
   div:['int a = 7;', 'int b = 2;', 'int c = a / b;', 'printf("%d\\n", c);'],
   all:['int a = 10;', 'int b = 3;', 'int add = a + b;', 'int sub = a - b;', 'int mul = a * b;', 'int div = a / b;', 'printf("%d %d %d %d\\n", add, sub, mul, div);'],
-  precedence:['int x = 2 + 3 * 4;', 'int y = (2 + 3) * 4;', 'printf("%d %d\\n", x, y);']
+  precedence:['int x = 2 + 3 * 4;', 'int y = (2 + 3) * 4;', 'printf("%d %d\\n", x, y);'],
+  scanfTwo:[
+    'int a, b;',
+    'int sum;',
+    '',
+    'printf("1つ目の数は？ ");',
+    'scanf("%d", &a);',
+    'printf("2つ目の数は？ ");',
+    'scanf("%d", &b);',
+    '',
+    'sum = a + b;',
+    'printf("合計は%dです\\n", sum);',
+    ''
+  ],
+  ifBasic:[
+    'int x = 8;',
+    '',
+    'if(x > 5){',
+    '    printf("5より大きいです\\n");',
+    '}',
+    '',
+    'printf("判定終了\\n");'
+  ],
+  ifElse:[
+    'int score = 75;',
+    '',
+    'if(score >= 60){',
+    '    printf("合格です\\n");',
+    '}else{',
+    '    printf("不合格です\\n");',
+    '}',
+    ''
+  ],
+  scanfIf:[
+    'int score;',
+    '',
+    'printf("点数を入力してください: ");',
+    'scanf("%d", &score);',
+    '',
+    'if(score >= 60){',
+    '    printf("合格です\\n");',
+    '}else{',
+    '    printf("不合格です\\n");',
+    '}',
+    ''
+  ]
 };
 
 // 常時表示の選択肢はHTML側に置き、解除対象だけをID単位で追加します。
@@ -34,7 +79,9 @@ const UNLOCK_KEY = 'c-visualizer-lite-unlocks-v1';
 const UNLOCKED_OPTIONS = {
   samples:[
     ['add', '足し算'], ['sub', '引き算'], ['mul', '掛け算'],
-    ['div', '割り算'], ['all', '四則演算まとめ'], ['precedence', '括弧と計算順序']
+    ['div', '割り算'], ['all', '四則演算まとめ'], ['precedence', '括弧と計算順序'],
+    ['scanfTwo', '2つの数を入力する'], ['ifBasic', 'if文の基本'],
+    ['ifElse', 'if〜else文'], ['scanfIf', '入力して条件判定']
   ]
 };
 const UNLOCK_LABELS = {
@@ -1033,7 +1080,11 @@ editor.on('gutterClick', (_editor, line, gutter) => {
 $('sample-select').addEventListener('change', event => {
   const body = sampleBody[event.target.value];
   if(!body) return;
-  const code = ['#include <stdio.h>', '', 'int main(void){', ...body.map(line => `    ${line}`), '    return 0;', '}'].join('\n');
+  const code = ['#include <stdio.h>', '', 'int main(void){', ...body.map(line => line ? `    ${line}` : ''), '    return 0;', '}'].join('\n');
+  // 入力教材は毎回、最初のscanfで待機する状態から始めます。
+  if(event.target.value === 'scanfTwo' || event.target.value === 'scanfIf'){
+    scanfInput.value = '';
+  }
   editor.setValue(code);
   event.target.value = Object.keys(sampleBody).find(key => sampleBody[key] === body);
 });

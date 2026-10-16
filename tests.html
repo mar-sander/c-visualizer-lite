@@ -4937,7 +4937,7 @@
           if(input.rows !== 2 || !input.getAttribute('aria-label') ||
             !input.placeholder.includes('scanfで使う入力値') ||
             !input.placeholder.includes('1回につき1行') ||
-            !input.placeholder.includes('%cでは空白も1文字')) fail('入力欄の高さ・名前・説明が違います');
+            input.placeholder !== 'scanfで使う入力値（1回につき1行入力）\n入力値が複数ある場合は消さずに改行します') fail('入力欄の高さ・名前・説明が違います');
           if(doc.querySelector('.scanf-accordion-inner label, .scanf-accordion-inner p')) fail('枠外の説明が残っています');
         });
         await record('手動開閉', async fail => {
@@ -4978,7 +4978,8 @@
           if(!doc.querySelector('.result-state .waiting-state') || doc.querySelector('.result-flow-button') ||
             doc.querySelector('.failure-state')) fail('部分RESULTまたは待機中の操作制限が違います');
           if(!doc.getElementById('step-controls').hidden || !doc.querySelector('.output-card').hidden) fail('STEPまたは出力カードが見えています');
-          if(toggle.getAttribute('aria-expanded') !== 'true' || !accordion.classList.contains('is-prompted')) fail('自動展開または一度だけの視線誘導がありません');
+          if(toggle.getAttribute('aria-expanded') !== 'true' ||
+            accordion.classList.contains('is-prompted') !== !ui.matchMedia('(prefers-reduced-motion: reduce)').matches) fail('自動展開またはmotion設定に応じた視線誘導が違います');
           if(doc.activeElement !== input) fail('入力欄へfocusしません');
           if(ui.eval('historyEntries.length') !== before || ui.eval('errorLines.size') !== 0) fail('WAITINGを履歴または赤いエラーへ流しました');
         });
@@ -5755,6 +5756,200 @@
       return results;
     }
 
+    // L-SAMPLE1：仕様の完成コードと選択UIを照合し、実際のRUN/INPUTを通します。
+    async function checkExpandedSampleUiCases(){
+      const results = [];
+      const keys = ['c-visualizer-lite-unlocks-v1', 'c-visualizer-lite-history-v1'];
+      let saved;
+      let ui;
+      let frame;
+      const record = async (name, check) => {
+        const failures = [];
+        try{ await check(message => failures.push(message)); }
+        catch(error){ failures.push(String(error)); }
+        results.push({testCase:{name:`L-SAMPLE1 ${name}`}, result:{passed:failures.length === 0,
+          failures, actual:{output:'SAMPLE選択・実行を確認',warningCount:0}}});
+      };
+      const load = async () => {
+        frame?.remove();
+        frame = createUiTestFrame();
+        await new Promise(resolve => frame.addEventListener('load', resolve, {once:true}));
+        return frame.contentWindow;
+      };
+      try{
+        ui = await load();
+        saved = keys.map(key => ui.localStorage.getItem(key));
+        ui.localStorage.removeItem(keys[0]);
+        ui = await load();
+        await record('未解放では既存・新規とも表示なし', fail => {
+          if(ui.document.getElementById('sample-select').options.length !== 1) fail('未解放のSAMPLEが表示されました');
+        });
+        const unlock = () => {
+          ui.document.getElementById('secret-code-open').click();
+          ui.document.getElementById('secret-code-input').value = 'getsample';
+          ui.document.getElementById('secret-code-form').dispatchEvent(new ui.Event('submit', {bubbles:true,cancelable:true}));
+          ui.document.getElementById('secret-code-dialog').close();
+          ui.resetUnlockFeedback();
+        };
+        const expectedCodes = {
+          "add": "#include <stdio.h>\n\nint main(void){\n    int a = 10;\n    int b = 3;\n    int c = a + b;\n    printf(\"%d\\n\", c);\n    return 0;\n}",
+          "sub": "#include <stdio.h>\n\nint main(void){\n    int a = 10;\n    int b = 3;\n    int c = a - b;\n    printf(\"%d\\n\", c);\n    return 0;\n}",
+          "mul": "#include <stdio.h>\n\nint main(void){\n    int a = 10;\n    int b = 3;\n    int c = a * b;\n    printf(\"%d\\n\", c);\n    return 0;\n}",
+          "div": "#include <stdio.h>\n\nint main(void){\n    int a = 7;\n    int b = 2;\n    int c = a / b;\n    printf(\"%d\\n\", c);\n    return 0;\n}",
+          "all": "#include <stdio.h>\n\nint main(void){\n    int a = 10;\n    int b = 3;\n    int add = a + b;\n    int sub = a - b;\n    int mul = a * b;\n    int div = a / b;\n    printf(\"%d %d %d %d\\n\", add, sub, mul, div);\n    return 0;\n}",
+          "precedence": "#include <stdio.h>\n\nint main(void){\n    int x = 2 + 3 * 4;\n    int y = (2 + 3) * 4;\n    printf(\"%d %d\\n\", x, y);\n    return 0;\n}",
+          "scanfTwo": "#include <stdio.h>\n\nint main(void){\n    int a, b;\n    int sum;\n\n    printf(\"1つ目の数は？ \");\n    scanf(\"%d\", &a);\n    printf(\"2つ目の数は？ \");\n    scanf(\"%d\", &b);\n\n    sum = a + b;\n    printf(\"合計は%dです\\n\", sum);\n\n    return 0;\n}",
+          "ifBasic": "#include <stdio.h>\n\nint main(void){\n    int x = 8;\n\n    if(x > 5){\n        printf(\"5より大きいです\\n\");\n    }\n\n    printf(\"判定終了\\n\");\n    return 0;\n}",
+          "ifElse": "#include <stdio.h>\n\nint main(void){\n    int score = 75;\n\n    if(score >= 60){\n        printf(\"合格です\\n\");\n    }else{\n        printf(\"不合格です\\n\");\n    }\n\n    return 0;\n}",
+          "scanfIf": "#include <stdio.h>\n\nint main(void){\n    int score;\n\n    printf(\"点数を入力してください: \");\n    scanf(\"%d\", &score);\n\n    if(score >= 60){\n        printf(\"合格です\\n\");\n    }else{\n        printf(\"不合格です\\n\");\n    }\n\n    return 0;\n}"
+};
+        const labels = ['足し算', '引き算', '掛け算', '割り算', '四則演算まとめ', '括弧と計算順序',
+          '2つの数を入力する', 'if文の基本', 'if〜else文', '入力して条件判定'];
+        const options = () => [...ui.document.getElementById('sample-select').options].slice(1);
+        await record('初回getsampleで10種類・ID・名称・順序', fail => {
+          unlock();
+          if(JSON.stringify(options().map(option => option.value)) !== JSON.stringify(Object.keys(expectedCodes)) ||
+            JSON.stringify(options().map(option => option.textContent)) !== JSON.stringify(labels)) fail('選択肢が仕様と違います');
+          const data = JSON.parse(ui.localStorage.getItem(keys[0]));
+          if(data.version !== 1 || data.unlocked.join(',') !== 'samples') fail('保存schemaを変更しました');
+        });
+        await record('再アンロック・再描画で重複なし', fail => {
+          unlock(); ui.renderUnlockedSamples(); ui.renderUnlockedSamples();
+          if(options().length !== 10 || new Set(options().map(option => option.value)).size !== 10) fail('重複しました');
+        });
+        await record('従来のschema v1保存データを読み10種類表示', async fail => {
+          ui.localStorage.setItem(keys[0], JSON.stringify({version:1,unlocked:['samples']}));
+          ui = await load();
+          if(options().length !== 10) fail('既存解放済み環境へ追加されません');
+        });
+        const doc = ui.document;
+        const editor = ui.eval('editor');
+        const select = doc.getElementById('sample-select');
+        const input = doc.getElementById('scanfInput');
+        const choose = id => { select.value = id; select.dispatchEvent(new ui.Event('change', {bubbles:true})); };
+        const edit = value => { input.value = value; input.dispatchEvent(new ui.Event('input', {bubbles:true})); };
+        const output = () => doc.querySelector('.result-value .result-reveal-final')?.textContent ?? doc.querySelector('.result-value')?.textContent;
+        const idle = () => !doc.querySelector('.result-state, .waiting-state') &&
+          ui.eval('currentSteps.length === 0 && finalState === null && waitingCode === null && !pendingRunSuccess && !pendingInputInjection');
+        const wait = async () => {
+          // 入力待ちは最終RESULTの操作を有効にしないため、専用状態で確認します。
+          if(ui.cVisualizerLiteResult?.inputRequired){
+            const deadline = Date.now() + 5000;
+            while(Date.now() < deadline){
+              if(doc.querySelector('.result-state .waiting-state') && !ui.eval('pendingInputInjection')) return;
+              await new Promise(resolve => ui.setTimeout(resolve, 20));
+            }
+            throw new Error('入力待ち画面が5秒以内に表示されません');
+          }else await waitForUiResult(ui);
+        };
+        const run = async () => { doc.getElementById('visualize').click(); await wait(); };
+        const inject = async value => {
+          edit(value); ui.setScanfAccordionOpen(true); doc.getElementById('input-submit').click();
+          await wait();
+        };
+        for(const [id, code] of Object.entries(expectedCodes)){
+          await record(`${id} 完成コード一致・編集可能・自動RUNなし`, fail => {
+            const history = ui.eval('historyEntries.length');
+            choose(id);
+            if(editor.getValue() !== code || select.value !== id) fail('挿入コードが仕様と違います');
+            if(!idle() || ui.eval('historyEntries.length') !== history) fail('選択で自動実行または履歴保存しました');
+            editor.replaceRange(' ', {line:0,ch:0});
+            if(editor.getValue() === code || select.value !== '') fail('自由編集または手入力の選択解除ができません');
+          });
+        }
+        const legacyOutputs = {add:'13\n',sub:'7\n',mul:'30\n',div:'3\n',all:'13 7 30 3\n',precedence:'14 20\n'};
+        for(const [id, expected] of Object.entries(legacyOutputs)){
+          await record(`${id} 既存SAMPLEのRUN結果維持`, async fail => {
+            choose(id); await run();
+            if(output() !== expected || !ui.eval('hasCurrentResult()')) fail('既存SAMPLEの結果が違います');
+          });
+        }
+        await record('scanfTwo 選択で古い入力とRESULTを消し1回目の入力待ち', async fail => {
+          edit('999\n999'); choose('scanfTwo');
+          if(input.value !== '' || !idle()) fail('以前の入力またはRESULTが残りました');
+          await run();
+          if(!ui.cVisualizerLiteResult.inputRequired || ui.cVisualizerLiteResult.inputRequest.ordinal !== 1 ||
+            output() !== '1つ目の数は？ ') fail('1回目の待機が違います');
+        });
+        await record('scanfTwo INPUTで2回目へ段階的待機・入力エコー', async fail => {
+          await inject('10');
+          if(ui.cVisualizerLiteResult.inputRequest?.ordinal !== 2 || output() !== '1つ目の数は？ 10\n2つ目の数は？ ') fail('2回目の待機またはエコーが違います');
+        });
+        await record('scanfTwo INPUTで合計RESULT・FLOW・STEP・履歴', async fail => {
+          await inject('10\n3');
+          const expected = '1つ目の数は？ 10\n2つ目の数は？ 3\n合計は13です\n';
+          if(ui.cVisualizerLiteResult.inputRequired || output() !== expected) fail('最終RESULTが違います');
+          const steps = ui.cVisualizerLiteResult.steps;
+          if(steps.filter(step => step.scanfInput).length !== 2) fail('入力STEPが不足しています');
+          doc.querySelector('.result-flow-button').click();
+          if(!doc.querySelector('.step-top')) fail('FLOWへ進めません');
+          for(let i=0; i<steps.length; i++) doc.getElementById('step-next').click();
+          if(output() !== expected) fail('STEPからRESULTへ戻れません');
+          if(ui.eval('historyEntries[0].code') !== expectedCodes.scanfTwo) fail('実行履歴が保存されません');
+        });
+        const checkBranch = (truth, expected, fail) => {
+          if(output() !== expected) fail('分岐の出力が違います');
+          const index = ui.cVisualizerLiteResult.steps.findIndex(step => step.branchDecision);
+          if(index < 0){ fail('条件判定STEPがありません'); return; }
+          ui.eval(`activeStep = ${index}; renderStep()`);
+          const outcome = doc.querySelector('.decision-outcome')?.textContent;
+          if(outcome !== (truth ? '成立TRUE' : '不成立FALSE')) fail('条件成立表示が違います');
+          if(!truth && !doc.querySelector('.decision-paths')?.textContent.includes('IF · 通らない')) fail('不成立の経路が違います');
+          const length = ui.cVisualizerLiteResult.steps.length;
+          for(let i=0; i<length; i++) doc.getElementById('step-next').click();
+          if(output() !== expected) fail('分岐STEPからRESULTへ戻れません');
+        };
+        for(const [id, values] of [['ifBasic',[8,3]], ['ifElse',[75,40]]]){
+          for(const value of values){
+            await record(`${id} ${value}の実行経路・STEP`, async fail => {
+              choose(id);
+              if(value !== values[0]) editor.setValue(editor.getValue().replace(`= ${values[0]};`, `= ${value};`));
+              await run();
+              checkBranch(value === values[0], id === 'ifBasic'
+                ? (value === 8 ? '5より大きいです\n判定終了\n' : '判定終了\n')
+                : (value === 75 ? '合格です\n' : '不合格です\n'), fail);
+            });
+          }
+        }
+        for(const score of [75,40]){
+          await record(`scanfIf ${score}の入力待ち・INPUT・分岐`, async fail => {
+            edit('999'); choose('scanfIf');
+            if(input.value !== '' || !idle()) fail('古い状態を引き継ぎました');
+            await run();
+            if(!ui.cVisualizerLiteResult.inputRequired || output() !== '点数を入力してください: ') fail('最初の入力待ちが違います');
+            await inject(String(score));
+            checkBranch(score === 75, `点数を入力してください: ${score}\n${score === 75 ? '合格です' : '不合格です'}\n`, fail);
+          });
+        }
+        await record('INPUT注入中のSAMPLE切替で旧演出・RESULTを中断', async fail => {
+          choose('scanfTwo'); edit('2\n3'); ui.setScanfAccordionOpen(true);
+          doc.getElementById('input-submit').click();
+          if(!ui.eval('pendingInputInjection')) fail('検査前のINPUT演出が開始しません');
+          choose('scanfIf');
+          await new Promise(resolve => ui.setTimeout(resolve, 1100));
+          if(input.value !== '' || !idle() || doc.querySelector('.input-transfer, .input-injection-surface')) fail('旧注入演出または解析状態が復活しました');
+        });
+        await record('RUN Sweep中の切替と同じ入力SAMPLEの再選択もリセット', async fail => {
+          choose('ifElse'); doc.getElementById('visualize').click(); choose('scanfTwo');
+          edit('2\n3'); choose('scanfTwo');
+          await new Promise(resolve => ui.setTimeout(resolve, 1100));
+          if(input.value !== '' || !idle()) fail('同じSAMPLEまたはSweepの状態が残りました');
+        });
+        await record('placeholder・Light・入力方式・履歴schema維持', fail => {
+          if(input.placeholder !== 'scanfで使う入力値（1回につき1行入力）\n入力値が複数ある場合は消さずに改行します') fail('placeholderが変わりました');
+          doc.getElementById('editor-light-toggle').click(); choose('scanfIf');
+          if(!doc.querySelector('.editor-frame.is-light') || editor.getOption('inputStyle') !== 'textarea') fail('Lightまたは入力方式が変わりました');
+          if(JSON.parse(ui.localStorage.getItem(keys[1])).version !== 1) fail('履歴schemaが変わりました');
+        });
+      }catch(error){
+        await record('初期化', fail => fail(String(error)));
+      }finally{
+        if(saved) keys.forEach((key,index) => saved[index] === null ? ui.localStorage.removeItem(key) : ui.localStorage.setItem(key,saved[index]));
+        frame?.remove();
+      }
+      return results;
+    }
+
     async function runAllTests(){
       const results = testCases.map(testCase => ({ testCase, result:checkCase(testCase) }));
       results.push(...await checkDecisionUiCases());
@@ -5763,6 +5958,7 @@
       results.push(...await checkReturnHintUiCases());
       results.push(...await checkProgressiveResultUiCases());
       results.push(...await checkInputInjectionUiCases());
+      results.push(...await checkExpandedSampleUiCases());
       const passed = results.filter(item => item.result.passed).length;
       const failed = results.length - passed;
 
