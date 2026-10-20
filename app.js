@@ -732,6 +732,22 @@ function renderDecisionStep(decision){
   evaluation.append(element('span', 'decision-values', values), outcome);
 
   const paths = element('div', 'decision-paths');
+  if(decision.chainIndex !== undefined){
+    const label = decision.branchKind === 'else-if' ? 'ELSE IF' : 'IF';
+    paths.append(element('span', decision.result ? 'decision-path is-selected' : 'decision-path is-skipped',
+      `${label} · ${decision.result ? '選択' : '通らない'}`));
+    if(decision.selected === 'next'){
+      paths.append(element('span', 'decision-path', '次の条件へ進む'));
+    }else if(decision.selected === 'else'){
+      paths.append(element('span', 'decision-path is-selected', 'ELSE · 選択'));
+    }else if(!decision.result){
+      paths.append(element('span', 'decision-path', '分岐を選択せず次へ'));
+    }else{
+      paths.append(element('span', 'decision-path', 'この分岐を選択・残りの条件は評価しない'));
+    }
+    card.append(evaluation, paths);
+    return card;
+  }
   paths.append(element('span', decision.selected === 'if' ? 'decision-path is-selected' : 'decision-path is-skipped',
     `IF · ${decision.selected === 'if' ? '選択' : '通らない'}`));
   if(decision.selected === 'else' || decision.skipped === 'else'){
