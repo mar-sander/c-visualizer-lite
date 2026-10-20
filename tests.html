@@ -406,9 +406,9 @@
         expect:{ output:'出力はまだありません。', outputExcludes:['合格', '再挑戦'], variables:['score = 45'], variablesExclude:['bonus ='], warningMin:1, hintsInclude:['分岐内の変数宣言は未対応'], executedExcludes:['int bonus = 5;', 'printf("再挑戦'] }
       },
       {
-        name:'else ifは引き続き安全に停止',
+        name:'L-COND3 先頭false・else if true・後続復帰',
         code:`#include <stdio.h>\n\nint main(void){\n    int score = 75;\n    if(score >= 80){\n        printf("WRONG-A\\n");\n    }else if(score >= 60){\n        printf("WRONG-B\\n");\n    }else{\n        printf("WRONG-C\\n");\n    }\n    printf("判定終了\\n");\n    return 0;\n}`,
-        expect:{ output:'判定終了', outputExcludes:['WRONG-A', 'WRONG-B', 'WRONG-C'], warningMin:1, hintsInclude:['このelse付きif文は未対応'], executedExcludes:['printf("WRONG'] }
+        expect:{ output:'WRONG-B\n判定終了', outputExcludes:['WRONG-A', 'WRONG-C'], warningMax:0, decisions:[{condition:'score >= 80',result:false,selected:'next',skipped:'if'},{condition:'score >= 60',result:true,selected:'else-if',skipped:'remaining'}] }
       },
       {
         name:'if〜elseのelse側にある入れ子if',
@@ -546,9 +546,9 @@
         expect:{ output:'0', variables:['value = 0'], warningMin:1, hintsInclude:['3階層以上のifは未対応'], executedExcludes:['value = 1;', 'value = 8;', 'value = 9;', 'value = 2;'] }
       },
       {
-        name:'内側のelse ifを外側ごと安全停止',
+        name:'L-COND3 内側else ifの選択・外側処理復帰',
         code:`#include <stdio.h>\n\nint main(void){\n    int value = 0;\n    if(1){\n        value = 1;\n        if(0){\n            value = 8;\n        }else if(1){\n            value = 9;\n        }\n        value = 2;\n    }\n    printf("%d\\n", value);\n    return 0;\n}`,
-        expect:{ output:'0', variables:['value = 0'], warningMin:1, hintsInclude:['このelse付きif文は未対応'], executedExcludes:['value = 1;', 'value = 8;', 'value = 9;', 'value = 2;'] }
+        expect:{ output:'2', variables:['value = 2'], warningMax:0, decisions:[{condition:'1',result:true,selected:'if',skipped:null},{condition:'0',depth:2,result:false,selected:'next',skipped:'if'},{condition:'1',depth:2,result:true,selected:'else-if',skipped:null}], noStepsFor:['value = 8;'] }
       },
       {
         name:'内側if〜else内のforを外側ごと安全停止',
@@ -2318,9 +2318,9 @@
         expect:{ output:'出力はまだありません。', outputExcludes:['WRONG'], variables:['i = 9'], warningMin:1, hintsInclude:['3階層以上のifは未対応'], stepCounts:{ 'for文の初期化':0 }, executedExcludes:['printf("WRONG-DEPTH3', 'printf("WRONG-AFTER-DEPTH3'] }
       },
       {
-        name:'Stage3 for内else ifを事前拒否',
+        name:'L-COND3 for内else ifの順序評価',
         code:makeMainCode(`    int i = 7;\n    for(i = 0; i < 1; i++){\n        if(i == 0){\n            printf("WRONG-IF");\n        }else if(i == 1){\n            printf("WRONG-ELSE-IF");\n        }\n    }\n    printf("WRONG-AFTER");\n    return 0;`),
-        expect:{ output:'出力はまだありません。', outputExcludes:['WRONG'], variables:['i = 7'], warningMin:1, hintsInclude:['このelse付きif文は未対応'], stepCounts:{ 'for文の初期化':0 } }
+        expect:{ output:'WRONG-IFWRONG-AFTER', outputExcludes:['WRONG-ELSE-IF'], variables:['i = 1'], warningMax:0 }
       },
       {
         name:'Stage3 for内波かっこ省略ifを事前拒否',
@@ -4090,7 +4090,6 @@
     rejectedConditionalCase('非選択else側のchar宣言を事前拒否', 'if(1){\n    printf("WRONG");\n}else{\n    char value = 65;\n}', ['printf("WRONG");']);
     rejectedConditionalCase('選択else側のdouble宣言を事前拒否', 'if(0){\n    printf("WRONG");\n}else{\n    double value = 2.5;\n}', ['printf("WRONG");']);
     rejectedConditionalCase('非選択側の更新文を事前拒否', 'int x = 0;\nif(1){\n    x = 1;\n}else{\n    x++;\n}', ['x = 1;']);
-    rejectedConditionalCase('else ifは未対応', 'if(1){\n    printf("WRONG");\n}else if(0){\n    printf("WRONG2");\n}', ['printf("WRONG");']);
     conditionalTests.push({
       name:'L-COND1 論理演算子は未対応',
       code:makeMainCode('    if(1 && 1){\n        printf("WRONG");\n    }\n    return 0;'),
@@ -4173,8 +4172,6 @@
     }
     rejectedNestedCase('3階層目を事前拒否',
       'if(1){\n    if(1){\n        if(1){\n            printf("WRONG");\n        }\n    }\n}', '3階層以上のifは未対応');
-    rejectedNestedCase('else-ifを事前拒否',
-      'if(1){\n    if(1){\n        printf("WRONG");\n    }else if(0){\n        printf("WRONG");\n    }\n}', 'このelse付きif文は未対応');
     rejectedNestedCase('選択される内側の宣言を事前拒否',
       'if(1){\n    if(1){\n        int inside = 1;\n        printf("WRONG");\n    }\n}', '分岐内の変数宣言は未対応');
     rejectedNestedCase('未選択の内側の宣言も事前拒否',
@@ -5978,6 +5975,69 @@
       }
       return results;
     }
+
+
+    // L-COND3: 4つの通過経路を、評価STEPと出力の両方で回帰確認します。
+    const elseIfPaths = [
+      {score:95, output:'A', decisions:[
+        {condition:'score >= 80',result:true,selected:'if',skipped:'remaining'}]},
+      {score:72, output:'B', decisions:[
+        {condition:'score >= 80',result:false,selected:'next',skipped:'if'},
+        {condition:'score >= 60',result:true,selected:'else-if',skipped:'remaining'}]},
+      {score:50, output:'C', decisions:[
+        {condition:'score >= 80',result:false,selected:'next',skipped:'if'},
+        {condition:'score >= 60',result:false,selected:'next',skipped:'else-if'},
+        {condition:'score >= 40',result:true,selected:'else-if',skipped:'remaining'}]},
+      {score:20, output:'D', decisions:[
+        {condition:'score >= 80',result:false,selected:'next',skipped:'if'},
+        {condition:'score >= 60',result:false,selected:'next',skipped:'else-if'},
+        {condition:'score >= 40',result:false,selected:'else',skipped:'else-if'}]}
+    ];
+    for(const {score,output,decisions} of elseIfPaths){
+      const body = [
+        '    int score = ' + score + ';',
+        '    if(score >= 80){',
+        '        printf("A");',
+        '    }else if(score >= 60){',
+        '        printf("B");',
+        '    }else if(score >= 40){',
+        '        printf("C");',
+        '    }else{',
+        '        printf("D");',
+        '    }',
+        '    return 0;'
+      ].join('\n');
+      testCases.push({name:'L-COND3 4分岐 score=' + score,
+        code:makeMainCode(body),expect:{output,warningMax:0,decisions}});
+    }
+    testCases.push({
+      name:'L-COND3 成立後の未到達式を評価しない',
+      code:makeMainCode('    if(1){\n        printf("YES");\n    }else if(undefinedValue){\n        printf("WRONG");\n    }\n    return 0;'),
+      expect:{output:'YES',warningMax:0,decisions:[
+        {condition:'1',result:true,selected:'if',skipped:'remaining'}],
+        noStepsFor:['if(undefinedValue)','printf("WRONG")']}
+    });
+    testCases.push({
+      name:'L-COND3 elseなし・全条件不成立',
+      code:makeMainCode('    int score = 20;\n    if(score >= 80){\n        printf("A");\n    }else if(score >= 60){\n        printf("B");\n    }\n    return 0;'),
+      expect:{output:'出力はまだありません。',warningMax:0,decisions:[
+        {condition:'score >= 80',result:false,selected:'next',skipped:'if'},
+        {condition:'score >= 60',result:false,selected:'none',skipped:'else-if'}]}
+    });
+    testCases.push({
+      name:'L-COND3 改行したelse if',
+      code:makeMainCode('    if(0){\n        printf("A");\n    }\n    else if(1){\n        printf("B");\n    }\n    return 0;'),
+      expect:{output:'B',warningMax:0,decisions:[
+        {condition:'0',result:false,selected:'next',skipped:'if'},
+        {condition:'1',result:true,selected:'else-if',skipped:null}]}
+    });
+    testCases.push({
+      name:'L-COND3 float型のelse if',
+      code:makeMainCode('    float temperature = 36.5f;\n    if(temperature >= 38.0f){\n        printf("HIGH");\n    }else if(temperature >= 36.0f){\n        printf("NORMAL");\n    }else{\n        printf("LOW");\n    }\n    return 0;'),
+      expect:{output:'NORMAL',warningMax:0,decisions:[
+        {condition:'temperature >= 38.0f',result:false,selected:'next',skipped:'if'},
+        {condition:'temperature >= 36.0f',result:true,selected:'else-if',skipped:'remaining'}]}
+    });
 
     async function runAllTests(){
       const results = testCases.map(testCase => ({ testCase, result:checkCase(testCase) }));

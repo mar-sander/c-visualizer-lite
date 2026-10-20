@@ -1351,6 +1351,52 @@ function stripWrappingParentheses(expr){
   return stripped;
 }
 
+// 条件チェーンの事前検査専用。変数の値や型を参照せず、演算も行いません。
+// 未到達の式の0除算・未初期化等は実行時まで評価しません。
+function inspectConditionalExpressionSyntax(expression){
+  const source = stripWrappingParentheses(expression);
+  const found = findComparison(source);
+  if(!found.ok) return false;
+  const parts = found.comparison
+    ? [source.slice(0, found.comparison.index),
+       source.slice(found.comparison.index + found.comparison.operator.length)]
+    : [source];
+  return parts.every(part => {
+    if(/\+\+|--/.test(codeOutsideStringAndLineComment(part))) return false;
+    const tokenized = tokenizeExpression(part);
+    if(!tokenized.ok) return false;
+    const tokens = tokenized.tokens;
+    let position = 0;
+    function factor(){
+      const token = tokens[position++];
+      if(token === '+' || token === '-') return factor();
+      if(token === '('){
+        if(!sum() || tokens[position++] !== ')') return false;
+        return true;
+      }
+      if(token?.startsWith("'")) return parseCharacterLiteral(token).ok;
+      return token !== undefined && /^(?:[A-Za-z_]\w*|\d+|(?:\d+\.\d*|\.\d+)[fF]?)$/.test(token);
+    }
+    function term(){
+      if(!factor()) return false;
+      while(['*', '/', '%'].includes(tokens[position])){
+        position++;
+        if(!factor()) return false;
+      }
+      return true;
+    }
+    function sum(){
+      if(!term()) return false;
+      while(['+', '-'].includes(tokens[position])){
+        position++;
+        if(!term()) return false;
+      }
+      return true;
+    }
+    return sum() && position === tokens.length;
+  });
+}
+
 function evaluateExpression(expr, variables, resolveArrayAccess = null, variableTypes = null){
   // 比較式全体を包む冗長な括弧だけを外し、内側の比較を見つけます。
   const normalizedExpr = stripWrappingParentheses(expr);
@@ -2564,7 +2610,9 @@ function visualizeCode(){
       if(index > startIndex && /^\s*if\s*\(/.test(structuralCode)) nested = true;
       if(/\belse\b/.test(structuralCode)) hasElse = true;
       if(index > startIndex && (/^\s*(for|while|switch)\s*\(/.test(structuralCode) || /^\s*do\b/.test(structuralCode))) unsupportedBlock = true;
-      const structuralBraces = bracesOutsideString(trimmed);
+      const rangeCode = index === startIndex && trimmed.includes('{')
+        ? trimmed.slice(trimmed.indexOf('{')) : trimmed;
+      const structuralBraces = bracesOutsideString(rangeCode);
       if(index > startIndex && structuralBraces.includes('{')) unsupportedBlock = true;
       for(const brace of structuralBraces){
         depth += brace === '{' ? 1 : -1;
@@ -2734,6 +2782,84 @@ function visualizeCode(){
       );
     }
 
+    // 各branchの解析は反復で進めます。else-ifは入れ子階層を増やしません。
+    function parseConditionalChain(ifIndex, depth, condition, firstBranch, elseIndex, elseHeaderCode){
+      const branches = [{
+        branchKind:'if', condition, startIndex:ifIndex,
+        bodyStartIndex:ifIndex + 1, endIndex:firstBranch.endIndex, nestedIfs:firstBranch.nestedIfs
+      }];
+      let previousBranch = firstBranch;
+      while(elseIndex >= 0){
+        const header = elseHeaderCode.match(/^else\s+if\s*\((.*)\)\s*\{$/);
+        const fallback = /^else\s*\{$/.test(elseHeaderCode);
+        if(!header && !fallback){
+          return failure('else ifの書き方を確認', 'else ifでは条件と開き波かっこを同じ行に書いてください。条件チェーン全体は実行しません。');
+        }
+        if(header && containsArrayElementSyntax(header[1])){
+          return failure('if条件での配列要素readはまだ未対応', '配列要素を条件式に含む条件チェーン全体は実行しません。');
+        }
+        const body = parseBranch(elseIndex + 1, depth);
+        if(!body.ok) return body;
+        branches.push({
+          branchKind:fallback ? 'else' : 'else-if', condition:header ? header[1].trim() : null,
+          startIndex:elseIndex, bodyStartIndex:elseIndex + 1, endIndex:body.endIndex, nestedIfs:body.nestedIfs
+        });
+        const afterClose = body.closingCode.slice(1).trim();
+        const candidate = nextSignificantLine(body.endIndex + 1, safeEndIndex + 1);
+        const candidateCode = candidate <= safeEndIndex
+          ? codeOutsideStringAndLineComment(executableLines[candidate]).trim() : '';
+        elseIndex = afterClose ? body.endIndex : (/^else\b/.test(candidateCode) ? candidate : -1);
+        elseHeaderCode = afterClose || candidateCode;
+        if(afterClose && !/^else\b/.test(afterClose)){
+          return failure('閉じ波かっこを確認', '条件チェーンの閉じ波かっこの後ろに未対応のコードがあります。全体は実行しません。');
+        }
+        if(fallback && elseIndex >= 0){
+          return failure('elseの位置を確認', 'elseは条件チェーンの最後に1回だけ書いてください。全体は実行しません。');
+        }
+        previousBranch = body;
+      }
+      const node = {
+        ok:true, depth, startIndex:ifIndex, endIndex:previousBranch.endIndex,
+        conditionalChain:{ branches }
+      };
+      if(!inspectChainSyntax(node)){
+        return failure('条件チェーンの構文を確認', '未選択側を含め、条件式または本文に不正・未対応の式があります。条件チェーン全体は実行しません。');
+      }
+      return node;
+    }
+
+    // 本文と内側ifも構文だけを検査します。未定義変数等の実行時エラーはここでは調べません。
+    function inspectChainSyntax(node){
+      const branches = node.conditionalChain?.branches ?? [
+        { condition:node.condition, bodyStartIndex:node.ifBodyStartIndex, endIndex:node.ifEndIndex, nestedIfs:node.ifNestedIfs },
+        ...(node.hasElse ? [{ condition:null, bodyStartIndex:node.elseBodyStartIndex, endIndex:node.elseEndIndex, nestedIfs:node.elseNestedIfs }] : [])
+      ];
+      return branches.every(branch => {
+        if(branch.condition !== null && !inspectConditionalExpressionSyntax(branch.condition)) return false;
+        const nestedMap = new Map(branch.nestedIfs.map(child => [child.startIndex, child]));
+        for(let index = branch.bodyStartIndex; index < branch.endIndex; index++){
+          const nested = nestedMap.get(index);
+          if(nested){
+            if(!inspectChainSyntax(nested)) return false;
+            index = nested.endIndex;
+            continue;
+          }
+          const code = executableLines[index].trim();
+          const assignment = code.match(/^[A-Za-z_]\w*\s*=\s*(.+);$/);
+          if(assignment && !inspectConditionalExpressionSyntax(assignment[1])) return false;
+          const print = matchSimplePrintfStatement(code);
+          if(print){
+            const format = parsePrintfFormat(print[1]);
+            const args = print[2] === undefined ? [] : splitArgs(print[2]);
+            if(print[2] !== undefined && (!print[2].trim() || /,\s*$/.test(print[2]))) return false;
+            if(!format.ok || args.length !== format.specifiers.length ||
+               args.some(arg => !inspectConditionalExpressionSyntax(arg))) return false;
+          }
+        }
+        return true;
+      });
+    }
+
     function parseIf(ifIndex, depth, allowElse){
       const structuralCode = codeOutsideStringAndLineComment(executableLines[ifIndex]).trim();
       const headerMatch = structuralCode.match(/^if\s*\((.*)\)\s*\{$/);
@@ -2796,15 +2922,23 @@ function visualizeCode(){
         );
       }
 
+      if(/^else\s+if\b/.test(elseHeaderCode)){
+        return parseConditionalChain(ifIndex, depth, headerMatch[1].trim(), ifBranch, elseIndex, elseHeaderCode);
+      }
+
       if(!/^else\s*\{$/.test(elseHeaderCode)){
         return failure(
           'このelse付きif文は未対応',
-          '単純なelse付きif文だけに対応しています。else if、波かっこの省略、elseの次の行に開き波かっこを書く形は実行しません。'
+          'elseには同じ行に開き波かっこを書いてください。波かっこの省略、次の行に開き波かっこを書く形は実行しません。'
         );
       }
 
       const elseBranch = parseBranch(elseIndex + 1, depth);
       if(!elseBranch.ok) return elseBranch;
+      const afterElseIndex = nextSignificantLine(elseBranch.endIndex + 1, safeEndIndex + 1);
+      if(afterElseIndex <= safeEndIndex && /^else\b/.test(codeOutsideStringAndLineComment(executableLines[afterElseIndex]).trim())){
+        return failure('elseの位置を確認', 'elseは条件チェーンの最後に1回だけ書いてください。if文全体は実行しません。');
+      }
       if(elseBranch.closingCode !== '}'){
         return failure(
           '閉じ波かっこを確認',
@@ -2870,7 +3004,28 @@ function visualizeCode(){
     addAnalysis(analysis, node.elseEndIndex + 1, 'if〜else文の処理範囲の終わりです。');
   }
 
+  function describeConditionalChainBoundaries(node){
+    const branches = node.conditionalChain.branches;
+    branches.forEach((branch, index) => {
+      if(index > 0){
+        addAnalysis(analysis, branch.startIndex + 1, branch.branchKind === 'else'
+          ? 'それまでの条件がすべて不成立だった場合のelse側の始まりです。'
+          : '前の条件が不成立だった場合にだけ評価するelse ifの条件です。');
+        for(let gap = branches[index - 1].endIndex + 1; gap < branch.startIndex; gap++){
+          processSimpleLine(lines[gap], gap, true);
+        }
+      }
+      addAnalysis(analysis, branch.endIndex + 1, index === branches.length - 1
+        ? `条件チェーンの終わりです。${node.depth > 1 ? '外側の処理へ戻ります。' : ''}`
+        : 'この分岐の処理範囲の終わりです。');
+    });
+  }
+
   function describeIfBoundaries(node){
+    if(node.conditionalChain){
+      describeConditionalChainBoundaries(node);
+      return;
+    }
     if(node.depth > 1){
       describeNestedIfBoundaries(node);
     }else{
@@ -2878,7 +3033,76 @@ function visualizeCode(){
     }
   }
 
+  // 構文検査済みのチェーンを先頭から評価し、最初のtrueで終了します。
+  function executeConditionalChain(node, context){
+    const branches = node.conditionalChain.branches;
+    const conditionCount = branches.filter(branch => branch.branchKind !== 'else').length;
+    const hasFallbackElse = branches.at(-1).branchKind === 'else';
+    function skipBranch(branch, reason){
+      addAnalysis(analysis, branch.startIndex + 1, reason);
+      markSkippedIfBranch(branch.bodyStartIndex, branch.endIndex, branch.nestedIfs, reason,
+        '外側の分岐が選択されなかったため、この入れ子のif文は評価されませんでした。');
+    }
+    for(let index = 0; index < branches.length; index++){
+      const branch = branches[index];
+      const lineNo = branch.startIndex + 1;
+      if(branch.branchKind !== 'else'){
+        const evaluated = evaluateExpression(branch.condition, variables, null, variableTypes);
+        if(!evaluated.ok){
+          addAnalysis(analysis, lineNo, `条件チェーンの条件を評価できませんでした。${context.stopOnRuntimeError ? 'プログラムの実行を停止します。' : '残りの分岐は実行しません。'}`);
+          addHint(hints, lineNo, 'if文の条件を評価できません', escapeHtml(evaluated.error));
+          warningLines.add(lineNo);
+          addStep(lineNo, '条件チェーンの条件を評価できないため、残りの分岐は実行しません。');
+          if(context.stopOnRuntimeError){
+            return { status:'execution-stopped', stopKind:'runtime-error', stopIndex:branch.startIndex,
+              reason:`${context.insideWhile ? 'while文' : 'for文'}内のif文で実行を停止したため、この行は実行されませんでした。` };
+          }
+          branches.slice(index).forEach(rest => skipBranch(rest, '条件を評価できなかったため、この分岐は実行されませんでした。'));
+          describeIfBoundaries(node);
+          return { status:'normal' };
+        }
+        const conditionMet = evaluated.value !== 0;
+        const nextCondition = index + 1 < conditionCount;
+        const comparison = evaluated.comparison;
+        const decision = {
+          kind:'if', depth:node.depth, condition:branch.condition,
+          comparison:comparison ? {
+            left:{ source:comparison.leftSource, value:comparison.leftValue, display:comparison.leftDisplay },
+            operator:comparison.operator,
+            right:{ source:comparison.rightSource, value:comparison.rightValue, display:comparison.rightDisplay }
+          } : null,
+          evaluatedValue:evaluated.value, evaluatedDisplay:displayScalarValue(evaluated.value, evaluated.type),
+          result:conditionMet,
+          selected:conditionMet ? branch.branchKind : (nextCondition ? 'next' : (hasFallbackElse ? 'else' : 'none')),
+          skipped:conditionMet ? (index + 1 < branches.length ? 'remaining' : null) : branch.branchKind,
+          chainIndex:index, chainLength:conditionCount, branchKind:branch.branchKind, hasFallbackElse,
+          chainStartLine:node.startIndex + 1
+        };
+        const explanation = conditionMet ? 'この分岐を選択し、残りの条件は評価しません。'
+          : nextCondition ? 'この分岐は通らず、次の条件へ進みます。'
+          : hasFallbackElse ? 'すべての条件が不成立だったため、else側を実行します。'
+          : 'すべての条件が不成立だったため、条件チェーンの後へ進みます。';
+        addAnalysis(analysis, lineNo, `${branch.branchKind === 'if' ? 'IF' : 'ELSE IF'}の条件 <code>${escapeHtml(branch.condition)}</code> を判定しました。${explanation}`);
+        addStep(lineNo, `${escapeHtml(branch.condition)}を判定しました。<br>${explanation}`, true, [], decision);
+        if(!conditionMet){
+          markSkippedIfBranch(branch.bodyStartIndex, branch.endIndex, branch.nestedIfs,
+            'この条件が不成立だったため、この行は実行されませんでした。',
+            '外側の分岐が選択されなかったため、この入れ子のif文は評価されませんでした。');
+          continue;
+        }
+      }
+      const branchResult = executeIfBranch(branch.bodyStartIndex, branch.endIndex, branch.nestedIfs, context);
+      if(branchResult.status !== 'normal') return branchResult;
+      branches.slice(index + 1).forEach(rest => skipBranch(rest,
+        '先の分岐が選択されたため、この条件・本文は評価・実行されませんでした。'));
+      break;
+    }
+    describeIfBoundaries(node);
+    return { status:'normal' };
+  }
+
   function executeIfNode(node, context = {}){
+    if(node.conditionalChain) return executeConditionalChain(node, context);
     const stopOnRuntimeError = context.stopOnRuntimeError === true;
     const parentLoopLabel = context.insideWhile === true ? 'while文' : 'for文';
     const nested = node.depth > 1;
@@ -3049,6 +3273,15 @@ function visualizeCode(){
       const nestedIf = nestedIfMap.get(index);
       if(nestedIf){
         addAnalysis(analysis, nestedIf.startIndex + 1, nestedReason);
+        if(nestedIf.conditionalChain){
+          for(const branch of nestedIf.conditionalChain.branches){
+            if(branch.startIndex !== nestedIf.startIndex) addAnalysis(analysis, branch.startIndex + 1, nestedReason);
+            markSkippedIfBody(branch.bodyStartIndex, branch.endIndex, false, reason);
+          }
+          describeIfBoundaries(nestedIf);
+          index = nestedIf.endIndex;
+          continue;
+        }
         markSkippedIfBody(nestedIf.ifBodyStartIndex, nestedIf.ifEndIndex, false, reason);
         if(nestedIf.hasElse){
           markSkippedIfBody(nestedIf.elseBodyStartIndex, nestedIf.elseEndIndex, false, reason);
@@ -3153,8 +3386,8 @@ function visualizeCode(){
     }
 
     const inlineBody = elseCode.replace(/^else\b/, '').trim();
-    if(inlineBody.startsWith('{')){
-      return findBracedUnsupportedBlock(elseIndex).endIndex;
+    if(bracesOutsideString(inlineBody).includes('{')){
+      return findIfBlock(elseIndex).endIndex;
     }
     if(inlineBody !== ''){
       if(unsupportedControlInfo(inlineBody)){
@@ -4490,6 +4723,13 @@ function visualizeCode(){
       const range = findUnsupportedControlRange(index);
       warnUnsupportedControl(index, range, unsupportedControl);
       index = range.endIndex;
+      continue;
+    }
+
+    if(/^(?:}\s*)?else\b/.test(structuralCode)){
+      const endIndex = Math.min(findElseControlledStatementEnd(index), executionEndIndex - 1);
+      warnUnsupportedIf(index, endIndex, '対応するif文を確認', '対応するif文がないelseの処理は実行しません。');
+      index = endIndex;
       continue;
     }
 
