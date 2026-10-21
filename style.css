@@ -30,6 +30,40 @@
   box-sizing: border-box
 }
 
+/* L-UI14: 通常テキスト・フォーム・CODEで共通の選択配色にします。 */
+::selection {
+  background: rgba(69, 69, 69, 0.85);
+  color: #ffe600;
+}
+
+::-moz-selection {
+  background: rgba(69, 69, 69, 0.85);
+  color: #ffe600;
+}
+
+.CodeMirror .CodeMirror-selected,
+.CodeMirror.CodeMirror-focused .CodeMirror-selected {
+  background: rgba(69, 69, 69, 0.85);
+}
+
+.CodeMirror .CodeMirror-line::selection,
+.CodeMirror .CodeMirror-line span::selection {
+  background: rgba(69, 69, 69, 0.85);
+  color: #ffe600;
+}
+
+.CodeMirror .CodeMirror-line::-moz-selection,
+.CodeMirror .CodeMirror-line span::-moz-selection {
+  background: rgba(69, 69, 69, 0.85);
+  color: #ffe600;
+}
+
+/* Lightと構文色より優先し、選択解除時には元のtoken色へ戻します。 */
+.editor-frame .CodeMirror .cm-selection-text,
+.editor-frame .CodeMirror .cm-selection-text span {
+  color: #ffe600 !important;
+}
+
 body {
   margin: 0;
   background: radial-gradient(circle at 75% 0%,#233746 0,transparent 36rem),var(--bg);

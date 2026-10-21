@@ -4560,7 +4560,8 @@
             failures.push(`判定STEPの変数snapshot: 期待「${JSON.stringify(expected.decisionVariablesAtStep)}」/ 実際「${JSON.stringify(step.variablesAtStep)}」`);
           }
         });
-        if(bridge.steps.some(step => step.branchDecision && !/^\s*if\s*\(/.test(
+        // 同じ行の閉じ波括弧に続くelse ifも、条件判定STEPです。
+        if(bridge.steps.some(step => step.branchDecision && !/^\s*(?:}\s*)?(?:else\s+)?if\s*\(/.test(
           testCase.code.split('\n')[step.lineNo - 1] || ''
         ))) failures.push('if以外のSTEPにbranchDecisionが付いている');
       }
@@ -5819,7 +5820,7 @@
           ui = await load();
           if(options().length !== 10) fail('既存解放済み環境へ追加されません');
         });
-        await record('既存解放済みでも毎回アンロック演出を再生', fail => {
+        await record('既存解放済みでも毎回アンロック演出を再生', async fail => {
           const dialog = ui.document.getElementById('secret-code-dialog');
           const success = ui.document.getElementById('secret-code-success');
           for(let trial = 0; trial < 2; trial++){
@@ -5833,7 +5834,11 @@
               if(animation !== 'none') fail('reduced-motionで動作アニメーションが残っています');
             }else if(!animation.includes('unlock-frame-pulse')) fail('通常表示で成功アニメーションがありません');
             if(options().length !== 10 || new Set(options().map(option => option.value)).size !== 10) fail('SAMPLE選択肢が重複しました');
-            dialog.close();
+            // closeイベントの後片付けは非同期なので、実際の通知を待ちます。
+            await new Promise(resolve => {
+              dialog.addEventListener('close', resolve, {once:true});
+              dialog.close();
+            });
           }
           if(ui.eval('unlockFeedbackTimer') !== 0 || dialog.classList.contains('is-unlocking')) fail('演出タイマーの後片付けに失敗しました');
         });
@@ -6039,6 +6044,113 @@
         {condition:'temperature >= 36.0f',result:true,selected:'else-if',skipped:'remaining'}]}
     });
 
+    // L-UI14: 描画された文字色と選択レイヤー、編集・undoの維持を検査します。
+    async function checkSelectionPaletteUiCases(){
+      const results = [];
+      const frame = createUiTestFrame();
+      const record = async (name, check) => {
+        const failures = [];
+        try{ await check(message => failures.push(message)); }
+        catch(error){ failures.push(String(error)); }
+        results.push({testCase:{name:`L-UI14 ${name}`}, result:{passed:failures.length === 0,
+          failures, actual:{output:'選択配色と編集を確認',warningCount:0}}});
+      };
+      try{
+        await new Promise(resolve => frame.addEventListener('load', resolve, {once:true}));
+        const ui = frame.contentWindow;
+        const doc = ui.document;
+        const cm = doc.querySelector('.CodeMirror').CodeMirror;
+        const code = '#include <stdio.h>\n\nint main(void){\n    int score = 70;\n    if(score >= 80){\n        printf("A");\n    }else if(score >= 60){\n        printf("B");\n    }else{\n        printf("C");\n    }\n    return 0;\n}';
+        cm.setValue(code);
+        cm.clearHistory();
+        const tokens = () => [...doc.querySelectorAll('.CodeMirror-code span[class*="cm-"]')]
+          .filter(node => node.textContent.trim());
+        const selectAll = () => cm.setSelection({line:0,ch:0}, {line:cm.lastLine(),ch:1});
+        const palette = fail => {
+          const layers = [...doc.querySelectorAll('.CodeMirror-selected')];
+          if(!layers.length || layers.some(node => ui.getComputedStyle(node).backgroundColor !== 'rgba(69, 69, 69, 0.85)')){
+            fail('選択背景が指定色ではありません');
+          }
+          if(!tokens().length || tokens().some(node => ui.getComputedStyle(node).color !== 'rgb(255, 230, 0)')){
+            fail('構文色が混在する選択文字が黄色ではありません');
+          }
+        };
+        await record('Dark・全選択・複数行の背景と実際のtoken色', fail => {
+          cm.focus(); selectAll(); palette(fail);
+          if(cm.getSelection() !== code || cm.getValue() !== code) fail('選択またはソースが変化しました');
+          if(cm.historySize().undo !== 0) fail('選択でundo履歴が増えました');
+        });
+        await record('Light切替・選択保持・非focus', fail => {
+          doc.getElementById('editor-light-toggle').click();
+          palette(fail);
+          cm.getInputField().blur();
+          palette(fail);
+          if(cm.getSelection() !== code) fail('Light切替で選択を失いました');
+        });
+        await record('解除で構文色が復元・単語選択は周囲へ漏れない', fail => {
+          cm.setCursor({line:2,ch:0});
+          const normal = ui.getComputedStyle(doc.querySelector('.CodeMirror-code .cm-type')).color;
+          if(normal === 'rgb(255, 230, 0)') fail('解除しても黄色が残っています');
+          cm.setSelection({line:3,ch:4},{line:3,ch:7});
+          const types = [...doc.querySelectorAll('.CodeMirror-code .cm-type')];
+          if(ui.getComputedStyle(types.find(node => node.textContent === 'int' && node.closest('pre').textContent.includes('score'))).color !== 'rgb(255, 230, 0)') fail('選択した単語が黄色ではありません');
+          if(ui.getComputedStyle(types[0]).color !== normal) fail('未選択tokenまで色が変わりました');
+        });
+        await record('選択の置換・undo・redo・再描画', fail => {
+          cm.replaceSelection('double', 'end', '+input');
+          const edited = cm.getValue();
+          cm.undo();
+          if(cm.getValue() !== code) fail('undoで元のコードへ戻りません');
+          cm.redo();
+          if(cm.getValue() !== edited) fail('redoで編集を復元できません');
+          cm.setValue(code); selectAll();
+          cm.scrollTo(null, 100); cm.refresh(); cm.focus(); palette(fail);
+          cm.setCursor({line:0,ch:0});
+          if(doc.querySelector('.cm-selection-text')) fail('再描画後に選択表示が残っています');
+        });
+        await record('複数選択・選択だけでは保存履歴も値も変えない', fail => {
+          const history = ui.eval('historyEntries.length');
+          cm.clearHistory();
+          cm.setSelections([{anchor:{line:3,ch:4},head:{line:3,ch:7}},
+            {anchor:{line:11,ch:4},head:{line:11,ch:10}}]);
+          if(cm.getSelections().join('|') !== 'int|return') fail('複数選択が変化しました');
+          if(cm.getValue() !== code || cm.historySize().undo !== 0 || ui.eval('historyEntries.length') !== history) fail('選択が値または履歴を変更しました');
+        });
+        await record('通常本文・INPUTの選択配色と入力値', fail => {
+          doc.getElementById('scanf-accordion-toggle').click();
+          const input = doc.getElementById('scanfInput');
+          input.value = '10\n20'; input.focus(); input.setSelectionRange(0,5);
+          for(const node of [input, doc.querySelector('.footnote')]){
+            const style = ui.getComputedStyle(node, '::selection');
+            if(style.backgroundColor !== 'rgba(69, 69, 69, 0.85)' || style.color !== 'rgb(255, 230, 0)') fail('本文またはINPUTの選択指定が違います');
+          }
+          if(input.value.substring(input.selectionStart,input.selectionEnd) !== '10\n20') fail('INPUTの選択値が変化しました');
+        });
+        await record('else if RUN・RESULT・FLOW・STEP・履歴の選択指定', async fail => {
+          cm.setCursor({line:0,ch:0});
+          doc.getElementById('visualize').click();
+          await waitForUiResult(ui);
+          if(ui.cVisualizerLiteResult.output !== 'B') fail('else ifの結果が変わりました');
+          const checkColor = node => {
+            if(!node){ fail('対象表示がありません'); return; }
+            const style = ui.getComputedStyle(node, '::selection');
+            if(style.color !== 'rgb(255, 230, 0)' || style.backgroundColor !== 'rgba(69, 69, 69, 0.85)') fail('結果表示の選択配色が違います');
+          };
+          checkColor(doc.querySelector('.result-value'));
+          doc.querySelector('.result-flow-button').click();
+          checkColor(doc.getElementById('flow-content'));
+          doc.getElementById('step-next').click();
+          checkColor(doc.getElementById('step-count'));
+          doc.getElementById('history-open').click();
+          checkColor(doc.querySelector('.history-code'));
+          doc.getElementById('history-close').click();
+        });
+      }catch(error){
+        results.push({testCase:{name:'L-UI14 初期化'},result:{passed:false,failures:[String(error)],actual:{output:'',warningCount:0}}});
+      }finally{ frame.remove(); }
+      return results;
+    }
+
     async function runAllTests(){
       const results = testCases.map(testCase => ({ testCase, result:checkCase(testCase) }));
       results.push(...await checkDecisionUiCases());
@@ -6048,6 +6160,7 @@
       results.push(...await checkProgressiveResultUiCases());
       results.push(...await checkInputInjectionUiCases());
       results.push(...await checkExpandedSampleUiCases());
+      results.push(...await checkSelectionPaletteUiCases());
       const passed = results.filter(item => item.result.passed).length;
       const failed = results.length - passed;
 
