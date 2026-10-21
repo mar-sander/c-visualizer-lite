@@ -13,6 +13,22 @@ const editor = CodeMirror.fromTextArea($('code-input'), {
   indentUnit:4,
   gutters:['CodeMirror-linenumbers']
 });
+
+// textarea方式の選択文字は通常のDOM選択では着色できないため、
+// 選択範囲だけを表示用マークで覆います。値やundo履歴は変更しません。
+let selectionTextMarks = [];
+editor.on('cursorActivity', () => {
+  editor.operation(() => {
+    selectionTextMarks.forEach(mark => mark.clear());
+    selectionTextMarks = editor.listSelections()
+      .filter(range => !range.empty())
+      .map(range => editor.markText(range.from(), range.to(), {
+        className:'cm-selection-text',
+        addToHistory:false
+      }));
+  });
+});
+
 const editorLightToggle = $('editor-light-toggle');
 editorLightToggle.addEventListener('click', () => {
   const isLight = editorFrame.classList.toggle('is-light');
