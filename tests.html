@@ -4465,6 +4465,36 @@
 
       // Lite bridgeはUIと履歴へ渡す形式を保ったまま、型metadataを別tableに持ちます。
       const bridge = window.cVisualizerLiteResult;
+
+      if(expected.phase1){
+        const all = bridge.steps;
+        if(all.some(step => typeof step.outputAtStep !== 'string' || !Array.isArray(step.variablesAtStep) ||
+          step.variablesAtStep.some(pair => !Array.isArray(pair) || pair.length !== 2 || typeof pair[1] !== 'string'))){
+          failures.push('P1: 全STEPの出力・スカラーsnapshot契約が必要');
+        }
+        const arrays = all.map(step => step.variablesAtStep);
+        const pairs = arrays.filter(Array.isArray).flat();
+        if(new Set(arrays).size !== arrays.length || new Set(pairs).size !== pairs.length){
+          failures.push('P1: STEP間でsnapshotまたはpair参照を共有している');
+        }
+        if(expected.phase1.omissions){
+          const actualOmissions = all.filter(step => step.stepKind === 'loop-omission');
+          if(actualOmissions.length !== expected.phase1.omissions.length) failures.push('P1: 省略STEP数/識別子が違う');
+          expected.phase1.omissions.forEach((want,index) => {
+            const step=actualOmissions[index]; if(!step) return;
+            const range=step.omittedRange;
+            if(!range || range.first!==want.first || range.last!==want.last || range.kind!==want.kind || range.sourceLine!==step.lineNo) failures.push('P1: 省略範囲metadataが違う');
+            if(step.branchDecision || step.loopDecision || step.scanfInput) failures.push('P1: 省略を実行/条件として扱っている');
+            if(step.outputAtStep!==want.output) failures.push('P1: 省略末尾の出力が違う: '+JSON.stringify(step.outputAtStep));
+            for(const [name,value] of Object.entries(want.vars)){
+              if(new Map(step.variablesAtStep).get(name)!==value) failures.push('P1: 省略末尾の変数 '+name+' が違う');
+            }
+            const next=all[all.indexOf(step)+1];
+            if(JSON.stringify(next.variablesAtStep)!==JSON.stringify(step.variablesAtStep) || next.outputAtStep!==step.outputAtStep) failures.push('P1: 次条件への偽の状態変化');
+          });
+        }
+      }
+
       if(expected.missingReturnZero !== undefined &&
          bridge.learningHints?.missingReturnZero !== expected.missingReturnZero){
         failures.push('構造化されたreturn省略ヒントの判定が違います');
@@ -6249,6 +6279,436 @@
       return results;
     }
 
+    // Phase 1: F01/F02 only. Existing cases and expectations are preserved.
+    testCases.push(...[
+  {
+    "name": "L-WHILE1 P1 COMPRESS_7",
+    "code": "#include <stdio.h>\nint main(void){\nint i=0;\nwhile(i<7){\nprintf(\"%d \",i);\ni++;\n}\nprintf(\"%d\",i);\nreturn 0;\n}",
+    "input": "",
+    "expect": {
+      "output": "0 1 2 3 4 5 6 7",
+      "warningMax": 0,
+      "phase1": {
+        "snapshots": true,
+        "omissions": [
+          {
+            "kind": "while",
+            "first": 4,
+            "last": 6,
+            "output": "0 1 2 3 4 5 ",
+            "vars": {
+              "i": "6"
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P1 COMPRESS_10",
+    "code": "#include <stdio.h>\nint main(void){\nint i=0;\nwhile(i<10){\nprintf(\"%d \",i);\ni++;\n}\nprintf(\"%d\",i);\nreturn 0;\n}",
+    "input": "",
+    "expect": {
+      "output": "0 1 2 3 4 5 6 7 8 9 10",
+      "warningMax": 0,
+      "phase1": {
+        "snapshots": true,
+        "omissions": [
+          {
+            "kind": "while",
+            "first": 4,
+            "last": 9,
+            "output": "0 1 2 3 4 5 6 7 8 ",
+            "vars": {
+              "i": "9"
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P1 FOR_COMPRESS",
+    "code": "#include <stdio.h>\nint main(void){\nint i;\nfor(i=0;i<7;i++){\nprintf(\"%d \",i);\n}\n\nreturn 0;\n}",
+    "input": "",
+    "expect": {
+      "output": "0 1 2 3 4 5 6",
+      "warningMax": 0,
+      "phase1": {
+        "snapshots": true,
+        "omissions": [
+          {
+            "kind": "for",
+            "first": 4,
+            "last": 6,
+            "output": "0 1 2 3 4 5 ",
+            "vars": {
+              "i": "6"
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P1 EDU_04_2",
+    "code": "#include <stdio.h>\nint main(void){\nint i=1,sum=0;\nwhile(i<=10){\nprintf(\"ｉの値は %d \\n\",i);\nsum = sum+i;\ni++;\n}\nprintf(\"１から１０までの和は %d \\n\",sum);\nreturn 0;\n}",
+    "input": "",
+    "expect": {
+      "output": "ｉの値は 1 \nｉの値は 2 \nｉの値は 3 \nｉの値は 4 \nｉの値は 5 \nｉの値は 6 \nｉの値は 7 \nｉの値は 8 \nｉの値は 9 \nｉの値は 10 \n１から１０までの和は 55",
+      "warningMax": 0,
+      "phase1": {
+        "snapshots": true,
+        "omissions": [
+          {
+            "kind": "while",
+            "first": 4,
+            "last": 9,
+            "output": "ｉの値は 1 \nｉの値は 2 \nｉの値は 3 \nｉの値は 4 \nｉの値は 5 \nｉの値は 6 \nｉの値は 7 \nｉの値は 8 \nｉの値は 9 \n",
+            "vars": {
+              "i": "10",
+              "sum": "45"
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P1 CHAR_PAREN_OPEN",
+    "code": "#include <stdio.h>\nint main(void){\nchar c='(';\nwhile(c=='('){\nc='x';\n}\nprintf(\"%c\",c);\nreturn 0;\n}",
+    "input": "",
+    "expect": {
+      "output": "x",
+      "warningMax": 0,
+      "phase1": {
+        "snapshots": true
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P1 CHAR_PAREN_CLOSE",
+    "code": "#include <stdio.h>\nint main(void){\nchar c=')';\nwhile(c==')'){\nc='x';\n}\nprintf(\"%c\",c);\nreturn 0;\n}",
+    "input": "",
+    "expect": {
+      "output": "x",
+      "warningMax": 0,
+      "phase1": {
+        "snapshots": true
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P1 CHAR_PAREN_DIRECT",
+    "code": "#include <stdio.h>\nint main(void){\nchar c='(';\nwhile('('==c){\nc='x';\n}\nprintf(\"%c\",c);\nreturn 0;\n}",
+    "input": "",
+    "expect": {
+      "output": "x",
+      "warningMax": 0,
+      "phase1": {
+        "snapshots": true
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P1 CHAR_BRACE_OPEN",
+    "code": "#include <stdio.h>\nint main(void){\nchar c='{';\nint i=0;\nwhile(c=='{'){\ni++;\nc='x';\n}\nprintf(\"%d\",i);\nreturn 0;\n}",
+    "input": "",
+    "expect": {
+      "output": "1",
+      "warningMax": 0,
+      "phase1": {
+        "snapshots": true
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P1 CHAR_BRACE_CLOSE",
+    "code": "#include <stdio.h>\nint main(void){\nchar c='}';\nint i=0;\nwhile(c=='}'){\ni++;\nc='x';\n}\nprintf(\"%d\",i);\nreturn 0;\n}",
+    "input": "",
+    "expect": {
+      "output": "1",
+      "warningMax": 0,
+      "phase1": {
+        "snapshots": true
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P1 CHAR_BRACE_CLOSE_PREFIX",
+    "code": "#include <stdio.h>\nint main(void){\nint x=9;\nprintf(\"PRE\");\nchar c='}';\nint i=0;\nwhile(c=='}'){\ni++;\nc='x';\n}\nprintf(\"%d\",i);\nreturn 0;\n}",
+    "input": "",
+    "expect": {
+      "output": "PRE1",
+      "warningMax": 0,
+      "phase1": {
+        "snapshots": true
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P1 CHAR_DOUBLE_QUOTE",
+    "code": "#include <stdio.h>\nint main(void){\nchar c='\"';\nint i=0;\nwhile(c=='\"'){\ni++;\nc='x';\n}\nprintf(\"%d\",i);\nreturn 0;\n}",
+    "input": "",
+    "expect": {
+      "output": "1",
+      "warningMax": 0,
+      "phase1": {
+        "snapshots": true
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P1 CHAR_BACKSLASH",
+    "code": "#include <stdio.h>\nint main(void){\nchar c='\\\\';\nint i=0;\nwhile(c=='\\\\'){\ni++;\nc='x';\n}\nprintf(\"%d\",i);\nreturn 0;\n}",
+    "input": "",
+    "expect": {
+      "output": "1",
+      "warningMax": 0,
+      "phase1": {
+        "snapshots": true
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P1 COMMENT_BRACES",
+    "code": "#include <stdio.h>\nint main(void){\nint i=0;\nwhile(i<2){\n// while(1){\nprintf(\"while } { \");\ni++;\n}\nprintf(\"%d\",i);\nreturn 0;\n}",
+    "input": "",
+    "expect": {
+      "output": "while } { while } { 2",
+      "warningMax": 0,
+      "phase1": {
+        "snapshots": true
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P1 NO_OUTPUT_OMISSION",
+    "code": "#include <stdio.h>\nint main(void){\nint i=0;\nwhile(i<7){\ni++;\n}\nprintf(\"%d\",i);\nreturn 0;\n}",
+    "expect": {
+      "output": "7",
+      "warningMax": 0,
+      "phase1": {
+        "snapshots": true,
+        "omissions": [
+          {
+            "kind": "while",
+            "first": 4,
+            "last": 6,
+            "output": "",
+            "vars": {
+              "i": "6"
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P1 SEQUENTIAL_OMISSIONS",
+    "code": "#include <stdio.h>\nint main(void){\nint i=0;\nwhile(i<7){\nprintf(\"A\");\ni++;\n}\ni=0;\nwhile(i<7){\nprintf(\"B\");\ni++;\n}\nreturn 0;\n}",
+    "expect": {
+      "output": "AAAAAAABBBBBBB",
+      "warningMax": 0,
+      "phase1": {
+        "snapshots": true,
+        "omissions": [
+          {
+            "kind": "while",
+            "first": 4,
+            "last": 6,
+            "output": "AAAAAA",
+            "vars": {
+              "i": "6"
+            }
+          },
+          {
+            "kind": "while",
+            "first": 4,
+            "last": 6,
+            "output": "AAAAAAABBBBBB",
+            "vars": {
+              "i": "6"
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P1 NESTED_FOR_OMISSIONS",
+    "code": "#include <stdio.h>\nint main(void){\nint i,j;\nfor(i=0;i<2;i++){\nfor(j=0;j<7;j++){\nprintf(\"X\");\n}\n}\nreturn 0;\n}",
+    "expect": {
+      "output": "XXXXXXXXXXXXXX",
+      "warningMax": 0,
+      "phase1": {
+        "snapshots": true,
+        "omissions": [
+          {
+            "kind": "for",
+            "first": 4,
+            "last": 6,
+            "output": "XXXXXX",
+            "vars": {
+              "i": "0",
+              "j": "6"
+            }
+          },
+          {
+            "kind": "for",
+            "first": 4,
+            "last": 6,
+            "output": "XXXXXXXXXXXXX",
+            "vars": {
+              "i": "1",
+              "j": "6"
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P1 FOR_PAREN_OPEN",
+    "code": "#include <stdio.h>\nint main(void){\nint i=0;\nfor(i=0;i<'(';i++){\nprintf(\"x\");\n}\nreturn 0;\n}",
+    "expect": {
+      "output": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "warningMax": 0,
+      "phase1": {
+        "snapshots": true
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P1 FOR_PAREN_CLOSE",
+    "code": "#include <stdio.h>\nint main(void){\nint i=0;\nfor(i=0;i<')';i++){\nprintf(\"x\");\n}\nreturn 0;\n}",
+    "expect": {
+      "output": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "warningMax": 0,
+      "phase1": {
+        "snapshots": true
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P1 FOR_SEMICOLON",
+    "code": "#include <stdio.h>\nint main(void){\nint i=0;\nfor(i=';';i<60;i++){\nprintf(\"x\");\n}\nreturn 0;\n}",
+    "expect": {
+      "output": "x",
+      "warningMax": 0,
+      "phase1": {
+        "snapshots": true
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P1 CHAR_SLASH_COMMENTS",
+    "code": "#include <stdio.h>\nint main(void){\nchar c='/'; // } (\n/* { while( )\n } */\nint i=0;\nwhile(i<1){\nprintf(\"%c\",c);\ni++;\n}\nreturn 0;\n}",
+    "expect": {
+      "output": "/",
+      "warningMax": 0,
+      "phase1": {
+        "snapshots": true
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P1 ESCAPED_SINGLE_QUOTE",
+    "code": "#include <stdio.h>\nint main(void){\nchar c='\\'';\nint i=0;\nwhile(i<1){\nprintf(\"%c\",c);\ni++;\n}\nreturn 0;\n}",
+    "expect": {
+      "output": "'",
+      "warningMax": 0,
+      "phase1": {
+        "snapshots": true
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P1 QUOTE_THEN_COMMENT",
+    "code": "#include <stdio.h>\nint main(void){\nchar c='\"'; /* } \" ( */\nint i=0;\nwhile(i<1){\nprintf(\"{)/* // %c\",c);\ni++;\n}\nreturn 0;\n}",
+    "expect": {
+      "output": "{)/* // \"",
+      "warningMax": 0,
+      "phase1": {
+        "snapshots": true
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P1 IF_CHARACTER_PAREN",
+    "code": "#include <stdio.h>\nint main(void){\nint i=0;\nwhile(i<1){\nif('('==40){\nprintf(\"Y\");\n}else if(')'==41){\nprintf(\"N\");\n}\ni++;\n}\nreturn 0;\n}",
+    "expect": {
+      "output": "Y",
+      "warningMax": 0,
+      "phase1": {
+        "snapshots": true
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P1 main互換 int main() {",
+    "code": "#include <stdio.h>\nint main() {\nint x=9;\nprintf(\"PRE\");\nchar c='}';\nint i=0;\nwhile(c=='}'){\ni++;\nc='x';\n}\nprintf(\"%d\",i);\nreturn 0;\n}",
+    "expect": {
+      "output": "PRE1",
+      "warningMax": 0,
+      "phase1": {
+        "snapshots": true
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P1 main互換 int main(void) {",
+    "code": "#include <stdio.h>\nint main(void)\n{\nint x=9;\nprintf(\"PRE\");\nchar c='}';\nint i=0;\nwhile(c=='}'){\ni++;\nc='x';\n}\nprintf(\"%d\",i);\nreturn 0;\n}",
+    "expect": {
+      "output": "PRE1",
+      "warningMax": 0,
+      "phase1": {
+        "snapshots": true
+      }
+    }
+  }
+]);
+
+    async function checkPhase1UiCases(){
+      const results=[], frame=createUiTestFrame();
+      try{
+        await new Promise(resolve=>frame.addEventListener('load',resolve,{once:true}));
+        const ui=frame.contentWindow,doc=ui.document,cm=doc.querySelector('.CodeMirror').CodeMirror;
+        const errors=[];ui.addEventListener('error',event=>errors.push(event.message));
+        for(const test of testCases.filter(t=>t.expect.phase1?.omissions)){
+          const failures=[];
+          try{
+            cm.setValue(test.code);doc.getElementById('scanfInput').value='';doc.getElementById('visualize').click();
+            await waitForUiResult(ui);
+            const steps=ui.cVisualizerLiteResult.steps;
+            const frozen=JSON.stringify(steps);
+            doc.querySelector('.result-flow-button').click();
+            for(const [index,step] of steps.entries()){
+              if(!step.text.includes('省略'))continue;
+              ui.eval('activeStep = '+index+'; renderStep()');
+              for(let repeat=0;repeat<2;repeat++){
+                if(doc.getElementById('output-value').textContent!==step.outputAtStep && !(step.outputAtStep==='' && doc.getElementById('output-value').textContent==='—'))failures.push('省略出力がsnapshotと違う');
+                if(doc.querySelector('#flow-content .value-card,#flow-content .decision-card'))failures.push('省略を変数更新/条件カードとして表示');
+                doc.getElementById('step-next').click();
+                const fake=[...doc.querySelectorAll('.scalar-variable-history')].map(n=>n.textContent);
+                if(fake.some(t=>t.includes('— →')))failures.push('省略後に偽の初期化表示');
+                doc.getElementById('step-prev').click();
+              }
+              doc.getElementById('step-prev').click();doc.getElementById('step-next').click();
+            }
+            ui.eval('activeStep = '+(steps.length-1)+'; renderStep()');doc.getElementById('step-next').click();
+            if(!doc.querySelector('.result-state'))failures.push('最後からRESULTに戻れない');
+            doc.querySelector('.result-flow-button').click();doc.getElementById('step-prev').click();
+            if(!doc.querySelector('.result-state'))failures.push('先頭からRESULTに戻れない');
+            if(JSON.stringify(steps)!==frozen)failures.push('往復操作がsnapshotを変更した');
+          }catch(e){failures.push(String(e));}
+          if(errors.length)failures.push(...errors.splice(0));
+          results.push({testCase:{name:test.name+' UI往復'},result:{passed:!failures.length,failures,actual:{output:'省略FLOW・前後・RESULT',warningCount:0}}});
+        }
+      }finally{frame.remove();}
+      return results;
+    }
+
     async function runAllTests(){
       const results = testCases.map(testCase => ({ testCase, result:checkCase(testCase) }));
       results.push(...await checkDecisionUiCases());
@@ -6259,6 +6719,7 @@
       results.push(...await checkInputInjectionUiCases());
       results.push(...await checkExpandedSampleUiCases());
       results.push(...await checkSelectionPaletteUiCases());
+      results.push(...await checkPhase1UiCases());
       const passed = results.filter(item => item.result.passed).length;
       const failed = results.length - passed;
 
