@@ -662,6 +662,30 @@ function parseVariableUpdate(text, requiresSemicolon, allowIdentifierOperand = f
   return null;
 }
 
+// 文字定数内の括弧とエスケープを除外し、構文上の閉じ括弧を探します。
+function findClosingParenOutsideCharacter(code, openIndex){
+  let depth = 0;
+  let inCharacter = false;
+  let escaped = false;
+  for(let index = openIndex; index < code.length; index++){
+    const ch = code[index];
+    if(escaped){ escaped = false; continue; }
+    if(inCharacter){
+      if(ch === '\\') escaped = true;
+      else if(ch === "'") inCharacter = false;
+      continue;
+    }
+    if(ch === "'"){ inCharacter = true; continue; }
+    if(ch === '(') depth++;
+    if(ch === ')'){
+      depth--;
+      if(depth === 0) return index;
+      if(depth < 0) return -1;
+    }
+  }
+  return -1;
+}
+
 // forヘッダを、初期化・条件・更新の3要素へ分けて構造として保持します。
 function parseForHeader(structuralCode){
   const code = String(structuralCode).trim();
@@ -676,19 +700,7 @@ function parseForHeader(structuralCode){
     return { ok:false, error:'forの直後に、初期化・条件・更新を囲む丸かっこが必要です。' };
   }
 
-  let depth = 0;
-  let closeIndex = -1;
-  for(let index = openIndex; index < code.length; index++){
-    if(code[index] === '(') depth++;
-    if(code[index] === ')'){
-      depth--;
-      if(depth === 0){
-        closeIndex = index;
-        break;
-      }
-      if(depth < 0) break;
-    }
-  }
+  const closeIndex = findClosingParenOutsideCharacter(code, openIndex);
   if(closeIndex < 0){
     return { ok:false, error:'forヘッダの閉じ丸かっこを確認してください。' };
   }
@@ -706,14 +718,26 @@ function parseForHeader(structuralCode){
   const headerText = code.slice(openIndex + 1, closeIndex);
   const clauses = [];
   let clause = '';
-  depth = 0;
+  let depth = 0;
+  let inCharacter = false;
+  let escaped = false;
   for(const character of headerText){
-    if(character === '(') depth++;
-    if(character === ')') depth--;
+    if(escaped){
+      escaped = false;
+    }else if(inCharacter){
+      if(character === '\\') escaped = true;
+      else if(character === "'") inCharacter = false;
+    }else if(character === "'"){
+      inCharacter = true;
+    }else if(character === '('){
+      depth++;
+    }else if(character === ')'){
+      depth--;
+    }
     if(depth < 0){
       return { ok:false, error:'forヘッダ内の丸かっこの対応を確認してください。' };
     }
-    if(character === ';' && depth === 0){
+    if(character === ';' && depth === 0 && !inCharacter){
       clauses.push(clause.trim());
       clause = '';
     }else{
@@ -788,19 +812,7 @@ function parseWhileHeader(structuralCode){
     return { ok:false, error:'whileの直後に、条件を囲む丸かっこが必要です。' };
   }
 
-  let depth = 0;
-  let closeIndex = -1;
-  for(let index = openIndex; index < code.length; index++){
-    if(code[index] === '(') depth++;
-    if(code[index] === ')'){
-      depth--;
-      if(depth === 0){
-        closeIndex = index;
-        break;
-      }
-      if(depth < 0) break;
-    }
-  }
+  const closeIndex = findClosingParenOutsideCharacter(code, openIndex);
   if(closeIndex < 0){
     return { ok:false, error:'while条件の閉じ丸かっこを確認してください。' };
   }
@@ -825,27 +837,32 @@ function parseWhileHeader(structuralCode){
 // 文字列と行コメントを空白に置き換え、構文として読む部分だけを残します。
 function codeOutsideStringAndLineComment(text){
   let code = '';
-  let inString = false;
+  let quote = null;
   let escape = false;
   for(let index = 0; index < text.length; index++){
     const ch = text[index];
     if(escape){
       escape = false;
-      code += ' ';
+      code += quote === '"' ? ' ' : ch;
       continue;
     }
-    if(ch === '\\' && inString){
+    if(ch === '\\' && quote){
       escape = true;
-      code += ' ';
+      code += quote === '"' ? ' ' : ch;
       continue;
     }
-    if(ch === '"'){
-      inString = !inString;
-      code += ' ';
+    if(ch === quote){
+      code += quote === '"' ? ' ' : ch;
+      quote = null;
       continue;
     }
-    if(!inString && ch === '/' && text[index + 1] === '/') break;
-    code += inString ? ' ' : ch;
+    if(!quote && (ch === '"' || ch === "'")){
+      quote = ch;
+      code += ch === '"' ? ' ' : ch;
+      continue;
+    }
+    if(!quote && ch === '/' && text[index + 1] === '/') break;
+    code += quote === '"' ? ' ' : ch;
   }
   return code;
 }
@@ -854,7 +871,7 @@ function codeOutsideStringAndLineComment(text){
 // 改行位置を保つことで、元のコードと行番号を一致させます。
 function codeWithoutComments(text){
   let code = '';
-  let inString = false;
+  let quote = null;
   let inLineComment = false;
   let inBlockComment = false;
   let escape = false;
@@ -889,23 +906,28 @@ function codeWithoutComments(text){
       escape = false;
       continue;
     }
-    if(inString && ch === '\\'){
+    if(quote && ch === '\\'){
       code += ch;
       escape = true;
       continue;
     }
-    if(ch === '"'){
+    if(ch === quote){
       code += ch;
-      inString = !inString;
+      quote = null;
       continue;
     }
-    if(!inString && ch === '/' && next === '/'){
+    if(!quote && (ch === '"' || ch === "'")){
+      code += ch;
+      quote = ch;
+      continue;
+    }
+    if(!quote && ch === '/' && next === '/'){
       code += '  ';
       index++;
       inLineComment = true;
       continue;
     }
-    if(!inString && ch === '/' && next === '*'){
+    if(!quote && ch === '/' && next === '*'){
       code += '  ';
       index++;
       inBlockComment = true;
@@ -913,13 +935,27 @@ function codeWithoutComments(text){
     }
 
     code += ch;
+    if(ch === '\n' && quote === "'") quote = null;
   }
 
   return code;
 }
 
 function bracesOutsideString(text){
-  return [...codeOutsideStringAndLineComment(text)].filter(ch => ch === '{' || ch === '}');
+  const braces = [];
+  let quote = null;
+  let escaped = false;
+  for(const ch of codeOutsideStringAndLineComment(text)){
+    if(escaped){ escaped = false; continue; }
+    if(quote){
+      if(ch === '\\') escaped = true;
+      else if(ch === quote) quote = null;
+      continue;
+    }
+    if(ch === "'"){ quote = ch; continue; }
+    if(ch === '{' || ch === '}') braces.push(ch);
+  }
+  return braces;
 }
 
 // 対応形式のmain関数を探し、波かっこの深さから処理範囲を特定します。
@@ -964,15 +1000,8 @@ function inlineIfBodyCode(structuralCode){
   if(!ifMatch) return null;
 
   const openIndex = structuralCode.indexOf('(', ifMatch.index);
-  let depth = 0;
-  for(let index = openIndex; index < structuralCode.length; index++){
-    if(structuralCode[index] === '(') depth++;
-    if(structuralCode[index] === ')'){
-      depth--;
-      if(depth === 0) return structuralCode.slice(index + 1).trim();
-    }
-  }
-  return null;
+  const closeIndex = findClosingParenOutsideCharacter(structuralCode, openIndex);
+  return closeIndex < 0 ? null : structuralCode.slice(closeIndex + 1).trim();
 }
 
 // 未対応の制御構文について、閉じ丸かっこの後ろにある本文を返します。
@@ -981,15 +1010,8 @@ function inlineUnsupportedControlBodyCode(structuralCode){
   if(!controlMatch) return null;
 
   const openIndex = structuralCode.indexOf('(', controlMatch.index);
-  let depth = 0;
-  for(let index = openIndex; index < structuralCode.length; index++){
-    if(structuralCode[index] === '(') depth++;
-    if(structuralCode[index] === ')'){
-      depth--;
-      if(depth === 0) return structuralCode.slice(index + 1).trim();
-    }
-  }
-  return null;
+  const closeIndex = findClosingParenOutsideCharacter(structuralCode, openIndex);
+  return closeIndex < 0 ? null : structuralCode.slice(closeIndex + 1).trim();
 }
 
 function makeVisibleDisplayText(text){
@@ -3819,10 +3841,17 @@ function visualizeCode(){
           })));
 
         if(shouldCompress && recordIndex === LEADING_WHILE_EXPLANATION_ITERATIONS - 1){
+          // 最後に表示する反復の直前が、省略区間の実際の末尾です。
+          // 後続の実行結果を先読みせず、スカラーのpairも独立させます。
+          const omittedState = originalSteps[lastRecord.before.stepLength - 1];
           rebuiltSteps.push({
             step:0,
             lineNo:firstLineNo,
-            text:omissionText(omittedFirst, omittedLast)
+            text:omissionText(omittedFirst, omittedLast),
+            stepKind:'loop-omission',
+            omittedRange:{first:omittedFirst, last:omittedLast, kind:'while', sourceLine:firstLineNo},
+            outputAtStep:omittedState.outputAtStep,
+            variablesAtStep:omittedState.variablesAtStep.map(([name, value]) => [name, value])
           });
         }
       }
@@ -4388,10 +4417,17 @@ function visualizeCode(){
         ));
 
         if(shouldCompress && recordIndex === LEADING_FOR_EXPLANATION_ITERATIONS - 1){
+          // 最後に表示する反復の直前には、for更新と内側forも完了済みです。
+          // 後続の実行結果を先読みせず、スカラーのpairも独立させます。
+          const omittedState = originalSteps[lastRecord.before.stepLength - 1];
           rebuiltSteps.push({
             step:0,
             lineNo:firstLineNo,
-            text:omissionText(omittedFirst, omittedLast)
+            text:omissionText(omittedFirst, omittedLast),
+            stepKind:'loop-omission',
+            omittedRange:{first:omittedFirst, last:omittedLast, kind:'for', sourceLine:firstLineNo},
+            outputAtStep:omittedState.outputAtStep,
+            variablesAtStep:omittedState.variablesAtStep.map(([name, value]) => [name, value])
           });
         }
       }

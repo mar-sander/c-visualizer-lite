@@ -825,6 +825,7 @@ function renderStep(){
   if(!hasCurrentResult() || activeStep < 0) return;
   cancelResultReveal();
   const step = currentSteps[activeStep];
+  const isOmission = step.stepKind === 'loop-omission';
   showExecutionLine(step.lineNo);
   const top = element('div', 'step-top');
   top.append(
@@ -839,7 +840,7 @@ function renderStep(){
   code.append(element('code', '', editor.getLine(step.lineNo - 1)));
   const explanation = element('div', 'flow-detail');
   explanation.append(
-    element('small', '', 'コードは何をしてる？'),
+    element('small', '', isOmission ? '反復説明の省略' : 'コードは何をしてる？'),
     element('p', '', step.branchDecision
       ? describeDecisionPurpose(step.branchDecision)
       : step.scanfInput
@@ -853,7 +854,7 @@ function renderStep(){
     input.append(element('small', '', 'INPUT'), element('span', '', step.scanfInput.inputDisplay));
   }
   // 判定では値が変わらないので、空の変化カードを重ねません。
-  const change = (step.branchDecision || step.loopDecision?.kind === 'for') ? null : renderValueChange(activeStep);
+  const change = (isOmission || step.branchDecision || step.loopDecision?.kind === 'for') ? null : renderValueChange(activeStep);
   const nextStep = currentSteps[activeStep + 1];
   const next = element('div', 'next-line');
   next.append(
@@ -886,8 +887,8 @@ function buildResultTranscript(result){
   }
 
   for(const step of result.steps){
-    // 反復説明の省略マーカーにはsnapshotがないため、次の実STEPまで待ちます。
-    const output = step.outputAtStep ?? previousOutput;
+    // 省略STEPも、省略区間末尾に到達した時点のsnapshotから出力を取り込みます。
+    const output = step.outputAtStep;
     appendOutput(output.slice(previousOutput.length));
     previousOutput = output;
     if(step.scanfInput){
