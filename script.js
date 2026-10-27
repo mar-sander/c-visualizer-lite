@@ -616,7 +616,7 @@ function parseMultipleScalarDeclaration(text){
 }
 
 // ++ / -- / += / -= を、for専用ではない共通の変数更新として読み取ります。
-function parseVariableUpdate(text, requiresSemicolon){
+function parseVariableUpdate(text, requiresSemicolon, allowIdentifierOperand = false){
   const trimmed = String(text).trim();
   const hasSemicolon = trimmed.endsWith(';');
   if(requiresSemicolon !== hasSemicolon) return null;
@@ -643,9 +643,12 @@ function parseVariableUpdate(text, requiresSemicolon){
   }
 
   match = code.match(/^([A-Za-z_]\w*)\s*(\+=|-=)\s*([-+]?(?:(?:\d+\.\d*|\.\d+)[fF]?|\d+))$/);
+  if(!match && allowIdentifierOperand){
+    match = code.match(/^([A-Za-z_]\w*)\s*(\+=|-=)\s*([A-Za-z_]\w*)$/);
+  }
   if(match){
     const operand = match[3];
-    const amount = Number(operand.replace(/[fF]$/, ''));
+    const amount = /^[A-Za-z_]\w*$/.test(operand) ? NaN : Number(operand.replace(/[fF]$/, ''));
     return {
       name:match[1],
       operator:match[2],
@@ -739,7 +742,7 @@ function parseForHeader(structuralCode){
     };
   }
 
-  const variableUpdate = parseVariableUpdate(updateText, false);
+  const variableUpdate = parseVariableUpdate(updateText, false, true);
   let update;
   if(variableUpdate){
     update = { type:'variable-update', value:variableUpdate };
@@ -1766,11 +1769,12 @@ function visualizeCode(){
     return `${access.indexVariable}の値は${access.resolvedIndex}です。そのため、${access.name}[${access.sourceIndex}]は${access.name}[${access.resolvedIndex}]を表します。`;
   }
 
-  function addStep(lineNo, text, markAsExecuted = true, arrayViews = [], branchDecision = null, scanfInputData = null){
+  function addStep(lineNo, text, markAsExecuted = true, arrayViews = [], branchDecision = null, scanfInputData = null, loopDecision = null){
     const step = { step:stepNo++, lineNo, text };
     if(arrayViews.length) step.arrayViews = arrayViews;
     if(branchDecision) step.branchDecision = branchDecision;
     if(scanfInputData) step.scanfInput = scanfInputData;
+    if(loopDecision) step.loopDecision = loopDecision;
     // Lite UI用：STEPを記録した瞬間の状態です。後のprintfや代入を遡及させません。
     step.outputAtStep = output;
     step.variablesAtStep = variableOrder.map(name => [
@@ -1889,11 +1893,12 @@ function visualizeCode(){
     setScalarValue(name, after);
     const beforeDisplay = displayScalarValue(before, type);
     const afterDisplay = displayScalarValue(after, type);
-    const direction = update.amount >= 0 ? '増やし' : '減らし';
+    const delta = update.operator === '-=' || update.operator === '--' ? -operand.value : operand.value;
+    const direction = delta >= 0 ? '増やし' : '減らし';
     addAnalysis(
       analysis,
       lineNo,
-      `${analysisPrefix}<code>${escapeHtml(update.source)}</code> により、変数 <code>${name}</code> を <code>${Math.abs(update.amount)}</code> ${direction}、<code>${escapeHtml(beforeDisplay)}</code> から <code>${escapeHtml(afterDisplay)}</code> に更新しました。`
+      `${analysisPrefix}<code>${escapeHtml(update.source)}</code> により、変数 <code>${name}</code> を <code>${Math.abs(delta)}</code> ${direction}、<code>${escapeHtml(beforeDisplay)}</code> から <code>${escapeHtml(afterDisplay)}</code> に更新しました。`
     );
     addStep(lineNo, `${stepPrefix}${name} の中身を ${escapeHtml(beforeDisplay)} から ${escapeHtml(afterDisplay)} に変えました。更新：${escapeHtml(update.source)}`);
     return { ok:true, value:after };
@@ -2202,7 +2207,7 @@ function visualizeCode(){
       return;
     }
 
-    const variableUpdate = parseVariableUpdate(trimmed, true);
+    const variableUpdate = parseVariableUpdate(trimmed, true, insideFor);
     if(variableUpdate){
       const result = executeVariableUpdate(variableUpdate, lineNo);
       return !result.ok && insideLoop ? 'execution-error' : undefined;
@@ -4155,7 +4160,7 @@ function visualizeCode(){
         return failure(arrayStatement.message, arrayStatement.title);
       }
 
-      const variableUpdate = parseVariableUpdate(structuralBodyCode, true);
+      const variableUpdate = parseVariableUpdate(structuralBodyCode, true, true);
       if(/\+\+|--/.test(structuralBodyCode) && variableUpdate === null){
         return failure('for文の本体に、式中で副作用を利用する++ / --があります。現在のVisualizerでは単独更新文だけに対応しているため、for文全体を実行しません。', '式中の++・--は未対応');
       }
@@ -4462,7 +4467,25 @@ function visualizeCode(){
           )
           : '');
       addAnalysis(analysis, lineNo, `${conditionDisplayPrefix}<strong>for文の条件：</strong> ${conditionExplanation}${nextAction}`);
-      addStep(lineNo, `${conditionDisplayPrefix}for文の条件 ${escapeHtml(node.condition)} を判定しました。<br>${nextAction}`);
+      // LiteのSTEPへ、for条件の判定結果を文字列の再解析なしで渡します。
+      // 反復ごとに判定を記録し、最後の不成立判定も独立したSTEPにします。
+      const loopDecision = {
+        kind:'for',
+        condition:node.condition,
+        iteration:nextLocalIteration,
+        depth:node.forDepth,
+        label:node.explanationLabel || 'FOR',
+        comparison:conditionResult.comparison ? {
+          left:{source:conditionResult.comparison.leftSource, display:conditionResult.comparison.leftDisplay},
+          operator:conditionResult.comparison.operator,
+          right:{source:conditionResult.comparison.rightSource, display:conditionResult.comparison.rightDisplay}
+        } : null,
+        evaluatedDisplay:displayScalarValue(conditionResult.value, conditionResult.type),
+        result:conditionMet,
+        nextAction:reachesSafetyLimit ? 'limit' : conditionMet ? 'body' : 'exit'
+      };
+      addStep(lineNo, `${conditionDisplayPrefix}for文の条件 ${escapeHtml(node.condition)} を判定しました。<br>${nextAction}`,
+        true, [], null, null, loopDecision);
 
       if(!conditionMet){
         const endDisplayPrefix = forExplanationPrefix(

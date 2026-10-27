@@ -776,6 +776,26 @@ function renderDecisionStep(decision){
   return card;
 }
 
+// forの条件をLite固有のFLOWカードで表示。値はエンジンの判定済みmetadataだけを使用します。
+function renderForDecisionStep(decision){
+  const card = element('div', 'decision-card for-decision-card');
+  const heading = decision.depth > 1 ? `${decision.label} · ${decision.iteration}回目の条件` : `FOR · ${decision.iteration}回目の条件`;
+  card.append(element('div', 'decision-context', heading));
+  const evaluation = element('div', 'decision-evaluation');
+  const display = decision.comparison
+    ? `${decision.comparison.left.display} ${decision.comparison.operator} ${decision.comparison.right.display}`
+    : `${decision.condition} → ${decision.evaluatedDisplay}`;
+  const outcome = element('span', 'decision-outcome', decision.result ? '成立' : '不成立');
+  outcome.append(element('small', '', decision.result ? 'TRUE' : 'FALSE'));
+  evaluation.append(element('span', 'decision-values', display), outcome);
+  const paths = element('div', 'decision-paths');
+  const next = decision.nextAction === 'limit' ? '安全上限で停止'
+    : decision.result ? '本体へ進む' : 'ループを終了';
+  paths.append(element('span', 'decision-path is-selected', next));
+  card.append(evaluation, paths);
+  return card;
+}
+
 function describeDecisionPurpose(decision){
   const variableName = /^[A-Za-z_]\w*$/;
   const context = decision.depth === 2 ? '外側の分岐の中で、' : '';
@@ -826,13 +846,14 @@ function renderStep(){
         ? describeScanfPurpose(step.scanfInput)
       : decodeEngineExplanation(step.text))
   );
-  const decision = step.branchDecision ? renderDecisionStep(step.branchDecision) : null;
+  const decision = step.branchDecision ? renderDecisionStep(step.branchDecision)
+    : step.loopDecision?.kind === 'for' ? renderForDecisionStep(step.loopDecision) : null;
   const input = step.scanfInput ? element('div', 'scanf-step-input') : null;
   if(input){
     input.append(element('small', '', 'INPUT'), element('span', '', step.scanfInput.inputDisplay));
   }
   // 判定では値が変わらないので、空の変化カードを重ねません。
-  const change = step.branchDecision ? null : renderValueChange(activeStep);
+  const change = (step.branchDecision || step.loopDecision?.kind === 'for') ? null : renderValueChange(activeStep);
   const nextStep = currentSteps[activeStep + 1];
   const next = element('div', 'next-line');
   next.append(

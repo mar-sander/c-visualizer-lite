@@ -1997,9 +1997,9 @@
         expect:{ output:'出力はまだありません。', outputExcludes:['WRONG-MISSING-UPDATE', 'WRONG-AFTER-MISSING-UPDATE'], variables:['i = 9'], warningMin:1, hintsInclude:['初期化・条件・更新を省略'], stepCounts:{ 'for文の初期化':0 }, executedExcludes:['printf("WRONG-MISSING-UPDATE', 'printf("WRONG-AFTER-MISSING-UPDATE'] }
       },
       {
-        name:'for更新部の変数による複合代入は未対応',
+        name:'for更新部の変数による複合代入で2回反復する',
         code:makeMainCode(`    int i = 9;\n    int step = 1;\n    for(i = 0; i < 2; i += step){\n        printf("WRONG-VARIABLE-STEP");\n    }\n    printf("WRONG-AFTER-VARIABLE-STEP");\n    return 0;`),
-        expect:{ output:'出力はまだありません。', outputExcludes:['WRONG-VARIABLE-STEP', 'WRONG-AFTER-VARIABLE-STEP'], variables:['i = 9', 'step = 1'], warningMin:1, hintsInclude:['更新部では'], stepCounts:{ 'for文の初期化':0 }, executedExcludes:['printf("WRONG-VARIABLE-STEP', 'printf("WRONG-AFTER-VARIABLE-STEP'] }
+        expect:{ output:'WRONG-VARIABLE-STEPWRONG-VARIABLE-STEPWRONG-AFTER-VARIABLE-STEP', variables:['i = 2', 'step = 1'], warningMax:0, stepCounts:{ 'for文の初期化':1, 'for文の条件':3, 'for文の更新':2 }, loopDecisionCount:3, loopLastResult:false, executedIncludes:['printf("WRONG-VARIABLE-STEP', 'printf("WRONG-AFTER-VARIABLE-STEP'] }
       },
       {
         name:'同一行に本文を持つforは未対応で後続停止',
@@ -4527,6 +4527,22 @@
           current => current[0] === pair[0] && current[1] === pair[1]
         ))) failures.push(`Lite STEP snapshotに「${pair.join(' = ')}」がない`);
       }
+      if(expected.loopDecisionCount !== undefined){
+        const loopDecisions = bridge.steps.filter(step => step.loopDecision).map(step => step.loopDecision);
+        if(loopDecisions.length !== expected.loopDecisionCount){
+          failures.push(`for判定STEP数: 期待${expected.loopDecisionCount} / 実際${loopDecisions.length}`);
+        }
+        if(loopDecisions.some(decision => decision.kind !== 'for' ||
+          typeof decision.result !== 'boolean' || !Number.isInteger(decision.iteration) ||
+          typeof decision.condition !== 'string')) failures.push('for判定metadataが不正');
+        if(expected.loopLastResult !== undefined && loopDecisions.length &&
+          loopDecisions.at(-1).result !== expected.loopLastResult){
+          failures.push('最後のfor判定の成立/不成立が一致しない');
+        }
+        for(const depth of expected.loopDepthIncludes || []){
+          if(!loopDecisions.some(decision => decision.depth === depth)) failures.push(`for階層${depth}がない`);
+        }
+      }
       if(expected.decisions){
         const decisions = bridge.steps.filter(step => step.branchDecision);
         if(decisions.length !== expected.decisions.length){
@@ -6086,6 +6102,44 @@
       expect:{output:'NORMAL',warningMax:0,decisions:[
         {condition:'temperature >= 38.0f',result:false,selected:'next',skipped:'if'},
         {condition:'temperature >= 36.0f',result:true,selected:'else-if',skipped:'remaining'}]}
+    });
+
+    // L-FOR1: 問題プリント04の完成コードと、変数による複合更新を永続回帰へ追加します。
+    testCases.push({
+      name:'L-FOR1 教材04(1) 1から10までの和',
+      code:makeMainCode('    int i,sum=0;\n    for(i=1;i<=10;i++){\n        sum=sum+i;\n    }\n    printf("%d",sum);\n    return 0;'),
+      expect:{output:'55',variables:['i = 11','sum = 55'],warningMax:0,
+        stepCounts:{'for文の条件':5}, loopDecisionCount:5,loopLastResult:false}
+    });
+    testCases.push({
+      name:'L-FOR1 教材04(3) scanfと奇数和 n=9',
+      code:makeMainCode('    int n,i,kisu=0;\n    scanf("%d",&n);\n    for(i=1;i<=n;i+=2){\n        kisu+=i;\n    }\n    printf("%d",kisu);\n    return 0;'),
+      input:'9',
+      expect:{output:'25',variables:['n = 9','i = 11','kisu = 25'],warningMax:0,
+        loopDecisionCount:6,loopLastResult:false}
+    });
+    testCases.push({
+      name:'L-FOR1 教材04(4) 二重forの三角形',
+      code:makeMainCode('    int i,j;\n    for(i=1;i<=5;i++){\n        for(j=0;j<i;j++){\n            printf("*");\n        }\n        printf("\\n");\n    }\n    return 0;'),
+      expect:{output:'*\n**\n***\n****\n*****',variables:['i = 6','j = 5'],warningMax:0,
+        loopDecisionCount:26,loopLastResult:false,loopDepthIncludes:[1,2]}
+    });
+    testCases.push({
+      name:'L-FOR1 更新式の変数 i+=step と本体 sum+=i',
+      code:makeMainCode('    int i,step=2,sum=0;\n    for(i=1;i<=9;i+=step){\n        sum+=i;\n    }\n    printf("%d",sum);\n    return 0;'),
+      expect:{output:'25',variables:['i = 11','step = 2','sum = 25'],warningMax:0,
+        loopDecisionCount:6,loopLastResult:false}
+    });
+    testCases.push({
+      name:'L-FOR1 0回ループにも不成立判定STEPを残す',
+      code:makeMainCode('    int i,x=42;\n    for(i=5;i<5;i++){\n        x=0;\n    }\n    printf("%d",x);\n    return 0;'),
+      expect:{output:'42',variables:['i = 5','x = 42'],warningMax:0,
+        loopDecisionCount:1,loopLastResult:false}
+    });
+    testCases.push({
+      name:'L-FOR1 whileへfor判定metadataが混入しない',
+      code:makeMainCode('    int i=0;\n    while(i<3){\n        i++;\n    }\n    printf("%d",i);\n    return 0;'),
+      expect:{output:'3',variables:['i = 3'],warningMax:0,loopDecisionCount:0}
     });
 
     // L-UI14: 描画された文字色と選択レイヤー、編集・undoの維持を検査します。
