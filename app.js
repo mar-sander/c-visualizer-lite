@@ -184,6 +184,8 @@ $('secret-code-form').addEventListener('submit', event => {
   showUnlockFeedback(unlockId);
 });
 secretCodeDialog.addEventListener('click', event => {
+  // Enterキーの送信クリックを背景タップと誤判定しないようにします。
+  if(event.target !== secretCodeDialog) return;
   const rect = secretCodeDialog.getBoundingClientRect();
   const outside = event.clientX < rect.left || event.clientX > rect.right ||
     event.clientY < rect.top || event.clientY > rect.bottom;

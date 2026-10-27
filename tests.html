@@ -5842,6 +5842,50 @@
           }
           if(ui.eval('unlockFeedbackTimer') !== 0 || dialog.classList.contains('is-unlocking')) fail('演出タイマーの後片付けに失敗しました');
         });
+        // L-UI11 Hotfix: キーボードの暗黙submitは(0,0)クリックを伴います。
+        await record('Enter相当の座標なし送信でも解除演出が維持される', async fail => {
+          const doc = ui.document;
+          const dialog = doc.getElementById('secret-code-dialog');
+          doc.getElementById('secret-code-open').click();
+          doc.getElementById('secret-code-input').value = 'getsample';
+          // button.click()はキーボード送信と同様、座標を持たないclickです。
+          doc.querySelector('#secret-code-form button[type="submit"]').click();
+          const success = doc.getElementById('secret-code-success');
+          if(!dialog.open || !dialog.classList.contains('is-unlocking') || success.hidden ||
+            success.textContent.trim() !== 'SAMPLE UNLOCKED'){
+            fail('座標なし送信によりダイアログが閉じるか解除演出が表示されません');
+          }
+          if(dialog.open){
+            await new Promise(resolve => {
+              dialog.addEventListener('close', resolve, {once:true});
+              dialog.close();
+            });
+          }
+        });
+        await record('フォーム内クリックとダイアログ外クリックの区別', async fail => {
+          const doc = ui.document;
+          const dialog = doc.getElementById('secret-code-dialog');
+          doc.getElementById('secret-code-open').click();
+          // 入力欄への座標なしクリックで閉じないことを確認します。
+          doc.getElementById('secret-code-input').dispatchEvent(new ui.MouseEvent('click', {
+            bubbles:true, clientX:0, clientY:0
+          }));
+          if(!dialog.open) fail('フォーム内クリックでダイアログを閉じました');
+          if(dialog.open){
+            const rect = dialog.getBoundingClientRect();
+            const closed = new Promise(resolve => dialog.addEventListener('close', resolve, {once:true}));
+            dialog.dispatchEvent(new ui.MouseEvent('click', {
+              bubbles:true, clientX:rect.left - 4, clientY:rect.top - 4
+            }));
+            if(dialog.open){
+              fail('背景側クリックでダイアログが閉じません');
+              dialog.close();
+            }
+            await closed;
+          }else{
+            await new Promise(resolve => ui.setTimeout(resolve, 0));
+          }
+        });
         await record('無効なSECRET CODEでは演出を再生しない', fail => {
           const doc = ui.document;
           const dialog = doc.getElementById('secret-code-dialog');
