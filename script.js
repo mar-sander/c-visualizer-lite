@@ -2229,7 +2229,7 @@ function visualizeCode(){
       return;
     }
 
-    const variableUpdate = parseVariableUpdate(trimmed, true, insideFor);
+    const variableUpdate = parseVariableUpdate(trimmed, true, insideLoop);
     if(variableUpdate){
       const result = executeVariableUpdate(variableUpdate, lineNo);
       return !result.ok && insideLoop ? 'execution-error' : undefined;
@@ -3690,7 +3690,7 @@ function visualizeCode(){
         return failure('while文の本体内に、現在のVisualizerでは実行できないブロック構造があります。while文全体を実行しません。', 'while文内のブロックは未対応');
       }
 
-      const variableUpdate = parseVariableUpdate(structuralBodyCode, true);
+      const variableUpdate = parseVariableUpdate(structuralBodyCode, true, true);
       if(/\+\+|--/.test(structuralBodyCode) && variableUpdate === null){
         return failure('while文の本体に、式中で副作用を利用する++ / --があります。現在は単独更新文だけに対応しているため、while文全体を実行しません。', '式中の++・--は未対応');
       }
@@ -3890,11 +3890,31 @@ function visualizeCode(){
         ? describeComparison(conditionResult)
         : `${escapeHtml(conditionResult.readable)} を計算した結果は ${conditionResult.value} です。C言語では0以外を条件成立、0を条件不成立として扱います。`;
 
+      // 評価に成功した条件だけを記録します。UIで再評価せず、本文進入数と判定序数を区別します。
+      const loopDecision = {
+        kind:'while',
+        sourceId:`while:${lineNo}`,
+        headerLineNo:lineNo,
+        depth:1,
+        condition:node.condition,
+        iteration:enteredBodyCount + 1,
+        enteredCount:enteredBodyCount,
+        comparison:conditionResult.comparison ? {
+          left:{source:conditionResult.comparison.leftSource, display:conditionResult.comparison.leftDisplay, value:conditionResult.comparison.leftValue},
+          operator:conditionResult.comparison.operator,
+          right:{source:conditionResult.comparison.rightSource, display:conditionResult.comparison.rightDisplay, value:conditionResult.comparison.rightValue}
+        } : null,
+        evaluatedValue:conditionResult.value,
+        evaluatedDisplay:displayScalarValue(conditionResult.value, conditionResult.type),
+        result:conditionMet,
+        nextAction:conditionMet ? (enteredBodyCount >= MAX_WHILE_ITERATIONS ? 'limit' : 'body') : 'exit'
+      };
+
       if(!conditionMet){
         const endLabel = enteredBodyCount === 0 ? '最初の条件判定／終了判定' : '終了判定';
         const endPrefix = whileDisplayPrefix(endLabel);
         addAnalysis(analysis, lineNo, `${endPrefix}<strong>while文の条件：</strong> ${conditionExplanation}条件が成立しなかったため、while文の本体へは進みません。`);
-        addStep(lineNo, `${endPrefix}while文の条件 ${escapeHtml(node.condition)} を判定しました。<br>条件が成立しなかったため、while文の本体へは進みません。`);
+        addStep(lineNo, `${endPrefix}while文の条件 ${escapeHtml(node.condition)} を判定しました。<br>条件が成立しなかったため、while文の本体へは進みません。`, true, [], null, null, loopDecision);
         const whileEndPrefix = whileDisplayPrefix('while終了');
         addAnalysis(analysis, node.endIndex + 1, `${whileEndPrefix}while文の最終条件が成立しなかったため、後続の処理へ進みます。`);
         addStep(lineNo, `${whileEndPrefix}while文を終了します。`);
@@ -3905,7 +3925,7 @@ function visualizeCode(){
       if(enteredBodyCount >= MAX_WHILE_ITERATIONS){
         const conditionPrefix = whileDisplayPrefix(`${enteredBodyCount + 1}回目へ進む条件判定`);
         addAnalysis(analysis, lineNo, `${conditionPrefix}<strong>while文の条件：</strong> ${conditionExplanation}条件が成立したため、本来は${enteredBodyCount + 1}回目の本体へ進む必要があります。`);
-        addStep(lineNo, `${conditionPrefix}while文の条件 ${escapeHtml(node.condition)} を判定しました。<br>条件が成立したため、本来は${enteredBodyCount + 1}回目の本体へ進む必要があります。`);
+        addStep(lineNo, `${conditionPrefix}while文の条件 ${escapeHtml(node.condition)} を判定しました。<br>条件が成立したため、本来は${enteredBodyCount + 1}回目の本体へ進む必要があります。`, true, [], null, null, loopDecision);
 
         const safetyPrefix = whileDisplayPrefix('安全上限停止');
         const safetyMessage = `while文は本体を ${MAX_WHILE_ITERATIONS} 回実行済みです。次の本体へ入ると ${enteredBodyCount + 1} 回目になるため、C Code Visualizerが安全のため停止しました。これはC言語自体の制限ではありません。条件がfalseへ近づくよう、値が変化しているか確認してみましょう。`;
@@ -3926,7 +3946,7 @@ function visualizeCode(){
       const iterationNumber = enteredBodyCount + 1;
       const activeIteration = explanationHistory.beginIteration(iterationNumber);
       addAnalysis(analysis, lineNo, `<strong>while文の条件：</strong> ${conditionExplanation}条件が成立したため、while文の本体へ進みます。`);
-      addStep(lineNo, `while文の条件 ${escapeHtml(node.condition)} を判定しました。<br>条件が成立したため、while文の本体へ進みます。`);
+      addStep(lineNo, `while文の条件 ${escapeHtml(node.condition)} を判定しました。<br>条件が成立したため、while文の本体へ進みます。`, true, [], null, null, loopDecision);
       enteredBodyCount++;
 
       for(const bodyItem of node.bodyItems){

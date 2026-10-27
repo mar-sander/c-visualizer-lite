@@ -4558,7 +4558,7 @@
         ))) failures.push(`Lite STEP snapshotに「${pair.join(' = ')}」がない`);
       }
       if(expected.loopDecisionCount !== undefined){
-        const loopDecisions = bridge.steps.filter(step => step.loopDecision).map(step => step.loopDecision);
+        const loopDecisions = bridge.steps.filter(step => step.loopDecision?.kind === 'for').map(step => step.loopDecision);
         if(loopDecisions.length !== expected.loopDecisionCount){
           failures.push(`for判定STEP数: 期待${expected.loopDecisionCount} / 実際${loopDecisions.length}`);
         }
@@ -4792,6 +4792,7 @@
         if(!actual.syntaxClasses.includes(className)) failures.push(`色分け要素に「${className}」がない`);
       }
 
+      if(expected.phase2) checkPhase2Trace(bridge, expected.phase2, failures);
       return { passed:failures.length === 0, failures, actual };
     }
 
@@ -6169,7 +6170,7 @@
     testCases.push({
       name:'L-FOR1 whileへfor判定metadataが混入しない',
       code:makeMainCode('    int i=0;\n    while(i<3){\n        i++;\n    }\n    printf("%d",i);\n    return 0;'),
-      expect:{output:'3',variables:['i = 3'],warningMax:0,loopDecisionCount:0}
+      expect:{output:'3',variables:['i = 3'],warningMax:0,loopDecisionCount:0,phase2:{decisions:[{iteration:1,result:true},{iteration:2,result:true},{iteration:3,result:true},{iteration:4,result:false}]}}
     });
 
     // L-UI14: 描画された文字色と選択レイヤー、編集・undoの維持を検査します。
@@ -6669,6 +6670,1616 @@
   }
 ]);
 
+    // Phase 2: verify the recorded trace against independent input/expected values.
+    function checkPhase2Trace(bridge, expected, failures){
+      const steps=bridge.steps, tagged=steps.filter(s=>s.loopDecision?.kind==='while');
+      if(expected.decisions && tagged.length!==expected.decisions.length)failures.push(`WHILE判定数: 期待${expected.decisions.length} / 実際${tagged.length}`);
+      for(const [index,wanted] of (expected.decisions||[]).entries()){
+        const step=tagged[index],d=step?.loopDecision;
+        if(!d){failures.push(`WHILE判定${index+1}がない`);continue;}
+        for(const [key,value] of Object.entries(wanted)){
+          if(key==='leftValue'||key==='rightValue'){
+            const side=key==='leftValue'?'left':'right';
+            if(d.comparison?.[side]?.value!==value)failures.push(`WHILE ${index+1} ${key}が違う`);
+          }else if(key==='operator'){
+            if(d.comparison?.operator!==value)failures.push(`WHILE ${index+1} 演算子が違う`);
+          }else if(JSON.stringify(d[key])!==JSON.stringify(value))failures.push(`WHILE ${index+1} ${key}: ${JSON.stringify(d[key])} / 期待${JSON.stringify(value)}`);
+        }
+      }
+      for(const step of tagged){
+        const d=step.loopDecision;
+        if(d.kind!=='while'||d.depth!==1||d.headerLineNo!==step.lineNo||d.sourceId!==`while:${step.lineNo}`||
+          typeof d.condition!=='string'||typeof d.evaluatedDisplay!=='string'||typeof d.evaluatedValue!=='number'||
+          !Number.isFinite(d.evaluatedValue)||typeof d.result!=='boolean'||d.result!==(d.evaluatedValue!==0)||
+          !Number.isInteger(d.iteration)||d.iteration!==d.enteredCount+1||
+          d.nextAction!==(d.result?(d.enteredCount>=500?'limit':'body'):'exit'))failures.push('WHILE metadata契約が不正');
+        if(d.comparison){
+          for(const side of ['left','right'])if(typeof d.comparison[side].source!=='string'||typeof d.comparison[side].display!=='string'||!Number.isFinite(d.comparison[side].value))failures.push('WHILE比較値契約が不正');
+        }
+        if(!Array.isArray(step.variablesAtStep)||typeof step.outputAtStep!=='string')failures.push('条件snapshotがない');
+        const previous=steps[steps.indexOf(step)-1];
+        if(previous&&(JSON.stringify(previous.variablesAtStep)!==JSON.stringify(step.variablesAtStep)||previous.outputAtStep!==step.outputAtStep))failures.push('条件判定が変数/出力を変えている');
+      }
+      for(const step of steps.filter(s=>s.stepKind==='loop-omission'))if(step.loopDecision)failures.push('省略STEPに条件metadataが混入');
+      if(expected.equivalentTo){
+        const original={output:bridge.output,variables:bridge.variables,hasWarnings:bridge.hasWarnings};
+        document.getElementById('codeInput').value=expected.equivalentTo;visualizeCode();
+        const other=window.cVisualizerLiteResult;
+        if(JSON.stringify(original)!==JSON.stringify({output:other.output,variables:other.variables,hasWarnings:other.hasWarnings}))failures.push('通常代入/FORとの結果・最終変数が非等価');
+      }
+    }
+
+    async function checkPhase2UiCases(){
+      const results=[],frame=createUiTestFrame();
+      try{
+        await new Promise(resolve=>frame.addEventListener('load',resolve,{once:true}));
+        const ui=frame.contentWindow,doc=ui.document,cm=doc.querySelector('.CodeMirror').CodeMirror;
+        const errors=[];ui.addEventListener('error',event=>errors.push(event.message));
+        for(const test of testCases.filter(t=>t.expect.phase2Ui)){
+          const failures=[];
+          try{
+            cm.setValue(test.code);doc.getElementById('scanfInput').value='';doc.getElementById('visualize').click();
+            const isError=!!test.expect.warningMin;
+            if(isError){
+              const limit=ui.cVisualizerLiteResult.steps.findLast(s=>s.loopDecision?.nextAction==='limit');
+              const card=doc.querySelector('.failure-state .while-decision-card');
+              if(!limit||!card||!card.textContent.includes('TRUE')||!card.textContent.includes('安全上限に達したため停止')||card.textContent.includes('FALSE'))failures.push('上限TRUEカードがエラー画面にない');
+              if(doc.querySelector('.result-state')||!doc.getElementById('step-controls').hidden||ui.eval('hasCurrentResult()')||doc.querySelector('.is-run-success'))failures.push('安全停止を成功扱い');
+            }else{
+              await waitForUiResult(ui);
+              const steps=ui.cVisualizerLiteResult.steps,frozen=JSON.stringify(steps);
+              if(steps.filter(s=>s.loopDecision?.kind==='while').length!==test.expect.phase2.decisions.length)failures.push('UI対象のWHILE判定metadataが欠落');
+              doc.querySelector('.result-flow-button').click();
+              for(let index=0;index<steps.length;index++){
+                const step=steps[index],d=step.loopDecision;
+                const card=doc.querySelector('#flow-content .while-decision-card');
+                if(d?.kind==='while'){
+                  if(!card){failures.push(`STEP${index+1}: WHILEカードなし`);}
+                  else{
+                    const values=d.comparison?`${d.comparison.left.display} ${d.comparison.operator} ${d.comparison.right.display}`:`${d.condition} → ${d.evaluatedDisplay}`;
+                    if(card.querySelector('.decision-values')?.textContent!==values||!card.textContent.includes(d.result?'TRUE':'FALSE')||!card.textContent.includes('WHILE CONDITION')||!card.textContent.includes(`${d.iteration}回目`)||!card.textContent.includes(`${d.headerLineNo}行目`))failures.push('条件カードの値/回数/行が不一致');
+                    if(!card.textContent.includes(d.result?'条件が成立→本文へ':'不成立→ループ終了'))failures.push('条件の進行先が不一致');
+                  }
+                  if(doc.querySelector('#flow-content .value-card'))failures.push('条件で不要な変数変化');
+                }else if(card)failures.push('非WHILE条件にWHILEカード');
+                if(step.stepKind==='loop-omission'&&doc.querySelector('#flow-content .decision-card'))failures.push('省略に条件カード');
+                const shown=doc.getElementById('output-value').textContent;
+                if(shown!==step.outputAtStep&&!(shown==='—'&&step.outputAtStep===''))failures.push('STEP出力不一致');
+                if(index>0){doc.getElementById('step-prev').click();doc.getElementById('step-next').click();}
+                doc.getElementById('step-next').click();
+              }
+              if(!doc.querySelector('.result-state'))failures.push('RESULT復帰なし');
+              if(JSON.stringify(steps)!==frozen)failures.push('往復でmetadata/snapshot変更');
+            }
+          }catch(e){failures.push(String(e));}
+          if(errors.length)failures.push(...errors.splice(0));
+          results.push({testCase:{name:test.name+' UIカード往復'},result:{passed:!failures.length,failures,actual:{output:'WHILEカード・FLOW・STEP',warningCount:0}}});
+        }
+      }finally{frame.remove();}
+      return results;
+    }
+
+    testCases.push(...[
+  {
+    "name": "L-WHILE1 P2 F03変数加算",
+    "code": "#include <stdio.h>\nint main(void){\nint i=1, sum=0, step=2;\nwhile(i<=5){\nsum += i;\ni += step;\n}\nprintf(\"%d\",sum);\nreturn 0;\n}",
+    "expect": {
+      "output": "9",
+      "variables": [
+        "i = 7",
+        "sum = 9",
+        "step = 2"
+      ],
+      "warningMax": 0,
+      "phase2": {
+        "decisions": [
+          {
+            "iteration": 1,
+            "enteredCount": 0,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 1,
+            "rightValue": 5,
+            "operator": "<="
+          },
+          {
+            "iteration": 2,
+            "enteredCount": 1,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 3,
+            "rightValue": 5,
+            "operator": "<="
+          },
+          {
+            "iteration": 3,
+            "enteredCount": 2,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 5,
+            "rightValue": 5,
+            "operator": "<="
+          },
+          {
+            "iteration": 4,
+            "enteredCount": 3,
+            "result": false,
+            "nextAction": "exit",
+            "leftValue": 7,
+            "rightValue": 5,
+            "operator": "<="
+          }
+        ],
+        "equivalentTo": "#include <stdio.h>\nint main(void){\nint i=1, sum=0, step=2;\nwhile(i<=5){\nsum = sum + i;\ni = i + step;\n}\nprintf(\"%d\",sum);\nreturn 0;\n}"
+      },
+      "phase2Ui": true
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 F03減算",
+    "code": "#include <stdio.h>\nint main(void){\nint i=5, sum=0, step=2;\nwhile(i>0){\nsum -= i;\ni -= step;\n}\nprintf(\"%d\",sum);\nreturn 0;\n}",
+    "expect": {
+      "output": "-9",
+      "variables": [
+        "i = -1",
+        "sum = -9"
+      ],
+      "warningMax": 0,
+      "phase2": {
+        "decisions": [
+          {
+            "iteration": 1,
+            "enteredCount": 0,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 5,
+            "rightValue": 0,
+            "operator": ">"
+          },
+          {
+            "iteration": 2,
+            "enteredCount": 1,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 3,
+            "rightValue": 0,
+            "operator": ">"
+          },
+          {
+            "iteration": 3,
+            "enteredCount": 2,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 1,
+            "rightValue": 0,
+            "operator": ">"
+          },
+          {
+            "iteration": 4,
+            "enteredCount": 3,
+            "result": false,
+            "nextAction": "exit",
+            "leftValue": -1,
+            "rightValue": 0,
+            "operator": ">"
+          }
+        ]
+      },
+      "phase2Ui": true
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 F03負のstep",
+    "code": "#include <stdio.h>\nint main(void){\nint i=5, step=-2;\nwhile(i>0){\ni += step;\n}\nprintf(\"%d\",i);\nreturn 0;\n}",
+    "expect": {
+      "output": "-1",
+      "warningMax": 0,
+      "phase2": {
+        "decisions": [
+          {
+            "iteration": 1,
+            "enteredCount": 0,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 5,
+            "rightValue": 0,
+            "operator": ">"
+          },
+          {
+            "iteration": 2,
+            "enteredCount": 1,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 3,
+            "rightValue": 0,
+            "operator": ">"
+          },
+          {
+            "iteration": 3,
+            "enteredCount": 2,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 1,
+            "rightValue": 0,
+            "operator": ">"
+          },
+          {
+            "iteration": 4,
+            "enteredCount": 3,
+            "result": false,
+            "nextAction": "exit",
+            "leftValue": -1,
+            "rightValue": 0,
+            "operator": ">"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 F03負数を引く",
+    "code": "#include <stdio.h>\nint main(void){\nint i=-3, step=-2;\nwhile(i<2){\ni -= step;\n}\nprintf(\"%d\",i);\nreturn 0;\n}",
+    "expect": {
+      "output": "3",
+      "warningMax": 0,
+      "phase2": {
+        "decisions": [
+          {
+            "iteration": 1,
+            "enteredCount": 0,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": -3,
+            "rightValue": 2,
+            "operator": "<"
+          },
+          {
+            "iteration": 2,
+            "enteredCount": 1,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": -1,
+            "rightValue": 2,
+            "operator": "<"
+          },
+          {
+            "iteration": 3,
+            "enteredCount": 2,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 1,
+            "rightValue": 2,
+            "operator": "<"
+          },
+          {
+            "iteration": 4,
+            "enteredCount": 3,
+            "result": false,
+            "nextAction": "exit",
+            "leftValue": 3,
+            "rightValue": 2,
+            "operator": "<"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 F03 float",
+    "code": "#include <stdio.h>\nint main(void){\nfloat i=0.5, step=0.5;\nwhile(i<2){\ni += step;\n}\nprintf(\"%.1f\",i);\nreturn 0;\n}",
+    "expect": {
+      "output": "2.0",
+      "warningMax": 0,
+      "phase2": {
+        "decisions": [
+          {
+            "iteration": 1,
+            "enteredCount": 0,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 0.5,
+            "rightValue": 2,
+            "operator": "<"
+          },
+          {
+            "iteration": 2,
+            "enteredCount": 1,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 1,
+            "rightValue": 2,
+            "operator": "<"
+          },
+          {
+            "iteration": 3,
+            "enteredCount": 2,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 1.5,
+            "rightValue": 2,
+            "operator": "<"
+          },
+          {
+            "iteration": 4,
+            "enteredCount": 3,
+            "result": false,
+            "nextAction": "exit",
+            "leftValue": 2,
+            "rightValue": 2,
+            "operator": "<"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 F03 double",
+    "code": "#include <stdio.h>\nint main(void){\ndouble i=0.5, step=0.5;\nwhile(i<2){\ni += step;\n}\nprintf(\"%.1f\",i);\nreturn 0;\n}",
+    "expect": {
+      "output": "2.0",
+      "warningMax": 0,
+      "phase2": {
+        "decisions": [
+          {
+            "iteration": 1,
+            "enteredCount": 0,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 0.5,
+            "rightValue": 2,
+            "operator": "<"
+          },
+          {
+            "iteration": 2,
+            "enteredCount": 1,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 1,
+            "rightValue": 2,
+            "operator": "<"
+          },
+          {
+            "iteration": 3,
+            "enteredCount": 2,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 1.5,
+            "rightValue": 2,
+            "operator": "<"
+          },
+          {
+            "iteration": 4,
+            "enteredCount": 3,
+            "result": false,
+            "nextAction": "exit",
+            "leftValue": 2,
+            "rightValue": 2,
+            "operator": "<"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 F03整数への変換",
+    "code": "#include <stdio.h>\nint main(void){\nint i=0;\ndouble step=1.5;\nwhile(i<3){\ni += step;\n}\nprintf(\"%d\",i);\nreturn 0;\n}",
+    "expect": {
+      "output": "3",
+      "warningMax": 0,
+      "phase2": {
+        "decisions": [
+          {
+            "iteration": 1,
+            "enteredCount": 0,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 0,
+            "rightValue": 3,
+            "operator": "<"
+          },
+          {
+            "iteration": 2,
+            "enteredCount": 1,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 1,
+            "rightValue": 3,
+            "operator": "<"
+          },
+          {
+            "iteration": 3,
+            "enteredCount": 2,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 2,
+            "rightValue": 3,
+            "operator": "<"
+          },
+          {
+            "iteration": 4,
+            "enteredCount": 3,
+            "result": false,
+            "nextAction": "exit",
+            "leftValue": 3,
+            "rightValue": 3,
+            "operator": "<"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 F03 char更新",
+    "code": "#include <stdio.h>\nint main(void){\nchar c='A';\nint step=1;\nwhile(c<'D'){\nc += step;\n}\nprintf(\"%c\",c);\nreturn 0;\n}",
+    "expect": {
+      "output": "D",
+      "warningMax": 0,
+      "phase2": {
+        "decisions": [
+          {
+            "iteration": 1,
+            "enteredCount": 0,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 65,
+            "rightValue": 68,
+            "operator": "<"
+          },
+          {
+            "iteration": 2,
+            "enteredCount": 1,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 66,
+            "rightValue": 68,
+            "operator": "<"
+          },
+          {
+            "iteration": 3,
+            "enteredCount": 2,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 67,
+            "rightValue": 68,
+            "operator": "<"
+          },
+          {
+            "iteration": 4,
+            "enteredCount": 3,
+            "result": false,
+            "nextAction": "exit",
+            "leftValue": 68,
+            "rightValue": 68,
+            "operator": "<"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 F03 char右辺",
+    "code": "#include <stdio.h>\nint main(void){\nint i=0;\nchar step='A';\nwhile(i<100){\ni += step;\n}\nprintf(\"%d\",i);\nreturn 0;\n}",
+    "expect": {
+      "output": "130",
+      "warningMax": 0,
+      "phase2": {
+        "decisions": [
+          {
+            "iteration": 1,
+            "enteredCount": 0,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 0,
+            "rightValue": 100,
+            "operator": "<"
+          },
+          {
+            "iteration": 2,
+            "enteredCount": 1,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 65,
+            "rightValue": 100,
+            "operator": "<"
+          },
+          {
+            "iteration": 3,
+            "enteredCount": 2,
+            "result": false,
+            "nextAction": "exit",
+            "leftValue": 130,
+            "rightValue": 100,
+            "operator": "<"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 F03自己参照",
+    "code": "#include <stdio.h>\nint main(void){\nint i=1;\nwhile(i<8){\ni += i;\n}\nprintf(\"%d\",i);\nreturn 0;\n}",
+    "expect": {
+      "output": "8",
+      "warningMax": 0,
+      "phase2": {
+        "decisions": [
+          {
+            "iteration": 1,
+            "leftValue": 1,
+            "result": true
+          },
+          {
+            "iteration": 2,
+            "leftValue": 2,
+            "result": true
+          },
+          {
+            "iteration": 3,
+            "leftValue": 4,
+            "result": true
+          },
+          {
+            "iteration": 4,
+            "leftValue": 8,
+            "result": false
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 F04境界0",
+    "code": "#include <stdio.h>\nint main(void){\nint i=0;\nwhile(i<0){\ni++;\n}\nprintf(\"%d\",i);\nreturn 0;\n}",
+    "expect": {
+      "output": "0",
+      "variables": [
+        "i = 0"
+      ],
+      "warningMax": 0,
+      "phase2": {
+        "decisions": [
+          {
+            "iteration": 1,
+            "enteredCount": 0,
+            "result": false,
+            "nextAction": "exit",
+            "leftValue": 0,
+            "rightValue": 0,
+            "operator": "<"
+          }
+        ]
+      },
+      "phase2Ui": true
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 F04境界1",
+    "code": "#include <stdio.h>\nint main(void){\nint i=0;\nwhile(i<1){\ni++;\n}\nprintf(\"%d\",i);\nreturn 0;\n}",
+    "expect": {
+      "output": "1",
+      "variables": [
+        "i = 1"
+      ],
+      "warningMax": 0,
+      "phase2": {
+        "decisions": [
+          {
+            "iteration": 1,
+            "enteredCount": 0,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 0,
+            "rightValue": 1,
+            "operator": "<"
+          },
+          {
+            "iteration": 2,
+            "enteredCount": 1,
+            "result": false,
+            "nextAction": "exit",
+            "leftValue": 1,
+            "rightValue": 1,
+            "operator": "<"
+          }
+        ]
+      },
+      "phase2Ui": true
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 F04境界3",
+    "code": "#include <stdio.h>\nint main(void){\nint i=0;\nwhile(i<3){\ni++;\n}\nprintf(\"%d\",i);\nreturn 0;\n}",
+    "expect": {
+      "output": "3",
+      "variables": [
+        "i = 3"
+      ],
+      "warningMax": 0,
+      "phase2": {
+        "decisions": [
+          {
+            "iteration": 1,
+            "enteredCount": 0,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 0,
+            "rightValue": 3,
+            "operator": "<"
+          },
+          {
+            "iteration": 2,
+            "enteredCount": 1,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 1,
+            "rightValue": 3,
+            "operator": "<"
+          },
+          {
+            "iteration": 3,
+            "enteredCount": 2,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 2,
+            "rightValue": 3,
+            "operator": "<"
+          },
+          {
+            "iteration": 4,
+            "enteredCount": 3,
+            "result": false,
+            "nextAction": "exit",
+            "leftValue": 3,
+            "rightValue": 3,
+            "operator": "<"
+          }
+        ]
+      },
+      "phase2Ui": true
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 F04境界6",
+    "code": "#include <stdio.h>\nint main(void){\nint i=0;\nwhile(i<6){\ni++;\n}\nprintf(\"%d\",i);\nreturn 0;\n}",
+    "expect": {
+      "output": "6",
+      "variables": [
+        "i = 6"
+      ],
+      "warningMax": 0,
+      "phase2": {
+        "decisions": [
+          {
+            "iteration": 1,
+            "enteredCount": 0,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 0,
+            "rightValue": 6,
+            "operator": "<"
+          },
+          {
+            "iteration": 2,
+            "enteredCount": 1,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 1,
+            "rightValue": 6,
+            "operator": "<"
+          },
+          {
+            "iteration": 3,
+            "enteredCount": 2,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 2,
+            "rightValue": 6,
+            "operator": "<"
+          },
+          {
+            "iteration": 4,
+            "enteredCount": 3,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 3,
+            "rightValue": 6,
+            "operator": "<"
+          },
+          {
+            "iteration": 5,
+            "enteredCount": 4,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 4,
+            "rightValue": 6,
+            "operator": "<"
+          },
+          {
+            "iteration": 6,
+            "enteredCount": 5,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 5,
+            "rightValue": 6,
+            "operator": "<"
+          },
+          {
+            "iteration": 7,
+            "enteredCount": 6,
+            "result": false,
+            "nextAction": "exit",
+            "leftValue": 6,
+            "rightValue": 6,
+            "operator": "<"
+          }
+        ]
+      },
+      "phase2Ui": true
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 F04境界7",
+    "code": "#include <stdio.h>\nint main(void){\nint i=0;\nwhile(i<7){\ni++;\n}\nprintf(\"%d\",i);\nreturn 0;\n}",
+    "expect": {
+      "output": "7",
+      "variables": [
+        "i = 7"
+      ],
+      "warningMax": 0,
+      "phase2": {
+        "decisions": [
+          {
+            "iteration": 1,
+            "enteredCount": 0,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 0,
+            "rightValue": 7,
+            "operator": "<"
+          },
+          {
+            "iteration": 2,
+            "enteredCount": 1,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 1,
+            "rightValue": 7,
+            "operator": "<"
+          },
+          {
+            "iteration": 3,
+            "enteredCount": 2,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 2,
+            "rightValue": 7,
+            "operator": "<"
+          },
+          {
+            "iteration": 7,
+            "enteredCount": 6,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 6,
+            "rightValue": 7,
+            "operator": "<"
+          },
+          {
+            "iteration": 8,
+            "enteredCount": 7,
+            "result": false,
+            "nextAction": "exit",
+            "leftValue": 7,
+            "rightValue": 7,
+            "operator": "<"
+          }
+        ]
+      },
+      "phase2Ui": true
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 F04境界10",
+    "code": "#include <stdio.h>\nint main(void){\nint i=0;\nwhile(i<10){\ni++;\n}\nprintf(\"%d\",i);\nreturn 0;\n}",
+    "expect": {
+      "output": "10",
+      "variables": [
+        "i = 10"
+      ],
+      "warningMax": 0,
+      "phase2": {
+        "decisions": [
+          {
+            "iteration": 1,
+            "enteredCount": 0,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 0,
+            "rightValue": 10,
+            "operator": "<"
+          },
+          {
+            "iteration": 2,
+            "enteredCount": 1,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 1,
+            "rightValue": 10,
+            "operator": "<"
+          },
+          {
+            "iteration": 3,
+            "enteredCount": 2,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 2,
+            "rightValue": 10,
+            "operator": "<"
+          },
+          {
+            "iteration": 10,
+            "enteredCount": 9,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 9,
+            "rightValue": 10,
+            "operator": "<"
+          },
+          {
+            "iteration": 11,
+            "enteredCount": 10,
+            "result": false,
+            "nextAction": "exit",
+            "leftValue": 10,
+            "rightValue": 10,
+            "operator": "<"
+          }
+        ]
+      },
+      "phase2Ui": true
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 F04境界500",
+    "code": "#include <stdio.h>\nint main(void){\nint i=0;\nwhile(i<500){\ni++;\n}\nprintf(\"%d\",i);\nreturn 0;\n}",
+    "expect": {
+      "output": "500",
+      "variables": [
+        "i = 500"
+      ],
+      "warningMax": 0,
+      "phase2": {
+        "decisions": [
+          {
+            "iteration": 1,
+            "enteredCount": 0,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 0,
+            "rightValue": 500,
+            "operator": "<"
+          },
+          {
+            "iteration": 2,
+            "enteredCount": 1,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 1,
+            "rightValue": 500,
+            "operator": "<"
+          },
+          {
+            "iteration": 3,
+            "enteredCount": 2,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 2,
+            "rightValue": 500,
+            "operator": "<"
+          },
+          {
+            "iteration": 500,
+            "enteredCount": 499,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 499,
+            "rightValue": 500,
+            "operator": "<"
+          },
+          {
+            "iteration": 501,
+            "enteredCount": 500,
+            "result": false,
+            "nextAction": "exit",
+            "leftValue": 500,
+            "rightValue": 500,
+            "operator": "<"
+          }
+        ]
+      },
+      "phase2Ui": true
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 F04上限501",
+    "code": "#include <stdio.h>\nint main(void){\nint i=0;\nwhile(i<501){\ni++;\n}\nprintf(\"WRONG\");\nreturn 0;\n}",
+    "expect": {
+      "output": "出力はまだありません。",
+      "variables": [
+        "i = 500"
+      ],
+      "warningMin": 1,
+      "phase2": {
+        "decisions": [
+          {
+            "iteration": 1,
+            "leftValue": 0,
+            "rightValue": 501,
+            "result": true,
+            "nextAction": "body"
+          },
+          {
+            "iteration": 2,
+            "leftValue": 1,
+            "rightValue": 501,
+            "result": true,
+            "nextAction": "body"
+          },
+          {
+            "iteration": 3,
+            "leftValue": 2,
+            "rightValue": 501,
+            "result": true,
+            "nextAction": "body"
+          },
+          {
+            "iteration": 500,
+            "leftValue": 499,
+            "rightValue": 501,
+            "result": true,
+            "nextAction": "body"
+          },
+          {
+            "iteration": 501,
+            "leftValue": 500,
+            "rightValue": 501,
+            "result": true,
+            "nextAction": "limit"
+          }
+        ]
+      },
+      "phase2Ui": true
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 F03 step0安全停止",
+    "code": "#include <stdio.h>\nint main(void){\nint i=1,step=0;\nwhile(i<2){\ni += step;\n}\nprintf(\"WRONG\");\nreturn 0;\n}",
+    "expect": {
+      "warningMin": 1,
+      "variables": [
+        "i = 1"
+      ],
+      "phase2": {
+        "decisions": [
+          {
+            "iteration": 1,
+            "leftValue": 1,
+            "result": true,
+            "nextAction": "body"
+          },
+          {
+            "iteration": 2,
+            "leftValue": 1,
+            "result": true,
+            "nextAction": "body"
+          },
+          {
+            "iteration": 3,
+            "leftValue": 1,
+            "result": true,
+            "nextAction": "body"
+          },
+          {
+            "iteration": 500,
+            "leftValue": 1,
+            "result": true,
+            "nextAction": "body"
+          },
+          {
+            "iteration": 501,
+            "leftValue": 1,
+            "result": true,
+            "nextAction": "limit"
+          }
+        ]
+      },
+      "phase2Ui": true
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 F03 右辺未宣言",
+    "code": "#include <stdio.h>\nint main(void){\nint i=0;\nwhile(1){\ni += missing;\n}\nprintf(\"WRONG\");\nreturn 0;\n}",
+    "expect": {
+      "warningMin": 1,
+      "outputExcludes": [
+        "WRONG"
+      ],
+      "phase2": {
+        "decisions": [
+          {
+            "iteration": 1,
+            "result": true,
+            "nextAction": "body"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 F03 右辺未初期化",
+    "code": "#include <stdio.h>\nint main(void){\nint i=0,step;\nwhile(1){\ni += step;\n}\nprintf(\"WRONG\");\nreturn 0;\n}",
+    "expect": {
+      "warningMin": 1,
+      "outputExcludes": [
+        "WRONG"
+      ],
+      "phase2": {
+        "decisions": [
+          {
+            "iteration": 1,
+            "result": true,
+            "nextAction": "body"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 F03 左辺未初期化",
+    "code": "#include <stdio.h>\nint main(void){\nint i,step=1;\nwhile(1){\ni += step;\n}\nprintf(\"WRONG\");\nreturn 0;\n}",
+    "expect": {
+      "warningMin": 1,
+      "outputExcludes": [
+        "WRONG"
+      ],
+      "phase2": {
+        "decisions": [
+          {
+            "iteration": 1,
+            "result": true,
+            "nextAction": "body"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 F03 左辺未宣言",
+    "code": "#include <stdio.h>\nint main(void){\nint step=1;\nwhile(1){\ni += step;\n}\nprintf(\"WRONG\");\nreturn 0;\n}",
+    "expect": {
+      "warningMin": 1,
+      "outputExcludes": [
+        "WRONG"
+      ],
+      "phase2": {
+        "decisions": [
+          {
+            "iteration": 1,
+            "result": true,
+            "nextAction": "body"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 範囲保護 式右辺",
+    "code": "#include <stdio.h>\nint main(void){\nint i=0,step=1;\nwhile(i<1){\ni += step + 1;\ni++;\n}\nprintf(\"WRONG\");\nreturn 0;\n}",
+    "expect": {
+      "warningMin": 1,
+      "outputExcludes": [
+        "WRONG"
+      ],
+      "phase2": {
+        "decisions": []
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 範囲保護 if内",
+    "code": "#include <stdio.h>\nint main(void){\nint i=0,step=1;\nwhile(i<1){\nif(i<2){\ni += step;\n}\ni++;\n}\nprintf(\"WRONG\");\nreturn 0;\n}",
+    "expect": {
+      "warningMin": 1,
+      "outputExcludes": [
+        "WRONG"
+      ],
+      "phase2": {
+        "decisions": []
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 範囲保護 else-if内",
+    "code": "#include <stdio.h>\nint main(void){\nint i=0,step=1;\nwhile(i<1){\nif(i>2){\ni=1;\n}else if(i<2){\ni += step;\n}\ni++;\n}\nprintf(\"WRONG\");\nreturn 0;\n}",
+    "expect": {
+      "warningMin": 1,
+      "outputExcludes": [
+        "WRONG"
+      ],
+      "phase2": {
+        "decisions": []
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 範囲保護 配列",
+    "code": "#include <stdio.h>\nint main(void){\nint i=0,a[2];\nwhile(i<1){\ni += a[0];\ni++;\n}\nprintf(\"WRONG\");\nreturn 0;\n}",
+    "expect": {
+      "warningMin": 1,
+      "outputExcludes": [
+        "WRONG"
+      ],
+      "phase2": {
+        "decisions": []
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 範囲保護 入力",
+    "code": "#include <stdio.h>\nint main(void){\nint i=0;\nwhile(i<1){\nscanf(\"%d\", &i);\ni++;\n}\nprintf(\"WRONG\");\nreturn 0;\n}",
+    "expect": {
+      "warningMin": 1,
+      "outputExcludes": [
+        "WRONG"
+      ],
+      "phase2": {
+        "decisions": []
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 範囲保護 宣言",
+    "code": "#include <stdio.h>\nint main(void){\nint i=0;\nwhile(i<1){\nint step=1;\ni++;\n}\nprintf(\"WRONG\");\nreturn 0;\n}",
+    "expect": {
+      "warningMin": 1,
+      "outputExcludes": [
+        "WRONG"
+      ],
+      "phase2": {
+        "decisions": []
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 範囲保護 ネスト",
+    "code": "#include <stdio.h>\nint main(void){\nint i=0;\nwhile(i<1){\nwhile(i<1){\ni++;\n}\ni++;\n}\nprintf(\"WRONG\");\nreturn 0;\n}",
+    "expect": {
+      "warningMin": 1,
+      "outputExcludes": [
+        "WRONG"
+      ],
+      "phase2": {
+        "decisions": []
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 範囲保護 forネスト",
+    "code": "#include <stdio.h>\nint main(void){\nint i=0;\nwhile(i<1){\nfor(i=0;i<1;i++){\nprintf(\"X\");\n}\ni++;\n}\nprintf(\"WRONG\");\nreturn 0;\n}",
+    "expect": {
+      "warningMin": 1,
+      "outputExcludes": [
+        "WRONG"
+      ],
+      "phase2": {
+        "decisions": []
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 範囲保護 break",
+    "code": "#include <stdio.h>\nint main(void){\nint i=0;\nwhile(i<1){\nbreak;\ni++;\n}\nprintf(\"WRONG\");\nreturn 0;\n}",
+    "expect": {
+      "warningMin": 1,
+      "outputExcludes": [
+        "WRONG"
+      ],
+      "phase2": {
+        "decisions": []
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 範囲保護 continue",
+    "code": "#include <stdio.h>\nint main(void){\nint i=0;\nwhile(i<1){\ncontinue;\ni++;\n}\nprintf(\"WRONG\");\nreturn 0;\n}",
+    "expect": {
+      "warningMin": 1,
+      "outputExcludes": [
+        "WRONG"
+      ],
+      "phase2": {
+        "decisions": []
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 範囲保護 main複合更新",
+    "code": "#include <stdio.h>\nint main(void){\nint i=0,step=1;\ni += step;\nprintf(\"%d\",i);\nreturn 0;\n}",
+    "expect": {
+      "warningMin": 1,
+      "variables": [
+        "i = 0"
+      ],
+      "phase2": {
+        "decisions": []
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 F04途中return",
+    "code": "#include <stdio.h>\nint main(void){\nint i=0;\nwhile(i<5){\nprintf(\"P\");\nreturn 0;\n}\nprintf(\"WRONG\");\nreturn 0;\n}",
+    "expect": {
+      "output": "P",
+      "warningMax": 0,
+      "phase2": {
+        "decisions": [
+          {
+            "iteration": 1,
+            "leftValue": 0,
+            "result": true
+          }
+        ]
+      },
+      "phase2Ui": true
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 F04本文エラー",
+    "code": "#include <stdio.h>\nint main(void){\nint i=0;\nwhile(i<3){\nprintf(\"P\");\ni=1/0;\n}\nprintf(\"WRONG\");\nreturn 0;\n}",
+    "expect": {
+      "output": "P",
+      "warningMin": 1,
+      "phase2": {
+        "decisions": [
+          {
+            "iteration": 1,
+            "result": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 F04条件エラー",
+    "code": "#include <stdio.h>\nint main(void){\nint i=0;\nwhile(1/i){\ni++;\n}\nprintf(\"WRONG\");\nreturn 0;\n}",
+    "expect": {
+      "warningMin": 1,
+      "phase2": {
+        "decisions": []
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 F04非有限更新",
+    "code": "#include <stdio.h>\nint main(void){\ndouble i=100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000.0,step=100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000.0;\nwhile(i>0){\ni += step;\n}\nprintf(\"WRONG\");\nreturn 0;\n}",
+    "expect": {
+      "warningMin": 1,
+      "outputExcludes": [
+        "WRONG"
+      ],
+      "phase2": {
+        "decisions": [
+          {
+            "iteration": 1,
+            "result": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 F04数値真値",
+    "code": "#include <stdio.h>\nint main(void){\nint i=-2;\nwhile(i){\ni++;\n}\nprintf(\"%d\",i);\nreturn 0;\n}",
+    "expect": {
+      "output": "0",
+      "warningMax": 0,
+      "phase2": {
+        "decisions": [
+          {
+            "iteration": 1,
+            "result": true,
+            "evaluatedValue": -2,
+            "comparison": null
+          },
+          {
+            "iteration": 2,
+            "result": true,
+            "evaluatedValue": -1,
+            "comparison": null
+          },
+          {
+            "iteration": 3,
+            "result": false,
+            "evaluatedValue": 0,
+            "comparison": null
+          }
+        ]
+      },
+      "phase2Ui": true
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 EDU_04_2",
+    "code": "#include <stdio.h>\nint main(void){\nint i=1,sum=0;\nwhile(i<=10){\nprintf(\"ｉの値は %d \\n\",i);\nsum = sum+i;\ni++;\n}\nprintf(\"１から１０までの和は %d \\n\",sum);\nreturn 0;\n}",
+    "expect": {
+      "warningMax": 0,
+      "output": "ｉの値は 1 \nｉの値は 2 \nｉの値は 3 \nｉの値は 4 \nｉの値は 5 \nｉの値は 6 \nｉの値は 7 \nｉの値は 8 \nｉの値は 9 \nｉの値は 10 \n１から１０までの和は 55",
+      "variables": [
+        "i = 11",
+        "sum = 55"
+      ],
+      "phase2": {
+        "decisions": [
+          {
+            "iteration": 1,
+            "result": true
+          },
+          {
+            "iteration": 2,
+            "result": true
+          },
+          {
+            "iteration": 3,
+            "result": true
+          },
+          {
+            "iteration": 10,
+            "result": true
+          },
+          {
+            "iteration": 11,
+            "result": false
+          }
+        ]
+      },
+      "phase2Ui": true
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 COND_ERROR_AFTER_8",
+    "code": "#include <stdio.h>\nint main(void){\nint i=0;\nwhile(1.0/(8-i)){\ni++;\n}\nprintf(\"WRONG\");\nreturn 0;\n}",
+    "expect": {
+      "warningMin": 1,
+      "phase2": {
+        "decisions": [
+          {
+            "iteration": 1,
+            "result": true
+          },
+          {
+            "iteration": 2,
+            "result": true
+          },
+          {
+            "iteration": 3,
+            "result": true
+          },
+          {
+            "iteration": 8,
+            "result": true
+          }
+        ]
+      },
+      "phase2Ui": false
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 RETURN_AFTER_8",
+    "code": "#include <stdio.h>\nint main(void){\nint i=0;\nwhile(i<10){\ni++;\nif(i==8){\nreturn 0;\n}\n}\nprintf(\"WRONG\");\nreturn 0;\n}",
+    "expect": {
+      "warningMax": 0,
+      "phase2": {
+        "decisions": [
+          {
+            "iteration": 1,
+            "result": true
+          },
+          {
+            "iteration": 2,
+            "result": true
+          },
+          {
+            "iteration": 3,
+            "result": true
+          },
+          {
+            "iteration": 8,
+            "result": true
+          }
+        ]
+      },
+      "phase2Ui": true
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 CHAR_WRAP_OVERFLOW",
+    "code": "#include <stdio.h>\nint main(void){\nchar c=127;\nwhile(c>0){\nc++;\n}\n\nreturn 0;\n}",
+    "expect": {
+      "warningMin": 1,
+      "phase2": {
+        "decisions": [
+          {
+            "iteration": 1,
+            "result": true
+          }
+        ]
+      },
+      "phase2Ui": false
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 INT_DIVISION",
+    "code": "#include <stdio.h>\nint main(void){\nint i=0;\nwhile(5/2-i){\ni++;\n}\nprintf(\"%d\",i);\nreturn 0;\n}",
+    "expect": {
+      "warningMax": 0,
+      "phase2": {
+        "decisions": [
+          {
+            "iteration": 1,
+            "result": true
+          },
+          {
+            "iteration": 2,
+            "result": true
+          },
+          {
+            "iteration": 3,
+            "result": false
+          }
+        ]
+      },
+      "phase2Ui": false
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 F04独立while順次",
+    "code": "#include <stdio.h>\nint main(void){\nint i=0;\nwhile(i<1){\ni++;\n}\nwhile(i<2){\ni++;\n}\nprintf(\"%d\",i);\nreturn 0;\n}",
+    "expect": {
+      "output": "2",
+      "warningMax": 0,
+      "phase2": {
+        "decisions": [
+          {
+            "iteration": 1,
+            "headerLineNo": 4,
+            "leftValue": 0,
+            "result": true
+          },
+          {
+            "iteration": 2,
+            "headerLineNo": 4,
+            "leftValue": 1,
+            "result": false
+          },
+          {
+            "iteration": 1,
+            "headerLineNo": 7,
+            "leftValue": 1,
+            "result": true
+          },
+          {
+            "iteration": 2,
+            "headerLineNo": 7,
+            "leftValue": 2,
+            "result": false
+          }
+        ]
+      },
+      "phase2Ui": true
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 F04 FOR混在",
+    "code": "#include <stdio.h>\nint main(void){\nint i=0,j=0,step=1;\nfor(i=0;i<2;i+=step){\nprintf(\"F\");\n}\nwhile(j<2){\nj += step;\n}\nfor(i=0;i<1;i++){\nprintf(\"G\");\n}\nprintf(\"%d\",j);\nreturn 0;\n}",
+    "expect": {
+      "output": "FFG2",
+      "warningMax": 0,
+      "loopDecisionCount": 5,
+      "phase2": {
+        "decisions": [
+          {
+            "iteration": 1,
+            "enteredCount": 0,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 0,
+            "rightValue": 2,
+            "operator": "<"
+          },
+          {
+            "iteration": 2,
+            "enteredCount": 1,
+            "result": true,
+            "nextAction": "body",
+            "leftValue": 1,
+            "rightValue": 2,
+            "operator": "<"
+          },
+          {
+            "iteration": 3,
+            "enteredCount": 2,
+            "result": false,
+            "nextAction": "exit",
+            "leftValue": 2,
+            "rightValue": 2,
+            "operator": "<"
+          }
+        ]
+      },
+      "phase2Ui": true
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 範囲保護 do-while",
+    "code": "#include <stdio.h>\nint main(void){\nint i=0;\ndo {\ni++;\n} while(i<2);\nreturn 0;\n}",
+    "expect": {
+      "warningMin": 1,
+      "variables": [
+        "i = 0"
+      ],
+      "phase2": {
+        "decisions": []
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 F03配列名右辺",
+    "code": "#include <stdio.h>\nint main(void){\nint i=0;\nint a[2];\nwhile(i<1){\ni += a;\n}\nprintf(\"WRONG\");\nreturn 0;\n}",
+    "expect": {
+      "warningMin": 1,
+      "variables": [
+        "i = 0"
+      ],
+      "outputExcludes": [
+        "WRONG"
+      ],
+      "phase2": {
+        "decisions": [
+          {
+            "iteration": 1,
+            "result": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "L-WHILE1 P2 F04長条件",
+    "code": "#include <stdio.h>\nint main(void){\nint very_long_loop_counter_name_for_condition_visualization=0;\nwhile((very_long_loop_counter_name_for_condition_visualization + 100 + 100 + 100 + 100 + 100 + 100 + 100 + 100) < 801){\nvery_long_loop_counter_name_for_condition_visualization++;\n}\nprintf(\"%d\",very_long_loop_counter_name_for_condition_visualization);\nreturn 0;\n}",
+    "expect": {
+      "output": "1",
+      "warningMax": 0,
+      "phase2": {
+        "decisions": [
+          {
+            "iteration": 1,
+            "leftValue": 800,
+            "rightValue": 801,
+            "result": true
+          },
+          {
+            "iteration": 2,
+            "leftValue": 801,
+            "rightValue": 801,
+            "result": false
+          }
+        ]
+      },
+      "phase2Ui": true
+    }
+  }
+]);
+
     async function checkPhase1UiCases(){
       const results=[], frame=createUiTestFrame();
       try{
@@ -6720,6 +8331,7 @@
       results.push(...await checkExpandedSampleUiCases());
       results.push(...await checkSelectionPaletteUiCases());
       results.push(...await checkPhase1UiCases());
+      results.push(...await checkPhase2UiCases());
       const passed = results.filter(item => item.result.passed).length;
       const failed = results.length - passed;
 

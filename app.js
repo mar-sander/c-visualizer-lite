@@ -796,6 +796,25 @@ function renderForDecisionStep(decision){
   return card;
 }
 
+// whileの値・序数・進行先は、実行器が記録した判定をそのまま表示します。
+function renderWhileDecisionStep(decision){
+  const card = element('div', 'decision-card while-decision-card');
+  card.append(element('div', 'decision-context', `WHILE CONDITION · ${decision.iteration}回目の条件 · ${decision.headerLineNo}行目`));
+  const evaluation = element('div', 'decision-evaluation');
+  const display = decision.comparison
+    ? `${decision.comparison.left.display} ${decision.comparison.operator} ${decision.comparison.right.display}`
+    : `${decision.condition} → ${decision.evaluatedDisplay}`;
+  const outcome = element('span', 'decision-outcome', decision.result ? '成立' : '不成立');
+  outcome.append(element('small', '', decision.result ? 'TRUE' : 'FALSE'));
+  evaluation.append(element('span', 'decision-values', display), outcome);
+  const paths = element('div', 'decision-paths');
+  const next = decision.nextAction === 'limit' ? '安全上限に達したため停止'
+    : decision.result ? '条件が成立→本文へ' : '不成立→ループ終了';
+  paths.append(element('span', 'decision-path is-selected', next));
+  card.append(evaluation, paths);
+  return card;
+}
+
 function describeDecisionPurpose(decision){
   const variableName = /^[A-Za-z_]\w*$/;
   const context = decision.depth === 2 ? '外側の分岐の中で、' : '';
@@ -848,13 +867,14 @@ function renderStep(){
       : decodeEngineExplanation(step.text))
   );
   const decision = step.branchDecision ? renderDecisionStep(step.branchDecision)
-    : step.loopDecision?.kind === 'for' ? renderForDecisionStep(step.loopDecision) : null;
+    : step.loopDecision?.kind === 'for' ? renderForDecisionStep(step.loopDecision)
+    : step.loopDecision?.kind === 'while' ? renderWhileDecisionStep(step.loopDecision) : null;
   const input = step.scanfInput ? element('div', 'scanf-step-input') : null;
   if(input){
     input.append(element('small', '', 'INPUT'), element('span', '', step.scanfInput.inputDisplay));
   }
   // 判定では値が変わらないので、空の変化カードを重ねません。
-  const change = (isOmission || step.branchDecision || step.loopDecision?.kind === 'for') ? null : renderValueChange(activeStep);
+  const change = (isOmission || step.branchDecision || step.loopDecision?.kind === 'for' || step.loopDecision?.kind === 'while') ? null : renderValueChange(activeStep);
   const nextStep = currentSteps[activeStep + 1];
   const next = element('div', 'next-line');
   next.append(
@@ -968,6 +988,9 @@ function showFailure(result){
   const box = element('div', 'failure-state');
   box.append(element('h3', '', '確認が必要です'));
   for(const warning of warnings) box.append(element('p', '', warning));
+  // 安全上限の実際のTRUE判定を失敗画面で示します。通常STEPや成功RESULTには進めません。
+  const limitStep = result.steps?.findLast(step => step.loopDecision?.kind === 'while' && step.loopDecision.nextAction === 'limit');
+  if(limitStep) box.append(renderWhileDecisionStep(limitStep.loopDecision));
   if(result.output) box.append(element('p', 'partial-output', `农止までの出力：${result.output}`));
   flow.replaceChildren(box);
   $('step-controls').hidden = true;
