@@ -8320,6 +8320,100 @@
       return results;
     }
 
+    // UI-FONT1: CodeMirror専用文字サイズの回帰。結果・FLOW・CodeMirror入力を保持する。
+    async function checkEditorFontUiCases(){
+      const storageKey='c-visualizer-lite:editor-font-size:v1';
+      let savedFontSize=null;
+      try{
+        savedFontSize=localStorage.getItem(storageKey);
+        localStorage.removeItem(storageKey);
+      }catch(_error){ /* 保存禁止でもUI検査は継続する。 */ }
+      const results=[], frame=createUiTestFrame();
+      const record=(name,failures)=>results.push({
+        testCase:{name:'UI-FONT1 '+name},
+        result:{passed:!failures.length,failures,actual:{output:'CODE専用サイズ操作',warningCount:0}}
+      });
+      try{
+        await new Promise(resolve=>frame.addEventListener('load',resolve,{once:true}));
+        const ui=frame.contentWindow,doc=ui.document;
+        const cm=doc.querySelector('.CodeMirror').CodeMirror;
+        const wrapper=cm.getWrapperElement();
+        const increase=doc.getElementById('editor-font-increase');
+        const decrease=doc.getElementById('editor-font-decrease');
+        const reset=doc.getElementById('editor-font-reset');
+        const light=doc.getElementById('editor-light-toggle');
+        const size=()=>Math.round(Number.parseFloat(ui.getComputedStyle(wrapper).fontSize));
+        const failures=[];
+        const initial=size();
+        const codeBefore=cm.getValue();
+        const flowSize=ui.getComputedStyle(doc.getElementById('flow-content')).fontSize;
+        const resultSize=ui.getComputedStyle(doc.getElementById('summary-output')).fontSize;
+        if(initial!==14)failures.push(`iframe PC初期サイズは14pxを期待: ${initial}`);
+        if(reset.textContent!==`${initial}px`)failures.push('サイズ表示の初期値が違います');
+        if(!(increase.getBoundingClientRect().right <= light.getBoundingClientRect().left))failures.push('拡大操作がLightの左にありません');
+        record('初期値・Light左配置',failures);
+
+        increase.click();
+        const plusFailures=[];
+        if(size()!==initial+2)plusFailures.push(`A+で2px拡大されない: ${size()}`);
+        if(reset.textContent!==`${initial+2}px`)plusFailures.push('サイズ表示が追従しません');
+        if(cm.getValue()!==codeBefore)plusFailures.push('操作時にコードが変更されました');
+        if(ui.getComputedStyle(doc.getElementById('flow-content')).fontSize!==flowSize)plusFailures.push('FLOW文字サイズが変更されました');
+        if(ui.getComputedStyle(doc.getElementById('summary-output')).fontSize!==resultSize)plusFailures.push('RESULT文字サイズが変更されました');
+        record('CODE限定拡大・他領域保持',plusFailures);
+
+        decrease.click();
+        record('A−で元のサイズへ',size()===initial?[]:[`戻り値 ${size()}px`]);
+
+        for(let i=0;i<16;i++)increase.click();
+        const maxFailures=[];
+        if(size()!==26)maxFailures.push(`最大は26px: ${size()}`);
+        if(!increase.disabled)maxFailures.push('最大値でA+が無効になりません');
+        record('26px上限',maxFailures);
+
+        for(let i=0;i<16;i++)decrease.click();
+        const minFailures=[];
+        if(size()!==12)minFailures.push(`最小は12px: ${size()}`);
+        if(!decrease.disabled)minFailures.push('最小値でA−が無効になりません');
+        record('12px下限',minFailures);
+
+        reset.click();
+        const resetFailures=[];
+        if(size()!==initial)resetFailures.push(`初期値に戻らない: ${size()}px`);
+        if(wrapper.style.fontSize)resetFailures.push('インラインCSSが除去されていません');
+        light.click();increase.click();
+        if(size()!==initial+2)resetFailures.push('Lightでの拡大ができません');
+        if(!doc.querySelector('.editor-frame').classList.contains('is-light'))resetFailures.push('Light状態が保持されません');
+        record('標準復帰・Light併用',resetFailures);
+
+        // オフラインでも保存禁止設定でも動作自体は継続できる設計。
+        // 通常HTTPでのlocalStorage永続化はブラウザE2Eで追加確認する。
+        const errorFailures=[];
+        try{
+          cm.setCursor(1,0);
+          cm.refresh();
+          if(!doc.querySelector('.CodeMirror-linenumber'))errorFailures.push('行番号が表示されません');
+          if(cm.getValue()!==codeBefore)errorFailures.push('コードが保持されません');
+          reset.click();
+          frame.style.width='390px';
+          await new Promise(resolve=>ui.setTimeout(resolve,100));
+          if(size()!==12 || reset.textContent!=='12px' || !decrease.disabled)errorFailures.push('小画面の標準サイズ・操作表示が追従しません');
+          frame.style.width='1200px';
+          await new Promise(resolve=>ui.setTimeout(resolve,100));
+          if(size()!==14 || reset.textContent!=='14px' || decrease.disabled)errorFailures.push('PC標準サイズ・操作表示が追従しません');
+        }catch(error){errorFailures.push(String(error));}
+        record('CodeMirror refresh・行番号',errorFailures);
+      }catch(error){record('実行例外',[String(error)]);}
+      finally{
+        frame.remove();
+        try{
+          if(savedFontSize===null)localStorage.removeItem(storageKey);
+          else localStorage.setItem(storageKey,savedFontSize);
+        }catch(_error){ /* 保存禁止設定を維持する。 */ }
+      }
+      return results;
+    }
+
     async function runAllTests(){
       const results = testCases.map(testCase => ({ testCase, result:checkCase(testCase) }));
       results.push(...await checkDecisionUiCases());
@@ -8332,6 +8426,7 @@
       results.push(...await checkSelectionPaletteUiCases());
       results.push(...await checkPhase1UiCases());
       results.push(...await checkPhase2UiCases());
+      results.push(...await checkEditorFontUiCases());
       const passed = results.filter(item => item.result.passed).length;
       const failed = results.length - passed;
 

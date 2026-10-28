@@ -29,6 +29,71 @@ editor.on('cursorActivity', () => {
   });
 });
 
+// CODE欄だけを拡大する。解析結果・FLOW・入力データ・undo履歴は変更しない。
+// 未設定ならPC 14px／小画面 12pxの既存CSSをそのまま使用する。
+const EDITOR_FONT_STORAGE_KEY = 'c-visualizer-lite:editor-font-size:v1';
+const EDITOR_FONT_MIN = 12;
+const EDITOR_FONT_MAX = 26;
+const EDITOR_FONT_STEP = 2;
+const editorFontDecrease = $('editor-font-decrease');
+const editorFontReset = $('editor-font-reset');
+const editorFontIncrease = $('editor-font-increase');
+const editorFontWrapper = editor.getWrapperElement();
+
+function readEditorFontSize(){
+  return Math.round(Number.parseFloat(window.getComputedStyle(editorFontWrapper).fontSize));
+}
+
+function updateEditorFontControls(){
+  const size = readEditorFontSize();
+  editorFontReset.textContent = `${size}px`;
+  editorFontDecrease.disabled = size <= EDITOR_FONT_MIN;
+  editorFontIncrease.disabled = size >= EDITOR_FONT_MAX;
+}
+
+function setEditorFontSize(size, persist = true){
+  if(size === null){
+    editorFontWrapper.style.removeProperty('font-size');
+  }else{
+    editorFontWrapper.style.fontSize = `${size}px`;
+  }
+  // サイズ変更後にCodeMirrorの行高・ガター・カーソル位置を再測定。
+  editor.refresh();
+  updateEditorFontControls();
+  if(persist){
+    try{
+      if(size === null) window.localStorage.removeItem(EDITOR_FONT_STORAGE_KEY);
+      else window.localStorage.setItem(EDITOR_FONT_STORAGE_KEY, String(size));
+    }catch(_error){ /* 保存を許可しないブラウザでも調整機能は利用できる。 */ }
+  }
+}
+
+function adjustEditorFontSize(delta){
+  const current = readEditorFontSize();
+  const next = Math.max(EDITOR_FONT_MIN, Math.min(EDITOR_FONT_MAX, current + delta));
+  if(next !== current) setEditorFontSize(next);
+}
+
+editorFontDecrease.addEventListener('click', () => adjustEditorFontSize(-EDITOR_FONT_STEP));
+editorFontIncrease.addEventListener('click', () => adjustEditorFontSize(EDITOR_FONT_STEP));
+editorFontReset.addEventListener('click', () => setEditorFontSize(null));
+try{
+  const stored = window.localStorage.getItem(EDITOR_FONT_STORAGE_KEY);
+  if(stored !== null){
+    const value = Number(stored);
+    if(Number.isInteger(value) && value >= EDITOR_FONT_MIN && value <= EDITOR_FONT_MAX && value % 2 === 0){
+      setEditorFontSize(value, false);
+    }
+  }
+}catch(_error){ /* localStorageが利用できなければ既存CSSの初期サイズを使う。 */ }
+updateEditorFontControls();
+
+// 標準サイズは画面幅に応じて変わるため、表示とCodeMirror計測も追従する。
+window.matchMedia('(max-width: 600px)').addEventListener('change', () => {
+  editor.refresh();
+  updateEditorFontControls();
+});
+
 const editorLightToggle = $('editor-light-toggle');
 editorLightToggle.addEventListener('click', () => {
   const isLight = editorFrame.classList.toggle('is-light');

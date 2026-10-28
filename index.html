@@ -29,7 +29,14 @@
         <section class="panel code-panel" aria-label="CODE">
           <div class="panel-heading">
             <button type="button" id="secret-code-open" class="section-index secret-code-open" aria-haspopup="dialog" aria-controls="secret-code-dialog" aria-label="SECRET CODEを入力">CODE</button>
-            <button type="button" id="editor-light-toggle" class="editor-light-toggle" role="switch" aria-checked="false" aria-label="エディタのライト表示" title="エディタのライト表示を切り替え">Light</button>
+            <div class="editor-heading-actions">
+              <div class="editor-font-controls" role="group" aria-label="コードエディタの文字サイズ">
+                <button type="button" id="editor-font-decrease" class="editor-font-button" aria-label="コードの文字を小さくする" title="文字を2px小さくする">A−</button>
+                <button type="button" id="editor-font-reset" class="editor-font-size" aria-label="コードの文字サイズを標準に戻す" title="標準の文字サイズに戻す">14px</button>
+                <button type="button" id="editor-font-increase" class="editor-font-button" aria-label="コードの文字を大きくする" title="文字を2px大きくする">A+</button>
+              </div>
+              <button type="button" id="editor-light-toggle" class="editor-light-toggle" role="switch" aria-checked="false" aria-label="エディタのライト表示" title="エディタのライト表示を切り替え">Light</button>
+            </div>
           </div>
           <div class="editor-frame">
             <textarea id="code-input" aria-label="C言語のコード入力欄" spellcheck="false">#include &lt;stdio.h&gt;

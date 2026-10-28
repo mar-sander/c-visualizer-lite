@@ -1733,6 +1733,57 @@ button:focus-visible,select:focus-visible {
   font-weight: 900;
 }
 
+/* CODE見出しに文字サイズ操作を配置し、Lightは常にその右端へ残す。 */
+.editor-heading-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.editor-font-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.editor-font-button,.editor-font-size {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  padding: 0 5px;
+  border: 1px solid #555;
+  border-radius: 6px;
+  background: #292929;
+  color: #dedede;
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.editor-font-size {
+  min-width: 36px;
+  font-variant-numeric: tabular-nums;
+}
+
+.editor-font-button:disabled {
+  opacity: .4;
+  cursor: default;
+}
+
+.editor-font-button:not(:disabled):hover,
+.editor-font-size:hover {
+  background: #383838;
+  border-color: #777;
+}
+
+.editor-font-button:focus-visible,.editor-font-size:focus-visible {
+  outline: 1px solid #d5d5d5;
+  outline-offset: 2px;
+}
+
 /* 凡例行をなくし、LightをCODE見出し行の右側へ置きます。 */
 
 .editor-light-toggle {
