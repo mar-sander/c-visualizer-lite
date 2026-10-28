@@ -1786,7 +1786,7 @@ button:focus-visible,select:focus-visible {
 }
 
 .editor-frame.is-light .CodeMirror {
-  background: #f2f2ef;
+  background: #ffffff;
   color: #252a2a
 }
 
