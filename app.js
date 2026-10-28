@@ -496,11 +496,13 @@ function loadHistory(){
   }
 }
 
-function persistHistory(){
+function persistHistory(entries = historyEntries){
   try{
-    localStorage.setItem(HISTORY_KEY, JSON.stringify({version:1, entries:historyEntries}));
+    localStorage.setItem(HISTORY_KEY, JSON.stringify({version:1, entries}));
+    return true;
   }catch(_error){
     // 保存が使えなくてもRUNや現在の表示は続行します。
+    return false;
   }
 }
 
@@ -533,6 +535,144 @@ function saveHistory(code, kind, result, warnings = []){
   }
 }
 
+// L-HISTORY-IO1: 外部ファイルは値を実行せず、検証した履歴項目だけを取り込む。
+const HISTORY_FILE_FORMAT = 'c-code-visualizer-lite-history';
+const HISTORY_FILE_VERSION = 1;
+const HISTORY_MAX_FILE_BYTES = 1024 * 1024;
+const historyExport = $('history-export');
+const historyImport = $('history-import');
+const historyImportFile = $('history-import-file');
+const historyTransferStatus = $('history-transfer-status');
+
+function historyTransferMessage(message, isError = false){
+  historyTransferStatus.hidden = !message;
+  historyTransferStatus.textContent = message;
+  historyTransferStatus.dataset.state = isError ? 'error' : 'ok';
+}
+
+function isValidImportedHistoryEntry(entry){
+  return entry && typeof entry === 'object' && !Array.isArray(entry) &&
+    typeof entry.id === 'string' && entry.id.length > 0 && entry.id.length <= 200 &&
+    typeof entry.timestamp === 'string' && !Number.isNaN(Date.parse(entry.timestamp)) &&
+    typeof entry.code === 'string' && entry.code.length <= 60000 &&
+    ['result', 'check'].includes(entry.kind) &&
+    typeof entry.output === 'string' && entry.output.length <= 60000 &&
+    Array.isArray(entry.variables) && entry.variables.length <= 200 && entry.variables.every(pair =>
+      Array.isArray(pair) && pair.length === 2 && pair.every(value =>
+        typeof value === 'string' && value.length <= 10000)) &&
+    Array.isArray(entry.warnings) && entry.warnings.length <= 100 && entry.warnings.every(value =>
+      typeof value === 'string' && value.length <= 10000);
+}
+
+function parseHistoryImport(text){
+  const data = JSON.parse(text);
+  const isArchive = data && data.format === HISTORY_FILE_FORMAT;
+  const isLegacy = data && data.format === undefined;
+  if(!data || typeof data !== 'object' || Array.isArray(data) ||
+    (!isArchive && !isLegacy) || data.version !== HISTORY_FILE_VERSION ||
+    !Array.isArray(data.entries) || data.entries.length > 100 ||
+    !data.entries.every(isValidImportedHistoryEntry)){
+    throw new Error('対応していない履歴形式、または不正なデータです。');
+  }
+  // prototypeを含む未知のプロパティは捨て、表示対象の文字列と配列だけを複製する。
+  return data.entries.map(entry => ({
+    id:entry.id, timestamp:entry.timestamp, code:entry.code,
+    kind:entry.kind, output:entry.output,
+    variables:entry.variables.map(pair => [pair[0],pair[1]]),
+    warnings:[...entry.warnings]
+  }));
+}
+
+function historyEntriesEqual(a, b){
+  return a.timestamp === b.timestamp &&
+    ['code','kind','output','variables','warnings'].every(key =>
+      JSON.stringify(a[key]) === JSON.stringify(b[key]));
+}
+
+function mergeHistoryImport(imported){
+  const combined = [...historyEntries];
+  let added = 0;
+  for(const entry of imported){
+    if(combined.some(existing => historyEntriesEqual(existing, entry))) continue;
+    const copy = {...entry};
+    if(combined.some(existing => existing.id === copy.id)){
+      copy.id = crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    }
+    combined.push(copy);
+    added++;
+  }
+  // RUN日時順にする。既存と同時刻なら既存の並びを保つ（安定ソート）。
+  combined.sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
+  return {all:combined, kept:combined.slice(0,HISTORY_LIMIT),
+    omitted:Math.max(0,combined.length - HISTORY_LIMIT), added};
+}
+
+historyExport.addEventListener('click', () => {
+  if(!historyEntries.length) return;
+  try{
+    const archive = {
+      format:HISTORY_FILE_FORMAT, version:HISTORY_FILE_VERSION,
+      exportedAt:new Date().toISOString(), entries:historyEntries
+    };
+    const blob = new Blob([JSON.stringify(archive,null,2)],{type:'application/json;charset=utf-8'});
+    const url = URL.createObjectURL(blob);
+    const date = new Date();
+    const pad = n => String(n).padStart(2,'0');
+    const filename = `C_Code_Visualizer_Lite_History_${date.getFullYear()}${pad(date.getMonth()+1)}${pad(date.getDate())}_${pad(date.getHours())}${pad(date.getMinutes())}.json`;
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url),2000);
+    historyTransferMessage(`${historyEntries.length}件の履歴を書き出しました。初期化されない保存先へ移してください。`);
+  }catch(_error){
+    historyTransferMessage('ファイルを書き出せませんでした。ブラウザのダウンロード設定を確認してください。',true);
+  }
+});
+
+historyImport.addEventListener('click', () => historyImportFile.click());
+historyImportFile.addEventListener('change', async () => {
+  const file = historyImportFile.files?.[0];
+  historyImportFile.value = ''; // 同じファイルの再選択も可能にする。
+  if(!file) return;
+  if(file.size > HISTORY_MAX_FILE_BYTES){
+    historyTransferMessage('ファイルが大きすぎます（上限1MB）。読み込みを中止しました。',true);
+    return;
+  }
+  try{
+    const imported = parseHistoryImport(await file.text());
+    if(!imported.length){
+      historyTransferMessage('履歴0件のファイルです。現在の履歴は変更していません。');
+      return;
+    }
+    const merged = mergeHistoryImport(imported);
+    if(!merged.added){
+      historyTransferMessage('すべて読み込み済みです。履歴は変更していません。');
+      return;
+    }
+    if(merged.omitted && !window.confirm(
+      `履歴は最大${HISTORY_LIMIT}件です。統合後、古い${merged.omitted}件が一覧から外れます。続けますか？`)){
+      historyTransferMessage('読み込みを取り消しました。履歴は変更していません。');
+      return;
+    }
+    // 保存が失敗した場合、現在の履歴は変更しない（部分読み込み禁止）。
+    if(!persistHistory(merged.kept)){
+      historyTransferMessage('ブラウザへ履歴を保存できませんでした。現在の履歴は変更していません。',true);
+      return;
+    }
+    historyEntries = merged.kept;
+    selectedHistoryId = null;
+    renderHistory();
+    historyTransferMessage(`読み込み完了：新規${merged.added}件、現在${historyEntries.length}件${merged.omitted ? `（古い${merged.omitted}件を整理）` : ''}。コードは自動実行されません。`);
+  }catch(error){
+    historyTransferMessage(error instanceof SyntaxError ?
+      'JSONの形式が正しくありません。履歴は変更していません。' :
+      '履歴を読み込めませんでした。ファイルの形式を確認してください。既存履歴は変更していません。',true);
+  }
+});
+
 function historyDate(timestamp){
   const date = new Date(timestamp);
   const pad = value => String(value).padStart(2, '0');
@@ -543,6 +683,7 @@ function renderHistory(){
   const empty = !historyEntries.length;
   $('history-empty').hidden = !empty;
   $('history-content').hidden = empty;
+  historyExport.disabled = empty;
   if(empty) selectedHistoryId = null;
   else if(!historyEntries.some(entry => entry.id === selectedHistoryId)){
     selectedHistoryId = historyEntries[0].id;
@@ -1236,6 +1377,8 @@ $('history-open').addEventListener('click', () => {
 });
 $('history-close').addEventListener('click', () => historyDialog.close());
 historyDialog.addEventListener('click', event => {
+  // ファイル選択inputの合成click（座標0,0）を背景クリックと誤判定しない。
+  if(event.target !== historyDialog) return;
   const rect = historyDialog.getBoundingClientRect();
   const outside = event.clientX < rect.left || event.clientX > rect.right ||
     event.clientY < rect.top || event.clientY > rect.bottom;

@@ -2083,7 +2083,8 @@ button:focus-visible,select:focus-visible {
 .challenge-history {
   width: min(920px,calc(100vw - 24px));
   max-width: none;
-  max-height: calc(100dvh - 24px);
+  /* PCでは上下に呼吸できる余白を確保。短い画面・スマホは下のmedia queryで緩和する。 */
+  max-height: min(820px,calc(100dvh - 144px));
   margin: auto;
   padding: 0;
   border: 1px solid var(--line-strong);
@@ -2291,6 +2292,43 @@ button:focus-visible,select:focus-visible {
   font-size: 23px
 }
 
+.history-transfer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--line)
+}
+
+.history-transfer .history-action {
+  min-height: 40px
+}
+
+.history-transfer-note {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted)
+}
+
+.history-transfer-status {
+  margin: 0;
+  padding: 8px 18px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere
+}
+
+.history-transfer-status[data-state="error"] {
+  color: #ffadad
+}
+
+.history-transfer-status[hidden] {
+  display: none
+}
+
 .history-empty {
   margin: 0;
   padding: 36px 20px;
@@ -2439,8 +2477,13 @@ button:focus-visible,select:focus-visible {
   font-size: 13px
 }
 
-.history-action:hover {
+.history-action:hover:not(:disabled) {
   background: var(--surface-hover)
+}
+
+.history-action:disabled {
+  opacity: .45;
+  cursor: not-allowed
 }
 
 .history-restore {
@@ -2510,7 +2553,21 @@ body {
   background-image: none
 }
 
+@media(max-height:700px) {
+  .challenge-history {
+    max-height: calc(100dvh - 24px)
+  }
+}
+
 @media(max-width:600px) {
+  .challenge-history {
+    max-height: calc(100dvh - 24px)
+  }
+
+  .history-transfer {
+    padding: 10px 14px
+  }
+
   .header-tools .sample-picker {
     width: auto
   }

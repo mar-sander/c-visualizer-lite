@@ -8414,6 +8414,85 @@
       return results;
     }
 
+    // L-HISTORY-IO1: 端末初期化を跨ぐJSON移送と、履歴復元の非自動RUN契約。
+    async function checkHistoryPortabilityUiCases(){
+      const storageKey='c-visualizer-lite-history-v1';
+      let saved=null;
+      try{saved=localStorage.getItem(storageKey);}catch(_error){/* 保存制限時も検査を継続 */}
+      const frame=createUiTestFrame(),results=[];
+      const record=(name,failures)=>results.push({
+        testCase:{name:'L-HISTORY-IO1 '+name},
+        result:{passed:!failures.length,failures,actual:{output:'JSON履歴移送',warningCount:0}}
+      });
+      const entry=(id,timestamp='2026-10-28T10:00:00.000Z')=>({
+        id,timestamp,code:`int ${id.replace(/-/g,'_')} = 3;`,kind:'result',
+        output:'3',variables:[['value','3']],warnings:[]
+      });
+      try{
+        await new Promise(resolve=>frame.addEventListener('load',resolve,{once:true}));
+        const ui=frame.contentWindow,doc=ui.document;
+        const archive=entries=>({format:'c-code-visualizer-lite-history',version:1,entries});
+        const setEntries=entries=>ui.eval(`historyEntries = ${JSON.stringify(entries)}; selectedHistoryId=null; persistHistory(); renderHistory();`);
+        setEntries([]);
+        doc.getElementById('history-open').click();
+        record('履歴0件でも読み込み操作が可能',
+          doc.getElementById('history-import').disabled || !doc.getElementById('history-export').disabled ||
+          !doc.querySelector('.history-transfer') ? ['空履歴でのボタン状態が不正'] : []);
+        // transfer-containerはclass属性を使うため、存在そのものも確認する。
+        // input.click()は座標0,0の合成clickも発生する。背景タップ扱いで閉じないこと。
+        doc.getElementById('history-import').click();
+        record('読み込み操作が常時配置・ファイル選択で閉じない',
+          doc.querySelector('.history-transfer') && doc.querySelector('#history-import-file') &&
+          doc.getElementById('history-dialog').open ? [] : ['読込UIがないか、ファイル選択で履歴が閉じました']);
+        const item=entry('case-a');
+        const parsed=ui.eval(`parseHistoryImport(${JSON.stringify(JSON.stringify(archive([item])))})`);
+        record('JSON v1を正しい履歴に復元',
+          parsed.length===1 && parsed[0].code===item.code ? [] : ['schema変換が不正']);
+        let badRejected=false;
+        try{ui.eval(`parseHistoryImport(${JSON.stringify('{"format":"other","version":1,"entries":[]}')})`);}catch(_e){badRejected=true;}
+        record('形式の異なるJSONを拒否',badRejected ? []:['形式違いを受け入れました']);
+        const old=entry('case-old','2026-10-28T09:00:00.000Z');
+        setEntries([item]);
+        const dup=ui.eval(`mergeHistoryImport(parseHistoryImport(${JSON.stringify(JSON.stringify(archive([item])))}))`);
+        record('同じJSONを繰り返し統合しても重複しない',
+          dup.added===0 && dup.kept.length===1 ? []:['重複履歴が増えました']);
+        const merged=ui.eval(`mergeHistoryImport(parseHistoryImport(${JSON.stringify(JSON.stringify(archive([old])))}))`);
+        record('既存履歴を保持し日時順で追加',
+          merged.kept.length===2 && merged.kept[0].id===item.id && merged.kept[1].id===old.id ? []:['追加統合が不正']);
+        const many=Array.from({length:30},(_,i)=>entry(`case-${i}`,
+          `2026-10-28T10:${String(i).padStart(2,'0')}:00.000Z`));
+        setEntries([]);
+        const limited=ui.eval(`mergeHistoryImport(${JSON.stringify(many)})`);
+        record('20件上限と最新日時の優先',
+          limited.kept.length===20 && limited.omitted===10 && limited.kept[0].id==='case-29' ? []:['上限または順序が不正']);
+        // 悪意ある文字列もDOMへ埋め込まず、常にtextContentで表示する。
+        const tagged=entry('case-tag');
+        tagged.code='<img src=x onerror="window.__injected=true">';
+        setEntries([tagged]);
+        const safe=doc.querySelector('.history-code')?.textContent===tagged.code &&
+          !doc.querySelector('#history-detail img') && !ui.__injected;
+        record('読み込んだコードはHTMLとして実行されない',safe ? []:['コードをHTMLとして表示しました']);
+        const restore=doc.querySelector('.history-restore');
+        restore.click();
+        record('コード復元後に自動RUNしない',
+          ui.eval('hasCurrentResult()') || ui.eval('historyEntries.length')!==1 ||
+          doc.querySelector('.CodeMirror').CodeMirror.getValue()!==tagged.code ? ['自動RUNまたは内容の不一致'] : []);
+        const docHeight=ui.innerHeight;
+        // PCは上下に余白を残し、スマホは従来に近い高さを確保する。
+        const max=ui.getComputedStyle(doc.getElementById('history-dialog')).maxHeight;
+        record('PCの履歴ウィンドウ高さ制限',
+          max.includes('px') && parseFloat(max)<=820 ? []:[`高さ上限が想定外: ${max}`]);
+      }catch(error){record('実行例外',[String(error)]);}
+      finally{
+        frame.remove();
+        try{
+          if(saved===null)localStorage.removeItem(storageKey);
+          else localStorage.setItem(storageKey,saved);
+        }catch(_error){/* 保存制限を変更しない */}
+      }
+      return results;
+    }
+
     async function runAllTests(){
       const results = testCases.map(testCase => ({ testCase, result:checkCase(testCase) }));
       results.push(...await checkDecisionUiCases());
@@ -8427,6 +8506,7 @@
       results.push(...await checkPhase1UiCases());
       results.push(...await checkPhase2UiCases());
       results.push(...await checkEditorFontUiCases());
+      results.push(...await checkHistoryPortabilityUiCases());
       const passed = results.filter(item => item.result.passed).length;
       const failed = results.length - passed;
 

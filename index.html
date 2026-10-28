@@ -92,6 +92,13 @@ int main(void){
       <h2 id="history-title">履歴</h2>
       <button type="button" id="history-close" class="history-close" aria-label="履歴を閉じる">×</button>
     </div>
+    <div class="history-transfer" role="group" aria-label="履歴のJSONファイル保存・読み込み">
+      <button type="button" id="history-export" class="history-action" disabled>JSON書き出し</button>
+      <button type="button" id="history-import" class="history-action">JSON読み込み</button>
+      <input type="file" id="history-import-file" accept=".json,application/json" hidden>
+      <span class="history-transfer-note">コード・出力も保存されます。ファイルの管理にご注意ください。</span>
+    </div>
+    <p id="history-transfer-status" class="history-transfer-status" role="status" aria-live="polite" hidden></p>
     <p id="history-empty" class="history-empty" hidden>まだ履歴はありません。RUNすると、ここに挑戦の記録が残ります。</p>
     <div id="history-content" class="history-content">
       <div class="history-list-area">
