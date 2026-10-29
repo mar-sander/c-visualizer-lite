@@ -8459,12 +8459,29 @@
         const merged=ui.eval(`mergeHistoryImport(parseHistoryImport(${JSON.stringify(JSON.stringify(archive([old])))}))`);
         record('既存履歴を保持し日時順で追加',
           merged.kept.length===2 && merged.kept[0].id===item.id && merged.kept[1].id===old.id ? []:['追加統合が不正']);
-        const many=Array.from({length:30},(_,i)=>entry(`case-${i}`,
+        const many=Array.from({length:60},(_,i)=>entry(`case-${i}`,
           `2026-10-28T10:${String(i).padStart(2,'0')}:00.000Z`));
         setEntries([]);
         const limited=ui.eval(`mergeHistoryImport(${JSON.stringify(many)})`);
-        record('20件上限と最新日時の優先',
-          limited.kept.length===20 && limited.omitted===10 && limited.kept[0].id==='case-29' ? []:['上限または順序が不正']);
+        record('50件上限と最新日時の優先',
+          limited.kept.length===50 && limited.omitted===10 && limited.kept[0].id==='case-59' ? []:['上限または順序が不正']);
+        // 50件の保存・再読込、50件目以降のRUN、直前の同内容RUNを検証。
+        const imported50=ui.eval(`parseHistoryImport(${JSON.stringify(JSON.stringify(archive(limited.kept)))})`);
+        setEntries(imported50);
+        const persisted50=JSON.parse(ui.localStorage.getItem(storageKey));
+        record('50件の保存・再読込とschema v1維持',
+          persisted50.version===1 && persisted50.entries.length===50 &&
+          ui.eval('loadHistory().length')===50 ? []:['保存・再読込またはschemaが不正']);
+        const oldest=limited.kept[49].id;
+        ui.eval(`saveHistory('int newest = 77;', 'result', {output:'77', variables:[['newest','77']]})`);
+        record('51件目のRUNで最古の1件だけ削除',
+          ui.eval('historyEntries.length')===50 &&
+          ui.eval('historyEntries[0].code')==='int newest = 77;' &&
+          !ui.eval(`historyEntries.some(e => e.id === ${JSON.stringify(oldest)})`) ?
+          []:['RUN履歴の上限処理が不正']);
+        ui.eval(`saveHistory('int newest = 77;', 'result', {output:'77', variables:[['newest','77']]})`);
+        record('直前と同じRUNは50件上限のまま重複しない',
+          ui.eval('historyEntries.length')===50 ? []:['連続RUNで履歴が増えました']);
         // 悪意ある文字列もDOMへ埋め込まず、常にtextContentで表示する。
         const tagged=entry('case-tag');
         tagged.code='<img src=x onerror="window.__injected=true">';
