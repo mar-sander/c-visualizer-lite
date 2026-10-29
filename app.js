@@ -471,7 +471,7 @@ reducedMotion.addEventListener('change', event => {
 });
 
 const HISTORY_KEY = 'c-visualizer-lite-history-v1';
-const HISTORY_LIMIT = 20;
+const HISTORY_LIMIT = 50;
 const historyDialog = $('history-dialog');
 let historyEntries = loadHistory();
 let selectedHistoryId = null;
