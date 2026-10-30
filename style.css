@@ -3099,3 +3099,15 @@ body {
   border-color: var(--input-light);
   box-shadow: 0 0 10px rgb(255 230 0 / 24%);
 }
+
+/* PC (901px以上): 出力データの文字サイズのみ調整。見出しは元のまま。 */
+@media (min-width: 901px) {
+  .output-card output,
+  #summary-output {
+    font-size: 14px;
+  }
+
+  .result-value {
+    font-size: 20px;
+  }
+}
