@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>L-ARRAY1 FA1 限定表示テスト</title>
+  <style>
+    body { font: 14px system-ui,sans-serif; margin: 24px; }
+    table { border-collapse: collapse; width: 100%; }
+    td,th { padding: 8px; border-bottom: 1px solid #aaa; text-align: left; }
+    .fail { color: #c00; }
+  </style>
+</head>
+<body>
+  <h1>L-ARRAY1 FA1 限定表示テスト</h1>
+  <p id="counts">実行中</p>
+  <table><thead><tr><th>結果</th><th>検証</th><th>詳細</th></tr></thead><tbody id="results"></tbody></table>
+  <script>
+    // CSS限定調整の検証。既存tests.htmlの全回帰は起動しません。
+    const cases = [
+      {name:'配列とscalar混在・複数配列', body:'int x = 4;\nint a[3];\nint b[1] = {0};\na[1] = 7;\nprintf("%d", a[1]);', scalar:['x = 4']},
+      {name:'配列だけ・100要素', body:'int a[100] = {0};\na[99] = 7;\nprintf("%d", a[99]);', scalar:[]},
+      {name:'scalarだけ', body:'int x = 4;\nprintf("%d", x);', scalar:['x = 4']}
+    ];
+    const rows=[];
+    const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+    const frame=document.createElement('iframe');
+    frame.title='製品の限定表示検証';
+    frame.style.cssText='position:fixed;left:-10000px;top:0;width:1200px;height:1000px;border:0';
+    const record=(name,pass,detail='')=>rows.push({name,pass:!!pass,detail});
+    const pause=()=>new Promise(resolve=>setTimeout(resolve,100));
+    async function run(){
+      const keys=['c-visualizer-lite-history-v1','c-visualizer-lite:workspace-layout:v1','c-visualizer-lite:editor-font-size:v1'];
+      const saved=keys.map(key=>localStorage.getItem(key));
+      keys.forEach(key=>localStorage.removeItem(key));
+      const loaded=new Promise(resolve=>frame.addEventListener('load',resolve,{once:true}));
+      frame.src='index.html';document.body.append(frame);await loaded;
+      const ui=frame.contentWindow,doc=ui.document;
+      const cm=doc.querySelector('.CodeMirror').CodeMirror;
+      const visible=node=>!!node&&node.getClientRects().length>0&&ui.getComputedStyle(node).visibility!=='hidden';
+      const texts=(root,selector)=>[...root.querySelectorAll(selector)].map(node=>node.textContent);
+      try{
+        for(const width of [320,390,600,601,800,1440]){
+          frame.style.width=width+'px';await pause();
+          for(const item of cases){
+            const prefix=width+'px '+item.name+'：';
+            cm.setValue('#include <stdio.h>\nint main(void){\n'+item.body+'\nreturn 0;\n}');
+            doc.getElementById('scanfInput').value='';
+            // 解析・結果確定は既存共通経路を利用。INPUT未消費なら演出待ちだけを省略します。
+            ui.executeCode('input');await pause();
+            const r=ui.cVisualizerLiteResult,summary=doc.getElementById('summary-variables');
+            const final=doc.querySelector('#flow-content .result-variables');
+            if(!final)throw new Error('RESULTがありません');
+            const cards=[...summary.querySelectorAll('.lite-array-card')];
+            record(prefix+'配列名・型・要素数を維持',cards.length===r.arrays.length&&cards.every((card,i)=>
+              visible(card.querySelector('.lite-array-header'))&&card.querySelector('.lite-array-name').textContent===r.arrays[i].name&&
+              card.querySelector('.lite-array-type').textContent===r.arrays[i].type+'['+r.arrays[i].length+']'));
+            record(prefix+'上部の箱は600px以下だけ非表示',cards.every(card=>visible(card.querySelector('.lite-array-scroll'))===(width>600)));
+            record(prefix+'箱に付随する未初期化説明の表示範囲',cards.every(card=>{
+              const legend=card.querySelector('.lite-array-legend');return !legend||visible(legend)===(width>600);
+            }));
+            record(prefix+'scalar表示を維持',same(texts(summary,'.summary-variable'),item.scalar)&&
+              [...summary.querySelectorAll('.summary-variable')].every(visible));
+            const expected=r.arrays.flatMap(a=>a.values.map((v,i)=>a.initialized[i]?String(v):'—'));
+            record(prefix+'RESULTは箱・値・未初期化を維持',same(texts(final,'.lite-array-value'),expected)&&
+              [...final.querySelectorAll('.lite-array-scroll,.lite-array-cell,.lite-array-legend')].every(visible)&&
+              !final.querySelector('[data-access]'));
+            const frozen=JSON.stringify(r);
+            doc.querySelector('.result-flow-button').click();
+            function observe(index){
+              const views=r.steps[index].arrayViews||[],actual=[...doc.querySelectorAll('#flow-content .lite-array-card')];
+              if(actual.length!==views.length)return false;
+              return actual.every((card,i)=>{
+                const view=views[i],active=card.querySelector('[data-access]');
+                return visible(card.querySelector('.lite-array-scroll'))&&[...card.querySelectorAll('.lite-array-cell')].every(visible)&&
+                  same(texts(card,'.lite-array-value'),view.values.map((v,j)=>view.initialized[j]?String(v):'—'))&&
+                  (view.accesses.length?active?.dataset.access===view.accesses[0].mode&&active.querySelector('.lite-array-access').textContent===(view.accesses[0].mode==='read'?'参照':'代入'):!active);
+              });
+            }
+            let stepOk=true;
+            for(let i=0;i<r.steps.length;i++){stepOk=observe(i)&&stepOk;doc.getElementById('step-next').click();}
+            doc.querySelector('.result-flow-button').click();
+            for(let i=1;i<r.steps.length;i++)doc.getElementById('step-next').click();
+            for(let i=r.steps.length-1;i>=0;i--){stepOk=observe(i)&&stepOk;doc.getElementById('step-prev').click();}
+            record(prefix+'STEP前後移動・箱・参照/代入を維持',stepOk&&JSON.stringify(r)===frozen&&!!doc.querySelector('.result-state'));
+            const resultScroll=doc.querySelector('#flow-content .lite-array-scroll');
+            let longOk=true;
+            if(r.arrays.some(a=>a.length===100)){
+              resultScroll.scrollLeft=resultScroll.scrollWidth;
+              longOk=resultScroll.scrollWidth>resultScroll.clientWidth&&resultScroll.scrollLeft>0&&
+                visible(resultScroll.querySelector('.lite-array-cell:last-child'));
+            }
+            record(prefix+'100要素のRESULT横スクロールを維持',longOk);
+            record(prefix+'ページ横溢れなし・実行結果正常',doc.documentElement.scrollWidth<=width&&!r.hasWarnings&&r.output===(item.scalar.length&&r.arrays.length===0?'4':'7'));
+          }
+        }
+      }catch(error){record('実行例外',false,String(error));}
+      finally{
+        frame.remove();
+        keys.forEach((key,i)=>{if(saved[i]===null)localStorage.removeItem(key);else localStorage.setItem(key,saved[i]);});
+      }
+      window.fa1TestResults={total:rows.length,pass:rows.filter(r=>r.pass).length,fail:rows.filter(r=>!r.pass).length,rows};
+      const result=window.fa1TestResults;
+      document.getElementById('counts').textContent=result.pass+' PASS / '+result.fail+' FAIL / '+result.total+'件';
+      for(const row of rows){
+        const tr=document.createElement('tr');if(!row.pass)tr.className='fail';
+        for(const text of [row.pass?'PASS':'FAIL',row.name,row.detail]){const td=document.createElement('td');td.textContent=text;tr.append(td);}
+        document.getElementById('results').append(tr);
+      }
+      document.title=(result.fail?'✗':'✓')+' '+result.pass+'/'+result.total+' L-ARRAY1 FA1';
+    }
+    run();
+  </script>
+</body>
+</html>

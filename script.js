@@ -1690,7 +1690,7 @@ function visualizeCode(){
     arrays[name] = arrayState;
   }
 
-  function makeArrayView(access){
+  function makeArrayView(access, isDeclaration = false){
     const array = arrays[access.name];
     if(!array) return null;
     return {
@@ -1698,7 +1698,7 @@ function visualizeCode(){
       type:array.type,
       length:array.length,
       values:[...array.values],
-      accesses:[{ ...access }]
+      accesses:isDeclaration ? [] : [{ ...access }]
     };
   }
 
@@ -2010,7 +2010,8 @@ function visualizeCode(){
         );
         addStep(
           lineNo,
-          `整数を${arrayDeclaration.length}個入れられる配列 ${arrayDeclaration.name} を用意しました。各要素には、まだ値が代入されていません。`
+          `整数を${arrayDeclaration.length}個入れられる配列 ${arrayDeclaration.name} を用意しました。各要素には、まだ値が代入されていません。`,
+          true, [makeArrayView({name:arrayDeclaration.name}, true)]
         );
         return;
       }
@@ -2026,7 +2027,8 @@ function visualizeCode(){
       );
       addStep(
         lineNo,
-        `配列 ${arrayDeclaration.name} の箱を${arrayDeclaration.length}個用意し、0番から順番に値を入れました。${omittedExplanation}`
+        `配列 ${arrayDeclaration.name} の箱を${arrayDeclaration.length}個用意し、0番から順番に値を入れました。${omittedExplanation}`,
+        true, [makeArrayView({name:arrayDeclaration.name}, true)]
       );
       return;
     }
@@ -4994,7 +4996,8 @@ function visualizeCode(){
   const stepHtml = steps.length
     ? steps.map(item => {
       const arrayViewsHtml = (item.arrayViews || [])
-        .filter(Boolean)
+        // 従来DOMはアクセス一覧の契約を維持。Liteはbridgeで宣言も描画します。
+        .filter(view => view && view.accesses.length)
         .map(view => renderArrayCard(view.name, view, view.accesses))
         .join('');
       return `
@@ -5017,9 +5020,25 @@ function visualizeCode(){
   // 従来のDOM出力と並行して、解析済みの実データをLite画面へ渡します。
   const hasWarnings = warningLines.size > 0 || !hasMain || !mainRange?.closed;
   const inputRequired = inputRequest !== null && !hasWarnings;
+  // SymbolはJSON配列中でnullになるため、初期化状態を明示して境界でコピーします。
+  function publicArrayView(view){
+    return {
+      name:view.name, type:view.type, length:view.length,
+      values:view.values.map(value => value === UNINITIALIZED ? null : value),
+      initialized:view.values.map(value => value !== UNINITIALIZED),
+      accesses:(view.accesses || []).map(access => ({
+        ...access,
+        value:access.value === UNINITIALIZED || access.value === undefined ? null : access.value,
+        initialized:access.value !== UNINITIALIZED && access.value !== undefined
+      }))
+    };
+  }
   window.cVisualizerLiteResult = {
-    steps:steps.map(item => ({ ...item })),
+    steps:steps.map(item => ({ ...item,
+      ...(item.arrayViews ? {arrayViews:item.arrayViews.filter(Boolean).map(publicArrayView)} : {})
+    })),
     output,
+    arrays:arrayOrder.map(name => publicArrayView({name, ...arrays[name]})),
     variables:variableOrder.map(name => [
       name, scalarDisplay(name)
     ]),

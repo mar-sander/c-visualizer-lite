@@ -1526,6 +1526,60 @@ button:focus-visible,select:focus-visible {
   overflow-wrap: anywhere
 }
 
+/* L-ARRAY1: 配列の幅はカード内で完結し、ワークスペースを押し広げません。 */
+.lite-array-card {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-inset);
+  color: var(--text);
+  text-align: left;
+  font: 14px ui-monospace,Consolas,monospace;
+}
+
+.lite-array-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 14px;
+  margin-bottom: 10px;
+  overflow-wrap: anywhere;
+}
+
+.lite-array-type,.lite-array-index,.lite-array-legend,.lite-array-resolution {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.lite-array-resolution { margin-bottom: 8px; overflow-wrap: anywhere; }
+.lite-array-legend { display: block; margin-top: 9px; }
+.lite-array-scroll { max-width: 100%; overflow-x: auto; padding: 2px 2px 8px; }
+.lite-array-scroll:focus-visible { outline: 2px solid var(--accent-yellow); outline-offset: 2px; }
+.lite-array-row { display: flex; gap: 8px; width: max-content; min-width: 100%; align-items: stretch; }
+
+.lite-array-cell {
+  position: relative;
+  flex: 0 0 auto;
+  min-width: 58px;
+  padding: 25px 10px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+  background: var(--surface2);
+  text-align: center;
+}
+
+.lite-array-value { display: block; font-size: 18px; line-height: 1.4; }
+.lite-array-index { display: block; margin-top: 4px; }
+.lite-array-cell[data-access] { border-color: var(--accent-yellow); background: var(--accent-yellow-soft); }
+.lite-array-cell[data-access="read"] { border-style: dashed; }
+.lite-array-access { position: absolute; top: 5px; left: 0; right: 0; color: var(--accent-yellow); font-size: 11px; }
+.result-variable-values:has(.lite-array-card),.result-variables:has(.lite-array-card) { width: 100%; min-width: 0; }
+.action-area:has(.lite-array-card) { min-width: 0; }
+.final-summary>div:has(.lite-array-card) { width: 100%; max-width: 100%; }
+
 /* CodeMirrorの既存tokenだけで、無彩色の明度と控えめな暖色差をつけます。 */
 
 .CodeMirror .cm-def,.CodeMirror .cm-builtin {
@@ -1574,6 +1628,16 @@ button:focus-visible,select:focus-visible {
     flex: 1;
     padding: 9px 12px;
     gap: 8px 16px
+  }
+
+  /* L-ARRAY1 FA1: スマホの上部サマリーは配列の名前・型・要素数だけを残します。 */
+  #summary-variables .lite-array-scroll,
+  #summary-variables .lite-array-legend {
+    display: none;
+  }
+
+  #summary-variables .lite-array-header {
+    margin-bottom: 0;
   }
 }
 

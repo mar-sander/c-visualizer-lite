@@ -5846,12 +5846,13 @@
           "scanfTwo": "#include <stdio.h>\n\nint main(void){\n    int a, b;\n    int sum;\n\n    printf(\"1つ目の数は？ \");\n    scanf(\"%d\", &a);\n    printf(\"2つ目の数は？ \");\n    scanf(\"%d\", &b);\n\n    sum = a + b;\n    printf(\"合計は%dです\\n\", sum);\n\n    return 0;\n}",
           "ifBasic": "#include <stdio.h>\n\nint main(void){\n    int x = 8;\n\n    if(x > 5){\n        printf(\"5より大きいです\\n\");\n    }\n\n    printf(\"判定終了\\n\");\n    return 0;\n}",
           "ifElse": "#include <stdio.h>\n\nint main(void){\n    int score = 75;\n\n    if(score >= 60){\n        printf(\"合格です\\n\");\n    }else{\n        printf(\"不合格です\\n\");\n    }\n\n    return 0;\n}",
-          "scanfIf": "#include <stdio.h>\n\nint main(void){\n    int score;\n\n    printf(\"点数を入力してください: \");\n    scanf(\"%d\", &score);\n\n    if(score >= 60){\n        printf(\"合格です\\n\");\n    }else{\n        printf(\"不合格です\\n\");\n    }\n\n    return 0;\n}"
+          "scanfIf": "#include <stdio.h>\n\nint main(void){\n    int score;\n\n    printf(\"点数を入力してください: \");\n    scanf(\"%d\", &score);\n\n    if(score >= 60){\n        printf(\"合格です\\n\");\n    }else{\n        printf(\"不合格です\\n\");\n    }\n\n    return 0;\n}",
+          "arrayBasic": "#include <stdio.h>\n\nint main(void){\n    int a[3] = {10, 20, 30};\n    a[1] = 50;\n    printf(\"%d\\n\", a[1]);\n    return 0;\n}"
 };
         const labels = ['足し算', '引き算', '掛け算', '割り算', '四則演算まとめ', '括弧と計算順序',
-          '2つの数を入力する', 'if文の基本', 'if〜else文', '入力して条件判定'];
+          '2つの数を入力する', 'if文の基本', 'if〜else文', '入力して条件判定', '配列の基本'];
         const options = () => [...ui.document.getElementById('sample-select').options].slice(1);
-        await record('初回getsampleで10種類・ID・名称・順序', fail => {
+        await record('初回getsampleで11種類・ID・名称・順序', fail => {
           unlock();
           if(JSON.stringify(options().map(option => option.value)) !== JSON.stringify(Object.keys(expectedCodes)) ||
             JSON.stringify(options().map(option => option.textContent)) !== JSON.stringify(labels)) fail('選択肢が仕様と違います');
@@ -5860,12 +5861,12 @@
         });
         await record('再アンロック・再描画で重複なし', fail => {
           unlock(); ui.renderUnlockedSamples(); ui.renderUnlockedSamples();
-          if(options().length !== 10 || new Set(options().map(option => option.value)).size !== 10) fail('重複しました');
+          if(options().length !== 11 || new Set(options().map(option => option.value)).size !== 11) fail('重複しました');
         });
-        await record('従来のschema v1保存データを読み10種類表示', async fail => {
+        await record('従来のschema v1保存データを読み11種類表示', async fail => {
           ui.localStorage.setItem(keys[0], JSON.stringify({version:1,unlocked:['samples']}));
           ui = await load();
-          if(options().length !== 10) fail('既存解放済み環境へ追加されません');
+          if(options().length !== 11) fail('既存解放済み環境へ追加されません');
         });
         await record('既存解放済みでも毎回アンロック演出を再生', async fail => {
           const dialog = ui.document.getElementById('secret-code-dialog');
@@ -5880,7 +5881,7 @@
             if(ui.matchMedia('(prefers-reduced-motion: reduce)').matches){
               if(animation !== 'none') fail('reduced-motionで動作アニメーションが残っています');
             }else if(!animation.includes('unlock-frame-pulse')) fail('通常表示で成功アニメーションがありません');
-            if(options().length !== 10 || new Set(options().map(option => option.value)).size !== 10) fail('SAMPLE選択肢が重複しました');
+            if(options().length !== 11 || new Set(options().map(option => option.value)).size !== 11) fail('SAMPLE選択肢が重複しました');
             // closeイベントの後片付けは非同期なので、実際の通知を待ちます。
             await new Promise(resolve => {
               dialog.addEventListener('close', resolve, {once:true});
@@ -8690,6 +8691,154 @@
       return results;
     }
 
+    // L-ARRAY1: 従来DOMのaccessテストと別に、製品bridge・画面・履歴を通します。
+    async function checkArrayIntegrationUiCases(){
+      const keys=['c-visualizer-lite-history-v1','c-visualizer-lite-unlocks-v1'];
+      const saved=keys.map(key=>localStorage.getItem(key));
+      keys.forEach(key=>localStorage.removeItem(key));
+      const frame=createUiTestFrame(),results=[];
+      const record=(name,ok,detail='')=>results.push({testCase:{name:'L-ARRAY1 '+name},
+        result:{passed:!!ok,failures:ok?[]:[detail||name],actual:{output:'配列の製品UI・履歴',warningCount:0}}});
+      const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+      try{
+        await new Promise(resolve=>frame.addEventListener('load',resolve,{once:true}));
+        const ui=frame.contentWindow,doc=ui.document,cm=doc.querySelector('.CodeMirror').CodeMirror;
+        const get=code=>ui.eval(code);
+        const values=selector=>[...doc.querySelectorAll(selector+' .lite-array-value')].map(node=>node.textContent);
+        async function run(body,input=''){
+          cm.setValue(makeMainCode(body));doc.getElementById('scanfInput').value=input;
+          // INPUT経路は同じ解析・確定処理を使い、入力なしでは演出待ちだけを省きます。
+          ui.executeCode('input');
+          if(!ui.cVisualizerLiteResult.hasWarnings && !ui.cVisualizerLiteResult.inputRequired)await waitForUiResult(ui);
+          return ui.cVisualizerLiteResult;
+        }
+        const sample=doc.getElementById('sample-select');
+        record('未解除では配列SAMPLE非表示',!sample.querySelector('option[value="arrayBasic"]'));
+        get("unlockedIds.add('samples'); persistUnlocks(); renderUnlockedSamples()");
+        record('旧解除schemaへ配列SAMPLEを末尾追加',sample.lastElementChild.value==='arrayBasic'&&
+          sample.lastElementChild.textContent==='配列の基本'&&get('loadUnlocks().has("samples")'));
+        const initialResult=ui.cVisualizerLiteResult;
+        sample.value='arrayBasic';sample.dispatchEvent(new ui.Event('change',{bubbles:true}));
+        const sampleCode='#include <stdio.h>\n\nint main(void){\n    int a[3] = {10, 20, 30};\n    a[1] = 50;\n    printf("%d\\n", a[1]);\n    return 0;\n}';
+        record('配列SAMPLE全文一致・選択で自動RUNなし',cm.getValue()===sampleCode&&ui.cVisualizerLiteResult===initialResult&&get('historyEntries.length')===0);
+        doc.getElementById('visualize').click();await waitForUiResult(ui);
+        record('実RUNでSAMPLE出力50・最終配列',ui.cVisualizerLiteResult.output==='50\n'&&same(values('#flow-content'),['10','50','30']));
+
+        let r=await run('int a[3];\na[1] = 7;\nprintf("%d", a[1]);\nreturn 0;');
+        record('最小実機例の出力・最終値',r.output==='7'&&same(r.arrays[0].values,[null,7,null])&&same(r.arrays[0].initialized,[false,true,false]));
+        record('配列だけのRESULT・名前・型・添字',!doc.querySelector('.result-variables').textContent.includes('変数はありません')&&
+          doc.querySelector('#flow-content .lite-array-name').textContent==='a'&&doc.querySelector('#flow-content .lite-array-type').textContent==='int[3]'&&
+          same([...doc.querySelectorAll('#flow-content .lite-array-index')].map(n=>n.textContent),['[0]','[1]','[2]']));
+        record('RESULTとサマリーは箱と未初期化説明・強調なし',same(values('#summary-variables'),['—','7','—'])&&
+          doc.querySelector('#flow-content .lite-array-legend').textContent.includes('まだ値を入れていない')&&!doc.querySelector('.result-state [data-access],#summary-variables [data-access]'));
+        const frozen=JSON.stringify(r),roundtrip=JSON.parse(frozen);
+        record('公開データJSON往復で未初期化と0を区別',same(roundtrip,r)&&roundtrip.arrays[0].initialized[0]===false);
+        let symbols=0;function visit(value){if(typeof value==='symbol')symbols++;else if(value&&typeof value==='object')Object.values(value).forEach(visit);}
+        visit(r);record('公開結果・STEPにSymbolなし',symbols===0);
+        const relevant=r.steps.filter(step=>step.arrayViews?.length);
+        record('宣言・代入・参照の3STEPだけに配列',relevant.length===3&&relevant[0].arrayViews[0].accesses.length===0&&
+          relevant[1].arrayViews[0].accesses[0].mode==='write'&&relevant[2].arrayViews[0].accesses[0].mode==='read');
+        record('宣言時の独立コピー・最終状態と共有なし',same(relevant[0].arrayViews[0].initialized,[false,false,false])&&
+          relevant[0].arrayViews[0].values!==r.arrays[0].values&&relevant[1].arrayViews[0].values!==relevant[2].arrayViews[0].values);
+        doc.querySelector('.result-flow-button').click();
+        function observe(index){
+          const step=r.steps[index],views=step.arrayViews||[];
+          const actual=doc.querySelectorAll('#flow-content .lite-array-card');
+          let ok=actual.length===views.length;
+          views.forEach((view,i)=>{
+            ok=ok&&same([...actual[i].querySelectorAll('.lite-array-value')].map(n=>n.textContent),view.values.map((v,j)=>view.initialized[j]?String(v):'—'));
+            const active=actual[i].querySelector('[data-access]');
+            ok=ok&&(view.accesses.length?active?.dataset.access===view.accesses[0].mode:!active);
+            if(active)ok=ok&&active.querySelector('.lite-array-access').textContent===(view.accesses[0].mode==='read'?'参照':'代入');
+          });
+          return ok;
+        }
+        let forward=true,backward=true;
+        for(let i=0;i<r.steps.length;i++){forward=observe(i)&&forward;doc.getElementById('step-next').click();}
+        record('全STEP前進で時点値・ラベル・無関係STEPに混入なし',forward&&!!doc.querySelector('.result-state'));
+        doc.querySelector('.result-flow-button').click();
+        for(let i=1;i<r.steps.length;i++)doc.getElementById('step-next').click();
+        for(let i=r.steps.length-1;i>=0;i--){backward=observe(i)&&backward;doc.getElementById('step-prev').click();}
+        record('全STEP後退・RESULT復帰・データ不変',backward&&JSON.stringify(r)===frozen&&!doc.querySelector('.result-state [data-access]'));
+        const entry=get('historyEntries[0]');
+        record('JSON v1履歴へ配列の最終要約',same(entry.variables,[['a (int[3])','[—, 7, —]']])&&JSON.parse(ui.localStorage.getItem(keys[0])).version===1);
+        const archive=JSON.stringify({format:'c-code-visualizer-lite-history',version:1,entries:[entry]});
+        const imported=get(`parseHistoryImport(${JSON.stringify(archive)})`);
+        record('export/importと再読込で要約保持',same(imported[0].variables,entry.variables)&&same(get('loadHistory()[0].variables'),entry.variables));
+        record('同じ配列要約の重複importなし',get(`mergeHistoryImport(parseHistoryImport(${JSON.stringify(archive)})).added`)===0);
+        ui.saveHistory(entry.code,'result',r);
+        record('同一RUNの通常履歴は重複せず',get('historyEntries.length')===2);
+        ui.toggleHistoryLock(entry.id);
+        const protectedBefore=JSON.stringify(get(`historyEntries.find(e=>e.id===${JSON.stringify(entry.id)})`));
+        ui.saveHistory(entry.code,'result',r);
+        record('配列の保護履歴を再RUNで上書きしない',JSON.stringify(get(`historyEntries.find(e=>e.id===${JSON.stringify(entry.id)})`))===protectedBefore&&get('historyEntries.length')===3);
+        doc.getElementById('history-open').click();
+        record('履歴画面で最終配列要約を読める',doc.getElementById('history-detail').textContent.includes('a (int[3]) = [—, 7, —]'));
+        const resultBefore=ui.cVisualizerLiteResult,countBefore=get('historyEntries.length');
+        doc.querySelector('.history-restore').click();
+        record('復元はコードだけ・自動RUNと履歴追加なし',ui.cVisualizerLiteResult===resultBefore&&get('historyEntries.length')===countBefore&&get('finalState')===null&&!doc.querySelector('.result-state'));
+
+        for(const [name,body,expected] of [
+          ['長さ1未初期化','int a[1];',['—']],
+          ['完全初期化','int a[3] = {10, 20, 30};',['10','20','30']],
+          ['部分初期化','int a[3] = {5};',['5','0','0']],
+          ['ゼロ初期化','int a[3] = {0};',['0','0','0']],
+          ['先頭と末尾','int a[3];\na[0] = -5;\na[2] = 9;',['-5','—','9']]
+        ]){
+          r=await run(body+'\nreturn 0;');
+          record(name+'の製品RESULT',!r.hasWarnings&&same(values('#flow-content'),expected));
+        }
+        r=await run('int scalar = 4;\nfloat f = 1.5f;\ndouble d = 2.5;\nchar c = \'A\';\nint a[1];\nint b[2] = {0};\nreturn 0;');
+        record('複数配列と4型scalarの共存',r.variables.length===4&&same(r.arrays.map(a=>a.name),['a','b'])&&doc.querySelectorAll('#flow-content .lite-array-card').length===2);
+        for(const [name,statement] of [['未初期化read','printf("%d", a[1]);'],['負数添字','a[-1] = 8;'],['範囲外','a[2] = 8;']]){
+          r=await run('int a[2];\na[0] = 5;\n'+statement+'\na[0] = 99;\nprintf("WRONG");\nreturn 0;');
+          record(name+'安全停止・後続write/outputなし',r.hasWarnings&&r.output===''&&r.arrays[0].values[0]===5&&!!doc.querySelector('.failure-state'));
+        }
+        for(const [name,body] of [['不正宣言','int a[0];'],['添字式','int a[2] = {0};\nprintf("%d", a[0+1]);'],['配列scanf','int a[2];\nscanf("%d", &a[0]);']]){
+          r=await run(body+'\nprintf("WRONG");\nreturn 0;');
+          record(name+'を既存方針で拒否',r.hasWarnings&&!r.output.includes('WRONG'));
+        }
+        r=await run('int a[100] = {0};\na[99] = -9007199254740991;\nreturn 0;');
+        const scroll=doc.querySelector('#flow-content .lite-array-scroll');
+        record('100要素の横スクロール・全要素保持',values('#flow-content').length===100&&scroll.scrollWidth>scroll.clientWidth&&ui.getComputedStyle(scroll).overflowX==='auto'&&scroll.tabIndex===0);
+        scroll.scrollLeft=scroll.scrollWidth;
+        record('末尾までスクロール可能',scroll.scrollLeft>0&&[...doc.querySelectorAll('#flow-content .lite-array-index')].at(-1).textContent==='[99]'&&values('#flow-content')[99]==='-9007199254740991');
+        for(const width of [390,800,1200]){
+          frame.style.width=width+'px';await new Promise(resolve=>ui.setTimeout(resolve,100));
+          const scroller=doc.querySelector('#flow-content .lite-array-scroll');
+          record(width+'pxで100要素をカード内に限定',scroller.scrollWidth>scroller.clientWidth&&scroller.clientWidth<width&&doc.documentElement.scrollWidth<=width);
+        }
+        // JS Numberの最長級表示を100要素全体に入れ、v1文字列上限を実測します。
+        const numeric={arrays:[{name:'large',type:'int',length:100,values:Array(100).fill(-Number.MAX_VALUE),initialized:Array(100).fill(true)}],variables:[],output:''};
+        const numericPairs=ui.historyVariablePairs(numeric);
+        record('100要素の最長級数値も10000文字以内',numericPairs[0][1].length<10000&&ui.saveHistory('numeric-limit','result',numeric)===true&&
+          get(`parseHistoryImport(${JSON.stringify(JSON.stringify({version:1,entries:get('historyEntries').slice(0,1)}))}).length`)===1);
+        const oversize={...numeric,arrays:Array.from({length:201},(_,i)=>({...numeric.arrays[0],name:'a'+i}))};
+        const historyBefore=JSON.stringify(get('historyEntries'));
+        record('v1上限超過を欠落成功にしない',ui.saveHistory('too-many','result',oversize)===false&&JSON.stringify(get('historyEntries'))===historyBefore&&doc.getElementById('feedback').textContent.includes('保存できません'));
+        const originalSet=ui.Storage.prototype.setItem;
+        try{
+          ui.Storage.prototype.setItem=function(){throw new ui.DOMException('full','QuotaExceededError');};
+          record('容量不足は履歴のみ失敗・RUN結果を保持',ui.saveHistory('quota','result',r)===false&&JSON.stringify(get('historyEntries'))===historyBefore&&!!doc.querySelector('.result-state'));
+        }finally{ui.Storage.prototype.setItem=originalSet;}
+        r=await run('int a[2];\nint x;\nscanf("%d", &x);\na[0] = x;\nprintf("%d", a[0]);\nreturn 0;');
+        record('入力待ちでもその時点の配列状態',r.inputRequired&&same(values('#flow-content'),['—','—'])&&!!doc.querySelector('.waiting-state'));
+        r=await run('int a[2];\nint x;\nscanf("%d", &x);\na[0] = x;\nprintf("%d", a[0]);\nreturn 0;','8');
+        record('INPUT後の再解析と配列の接続',!r.hasWarnings&&r.output==='8'&&same(values('#flow-content'),['8','—']));
+        r=await run('int i;\nint a[10] = {0};\nfor(i = 0; i < 10; i++){\n    a[i] = i;\n}\nprintf("%d", a[9]);\nreturn 0;');
+        record('既存forの実行・圧縮・最終配列を維持',!r.hasWarnings&&r.output==='9'&&same(r.arrays[0].values,[0,1,2,3,4,5,6,7,8,9])&&r.steps.some(step=>step.stepKind==='loop-omission'));
+        record('forの宣言snapshotも最終状態と独立',same(r.steps.find(step=>step.arrayViews?.[0]?.accesses.length===0).arrayViews[0].values,Array(10).fill(0)));
+        const unsafe='<img src=x onerror="window.arrayInjected=true">';
+        const card=ui.renderLiteArray({name:unsafe,type:'int',length:1,values:[0],initialized:[true],accesses:[]});
+        record('配列名をHTMLとして解釈しない',card.querySelector('.lite-array-name').textContent===unsafe&&!card.querySelector('img')&&!ui.arrayInjected);
+        record('UPDATEは公開日を先取りしない',doc.body.textContent.includes('UPDATE: 2026.10.29'));
+      }catch(error){record('実行例外',false,String(error));}
+      finally{
+        frame.remove();keys.forEach((key,i)=>{if(saved[i]===null)localStorage.removeItem(key);else localStorage.setItem(key,saved[i]);});
+      }
+      return results;
+    }
+
     async function runAllTests(){
       const results = testCases.map(testCase => ({ testCase, result:checkCase(testCase) }));
       results.push(...await checkDecisionUiCases());
@@ -8706,6 +8855,7 @@
       results.push(...await checkHistoryPortabilityUiCases());
       results.push(...await checkWorkspaceUiCases());
       results.push(...await checkHistoryLockUiCases());
+      results.push(...await checkArrayIntegrationUiCases());
       const passed = results.filter(item => item.result.passed).length;
       const failed = results.length - passed;
 
