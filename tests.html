@@ -8511,6 +8511,114 @@
     }
 
 
+    // L-HISTORY-LOCK1: protected history behavior, backward compatibility, and UI event safety.
+    async function checkHistoryLockUiCases(){
+      const storageKey='c-visualizer-lite-history-v1';
+      let saved=null;
+      try{saved=localStorage.getItem(storageKey);}catch(_error){}
+      const frame=createUiTestFrame(),results=[];
+      const record=(name, failures)=>results.push({
+        testCase:{name:'L-HISTORY-LOCK1 '+name},
+        result:{passed:!failures.length, failures,
+          actual:{output:'ロック保護',warningCount:0}}
+      });
+      const entry=(id,n=0,locked=false)=>({
+        id,timestamp:new Date(Date.UTC(2026,9,29,10,n%60,0)).toISOString(),
+        code:`int a = ${n};`,kind:'result',output:String(n),
+        variables:[['a',String(n)]],warnings:[],locked
+      });
+      try{
+        await new Promise(resolve=>frame.addEventListener('load',resolve,{once:true}));
+        const ui=frame.contentWindow,doc=ui.document;
+        const setEntries=entries=>ui.eval(`historyEntries = ${JSON.stringify(entries)}; selectedHistoryId=null; persistHistory(); renderHistory();`);
+        const get=expression=>ui.eval(expression);
+        const archive=entries=>({format:'c-code-visualizer-lite-history',version:1,entries});
+        const item=entry('locked-one',1);
+        delete item.locked;
+        const imported=get(`parseHistoryImport(${JSON.stringify(JSON.stringify(archive([item])))})`);
+        record('旧JSONは非ロックとして復元',imported[0]?.locked===false ? []:['旧形式の既定ロック値が不正']);
+        const malicious={...item,locked:'true'};
+        let rejected=false;
+        try{get(`parseHistoryImport(${JSON.stringify(JSON.stringify(archive([malicious])))})`);}catch(_error){rejected=true;}
+        record('不正なlocked属性を拒否',rejected?[]:['文字列をbooleanとして受け入れました']);
+        setEntries([item]);
+        doc.getElementById('history-open').click();
+        const lock=doc.querySelector('.history-lock-toggle');
+        const separate=doc.querySelectorAll('.challenge-history-item button').length===2 &&
+          doc.querySelector('.history-item-select')?.contains(lock)===false;
+        record('鍵と選択は独立したボタン',separate?[]:['ボタン構造が不正']);
+        // FA1: アイコン位置は行頭固定。日時・RESULTの並びと内容は変えない。
+        const header=doc.querySelector('.history-item-top');
+        const lockBeforeText=header?.firstElementChild===lock &&
+          header?.lastElementChild?.classList.contains('history-item-meta') &&
+          header.lastElementChild.textContent===
+            get("historyDate(historyEntries[0].timestamp) + ' · RESULT'");
+        record('鍵が日時・RESULTの左側に配置される',
+          lockBeforeText?[]:['鍵が日時・RESULTの左側にありません']);
+        lock.click();
+        record('クリックでロック・黄色枠・保存',
+          get('historyEntries[0].locked')===true &&
+          doc.querySelector('.challenge-history-item')?.dataset.locked==='true' &&
+          JSON.parse(ui.localStorage.getItem(storageKey)).entries[0].locked===true ?
+          []:['ロック状態がUIか保存データに反映されません']);
+        record('鍵タップは自動RUN・コード復元を行わない',
+          doc.getElementById('history-dialog').open &&
+          doc.querySelector('.history-lock-toggle')?.getAttribute('aria-pressed')==='true' &&
+          doc.querySelector('.history-detail-actions button:nth-child(2)')?.disabled===true ?
+          []:['ロック操作が他の操作へ波及、または個別削除が有効です']);
+        record('保存→再読込でロック保持',get('loadHistory()[0].locked')===true ? []:['保存されたロックが失われました']);
+        doc.querySelector('.history-lock-toggle').click();
+        record('再タップで解除・削除可能',
+          get('historyEntries[0].locked')===false &&
+          !doc.querySelector('.history-detail-actions button:nth-child(2)').disabled ?
+          []:['解除または個別削除の復帰が不正']);
+        const protectedItem=entry('protected-oldest',0,true);
+        const normals=Array.from({length:50},(_,i)=>entry(`regular-${i}`,i+1,false));
+        setEntries([...normals,protectedItem]);
+        get(`saveHistory('int newest = 77;', 'result', {output:'77',variables:[['a','77']]})`);
+        record('50通常履歴＋ロック保護のまま51件目RUN',
+          get('historyEntries.filter(e=>!e.locked).length')===50 &&
+          get("historyEntries.some(e=>e.id==='protected-oldest')") &&
+          get('historyEntries.length')===51 ? []:['ロック履歴か通常上限を失いました']);
+        const exported=JSON.parse(JSON.stringify(archive([protectedItem])));
+        const importedLock=get(`parseHistoryImport(${JSON.stringify(JSON.stringify(exported))})`);
+        record('JSON v1でロック状態を持ち運べる',importedLock[0].locked===true ? []:['ロック属性が消えました']);
+        const existing=entry('match',7,false);
+        setEntries([existing]);
+        const duplicate={...existing,locked:true};
+        const merged=get(`mergeHistoryImport(parseHistoryImport(${JSON.stringify(JSON.stringify(archive([duplicate])))}))`);
+        record('重複インポートはロックを優先し重複しない',
+          merged.kept.length===1 && merged.protectedUpdated===1 && merged.added===0 && merged.kept[0].locked ?
+          []:['重複時の保護マージが不正']);
+        setEntries([entry('keep',1,true),entry('discard',2,false)]);
+        // FA2: 全削除は確認ダイアログを開かない。未ロックのみ直ちに削除する。
+        const originalConfirm=ui.confirm;
+        let confirmCalls=0;
+        ui.confirm=()=>{ confirmCalls++; return false; };
+        try{
+          doc.getElementById('history-clear').click();
+        }finally{
+          ui.confirm=originalConfirm;
+        }
+        record('全削除で確認ダイアログを表示しない',
+          confirmCalls===0 ? []:['全削除で確認ダイアログが呼ばれました']);
+        record('全削除で保護履歴だけ残る',
+          get("historyEntries.length===1 && historyEntries[0].id==='keep'") ?
+          []:['全履歴削除が保護履歴を消しました']);
+        setEntries([entry('protected-rerun',3,true)]);
+        get(`saveHistory('int a = 3;', 'result', {output:'3',variables:[['a','3']]})`);
+        record('同じRUNでも保護レコードを上書きしない',
+          get("historyEntries.length===2 && historyEntries.some(e=>e.id==='protected-rerun'&&e.locked)") ?
+          []:['保護レコードが再RUNで更新されました']);
+      }catch(error){record('実行例外',[String(error)]);}
+      finally{
+        frame.remove();
+        try{if(saved===null)localStorage.removeItem(storageKey);
+          else localStorage.setItem(storageKey,saved);}catch(_error){}
+      }
+      return results;
+    }
+
     // L-UI15: 製品画面の実寸・キーボード操作・保存と復元を検証します。
     async function checkWorkspaceUiCases(){
       const key='c-visualizer-lite:workspace-layout:v1';
@@ -8597,6 +8705,7 @@
       results.push(...await checkEditorFontUiCases());
       results.push(...await checkHistoryPortabilityUiCases());
       results.push(...await checkWorkspaceUiCases());
+      results.push(...await checkHistoryLockUiCases());
       const passed = results.filter(item => item.result.passed).length;
       const failed = results.length - passed;
 
