@@ -101,6 +101,7 @@ editorLightToggle.addEventListener('click', () => {
 });
 
 const sampleBody = {
+  arrayBasic:['int a[3] = {10, 20, 30};', 'a[1] = 50;', 'printf("%d\\n", a[1]);'],
   add:['int a = 10;', 'int b = 3;', 'int c = a + b;', 'printf("%d\\n", c);'],
   sub:['int a = 10;', 'int b = 3;', 'int c = a - b;', 'printf("%d\\n", c);'],
   mul:['int a = 10;', 'int b = 3;', 'int c = a * b;', 'printf("%d\\n", c);'],
@@ -162,7 +163,7 @@ const UNLOCKED_OPTIONS = {
     ['add', '足し算'], ['sub', '引き算'], ['mul', '掛け算'],
     ['div', '割り算'], ['all', '四則演算まとめ'], ['precedence', '括弧と計算順序'],
     ['scanfTwo', '2つの数を入力する'], ['ifBasic', 'if文の基本'],
-    ['ifElse', 'if〜else文'], ['scanfIf', '入力して条件判定']
+    ['ifElse', 'if〜else文'], ['scanfIf', '入力して条件判定'], ['arrayBasic', '配列の基本']
   ]
 };
 const UNLOCK_LABELS = {
@@ -515,15 +516,37 @@ function persistHistory(entries = historyEntries){
   }
 }
 
+function historyVariablePairs(result){
+  return [
+    ...(Array.isArray(result?.variables) ? result.variables : []),
+    ...(result?.arrays || []).map(array => [
+      `${array.name} (${array.type}[${array.length}])`,
+      `[${array.values.map((value, index) => array.initialized[index] ? String(value) : '—').join(', ')}]`
+    ])
+  ];
+}
+
+function historySaveFailure(){
+  $('feedback').textContent = '履歴を保存できませんでした。今回の実行結果は確認できます。';
+  historyTransferMessage('履歴を保存できませんでした。既存履歴は変更していません。', true);
+}
+
 function saveHistory(code, kind, result, warnings = []){
   try{
     const snapshot = JSON.parse(JSON.stringify({
       code,
       kind,
       output:typeof result?.output === 'string' ? result.output : '',
-      variables:Array.isArray(result?.variables) ? result.variables : [],
+      variables:historyVariablePairs(result),
       warnings
     }));
+    // 配列を含む記録はexport→importの上限も検査し、欠落・切捨てを成功扱いにしません。
+    if(result?.arrays?.length && !isValidImportedHistoryEntry({
+      id:'pending', timestamp:new Date().toISOString(), ...snapshot
+    })){
+      historySaveFailure();
+      return false;
+    }
     const previous = historyEntries[0];
     const same = previous && ['code', 'kind', 'output', 'variables', 'warnings'].every(key =>
       JSON.stringify(previous[key]) === JSON.stringify(snapshot[key]));
@@ -538,9 +561,16 @@ function saveHistory(code, kind, result, warnings = []){
       }, ...historyEntries];
     }
     nextEntries = limitHistoryEntries(nextEntries);
-    if(persistHistory(nextEntries)) historyEntries = nextEntries;
+    if(!persistHistory(nextEntries)){
+      historySaveFailure();
+      return false;
+    }
+    historyEntries = nextEntries;
+    return true;
   }catch(_error){
     // 履歴用データが想定外でも解析結果へ影響させません。
+    historySaveFailure();
+    return false;
   }
 }
 
@@ -904,10 +934,52 @@ function showFinalSummary(state){
   const values = $('summary-variables');
   values.replaceChildren();
   if(!state){ values.textContent = '—'; return; }
-  if(!state.variables.length){ values.textContent = '—'; return; }
+  if(!state.variables.length && !state.arrays?.length){ values.textContent = '—'; return; }
   values.append(...state.variables.map(([name, value]) =>
     element('span', 'summary-variable', `${name} = ${value}`)
   ));
+  values.append(...(state.arrays || []).map(array => renderLiteArray(array)));
+}
+
+// 最終状態はaccessを無視。STEPだけが自身のスナップショットで強調します。
+function renderLiteArray(array, showAccess = false){
+  const card = element('section', 'lite-array-card');
+  card.setAttribute('aria-label', `配列 ${array.name}`);
+  const header = element('div', 'lite-array-header');
+  header.append(element('strong', 'lite-array-name', array.name),
+    element('span', 'lite-array-type', `${array.type}[${array.length}]`));
+  card.append(header);
+  const accesses = showAccess ? array.accesses || [] : [];
+  const variableAccess = accesses.find(access => access.indexKind === 'variable');
+  if(variableAccess && Number.isInteger(variableAccess.resolvedIndex)){
+    card.append(element('div', 'lite-array-resolution',
+      `${array.name}[${variableAccess.sourceIndex}] → ${array.name}[${variableAccess.resolvedIndex}]`));
+  }
+  const scroll = element('div', 'lite-array-scroll');
+  scroll.tabIndex = 0;
+  scroll.setAttribute('role', 'region');
+  scroll.setAttribute('aria-label', `配列 ${array.name} の要素一覧（横スクロール）`);
+  const row = element('div', 'lite-array-row');
+  array.values.forEach((value, index) => {
+    const display = array.initialized[index] ? String(value) : '—';
+    const access = accesses.find(item => item.index === index);
+    const label = access?.mode === 'read' ? '参照' : access?.mode === 'write' ? '代入' : '';
+    const cell = element('div', 'lite-array-cell');
+    cell.setAttribute('aria-label', `${array.name}[${index}]：${array.initialized[index] ? display : 'まだ値を入れていない'}${label ? `、${label}` : ''}`);
+    if(label){
+      cell.dataset.access = access.mode;
+      cell.append(element('span', 'lite-array-access', label));
+    }
+    cell.append(element('span', 'lite-array-value', display),
+      element('span', 'lite-array-index', `[${index}]`));
+    row.append(cell);
+  });
+  scroll.append(row);
+  card.append(scroll);
+  if(array.initialized.some(initialized => !initialized)){
+    card.append(element('small', 'lite-array-legend', '—：まだ値を入れていない要素'));
+  }
+  return card;
 }
 
 function updateCursor(){
@@ -1180,7 +1252,10 @@ function renderStep(){
     input.append(element('small', '', 'INPUT'), element('span', '', step.scanfInput.inputDisplay));
   }
   // 判定では値が変わらないので、空の変化カードを重ねません。
-  const change = (isOmission || step.branchDecision || step.loopDecision?.kind === 'for' || step.loopDecision?.kind === 'while') ? null : renderValueChange(activeStep);
+  const previousVariables = new Map(activeStep > 0 ? currentSteps[activeStep - 1].variablesAtStep : []);
+  const scalarChanged = step.variablesAtStep.some(([name, value]) => previousVariables.get(name) !== value);
+  const change = (isOmission || step.branchDecision || step.loopDecision?.kind === 'for' || step.loopDecision?.kind === 'while' ||
+    (step.arrayViews?.length && !scalarChanged)) ? null : renderValueChange(activeStep);
   const nextStep = currentSteps[activeStep + 1];
   const next = element('div', 'next-line');
   next.append(
@@ -1188,7 +1263,8 @@ function renderStep(){
     element('strong', '', nextStep ? `${nextStep.lineNo}行目` : 'RESULT')
   );
   flow.replaceChildren(top, track, code, explanation, ...(decision ? [decision] : []),
-    ...(input ? [input] : []), ...(change ? [change] : []), next);
+    ...(input ? [input] : []), ...(change ? [change] : []),
+    ...(step.arrayViews || []).map(array => renderLiteArray(array, true)), next);
   $('step-controls').hidden = false;
   $('step-prev').disabled = false;
   $('step-next').disabled = false;
@@ -1241,7 +1317,8 @@ function createResultState(state, displayOutput){
   values.append(...state.variables.map(([name, value]) =>
     element('span', 'result-variable', `${name} = ${value}`)
   ));
-  if(!state.variables.length) values.textContent = '変数はありません';
+  values.append(...(state.arrays || []).map(array => renderLiteArray(array)));
+  if(!state.variables.length && !state.arrays?.length) values.textContent = '変数はありません';
   variables.append(values);
   result.append(variables);
   return result;
@@ -1391,6 +1468,7 @@ function executeCode(action){
         output:result.output,
         displayOutput:buildResultTranscript(result),
         variables:result.variables,
+        arrays:result.arrays,
         learningHints:{ ...result.learningHints }
       };
       resultCode = code;
