@@ -476,21 +476,30 @@ const historyDialog = $('history-dialog');
 let historyEntries = loadHistory();
 let selectedHistoryId = null;
 
+// 保護済み履歴は50件の通常枠を消費しない。元の順序を保ち、削除対象を通常履歴のみに限定する。
+function limitHistoryEntries(entries){
+  let normalCount = 0;
+  return entries.filter(entry => {
+    if(entry.locked === true) return true;
+    return ++normalCount <= HISTORY_LIMIT;
+  });
+}
+
 function loadHistory(){
   try{
     const raw = localStorage.getItem(HISTORY_KEY);
     if(!raw) return [];
     const data = JSON.parse(raw);
     if(data.version !== 1 || !Array.isArray(data.entries)) return [];
-    // 壊れたデータを画面やエディタへ渡さないよう、必要な項目だけを検査します。
-    return data.entries.filter(entry =>
+    // 旧v1の鍵属性なし履歴は非ロックとして読み取る。
+    return limitHistoryEntries(data.entries.filter(entry =>
       entry && typeof entry.id === 'string' && typeof entry.timestamp === 'string' &&
       !Number.isNaN(Date.parse(entry.timestamp)) && typeof entry.code === 'string' &&
       ['result', 'check'].includes(entry.kind) && typeof entry.output === 'string' &&
       Array.isArray(entry.variables) && entry.variables.every(pair =>
         Array.isArray(pair) && pair.length === 2 && pair.every(value => typeof value === 'string')) &&
       Array.isArray(entry.warnings) && entry.warnings.every(value => typeof value === 'string')
-    ).slice(0, HISTORY_LIMIT);
+    ).map(entry => ({...entry, locked:entry.locked === true})));
   }catch(_error){
     return [];
   }
@@ -501,14 +510,13 @@ function persistHistory(entries = historyEntries){
     localStorage.setItem(HISTORY_KEY, JSON.stringify({version:1, entries}));
     return true;
   }catch(_error){
-    // 保存が使えなくてもRUNや現在の表示は続行します。
+    // 失敗時は画面の履歴を確定させない。RUN自体は引き続き可能。
     return false;
   }
 }
 
 function saveHistory(code, kind, result, warnings = []){
   try{
-    // 解析結果の可変配列を参照せず、保存時点の値だけを独立させます。
     const snapshot = JSON.parse(JSON.stringify({
       code,
       kind,
@@ -519,26 +527,29 @@ function saveHistory(code, kind, result, warnings = []){
     const previous = historyEntries[0];
     const same = previous && ['code', 'kind', 'output', 'variables', 'warnings'].every(key =>
       JSON.stringify(previous[key]) === JSON.stringify(snapshot[key]));
-    if(same){
-      previous.timestamp = new Date().toISOString();
+    let nextEntries;
+    // 保護済みの記録は同じコードの再RUNでも書き換えない。
+    if(same && previous.locked !== true){
+      nextEntries = [{...previous, timestamp:new Date().toISOString()}, ...historyEntries.slice(1)];
     }else{
-      historyEntries.unshift({
+      nextEntries = [{
         id:crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-        timestamp:new Date().toISOString(),
-        ...snapshot
-      });
-      historyEntries.length = Math.min(historyEntries.length, HISTORY_LIMIT);
+        timestamp:new Date().toISOString(), locked:false, ...snapshot
+      }, ...historyEntries];
     }
-    persistHistory();
+    nextEntries = limitHistoryEntries(nextEntries);
+    if(persistHistory(nextEntries)) historyEntries = nextEntries;
   }catch(_error){
     // 履歴用データが想定外でも解析結果へ影響させません。
   }
 }
 
-// L-HISTORY-IO1: 外部ファイルは値を実行せず、検証した履歴項目だけを取り込む。
+// L-HISTORY-IO1 / L-HISTORY-LOCK1: JSON v1互換のまま鍵状態を受け渡す。
 const HISTORY_FILE_FORMAT = 'c-code-visualizer-lite-history';
 const HISTORY_FILE_VERSION = 1;
-const HISTORY_MAX_FILE_BYTES = 1024 * 1024;
+// ロック履歴を含む50件超のアーカイブも取り込めるよう、安全な上限を拡張する。
+const HISTORY_MAX_FILE_BYTES = 8 * 1024 * 1024;
+const HISTORY_MAX_IMPORT_ENTRIES = 5000;
 const historyExport = $('history-export');
 const historyImport = $('history-import');
 const historyImportFile = $('history-import-file');
@@ -561,7 +572,8 @@ function isValidImportedHistoryEntry(entry){
       Array.isArray(pair) && pair.length === 2 && pair.every(value =>
         typeof value === 'string' && value.length <= 10000)) &&
     Array.isArray(entry.warnings) && entry.warnings.length <= 100 && entry.warnings.every(value =>
-      typeof value === 'string' && value.length <= 10000);
+      typeof value === 'string' && value.length <= 10000) &&
+    (entry.locked === undefined || typeof entry.locked === 'boolean');
 }
 
 function parseHistoryImport(text){
@@ -570,16 +582,16 @@ function parseHistoryImport(text){
   const isLegacy = data && data.format === undefined;
   if(!data || typeof data !== 'object' || Array.isArray(data) ||
     (!isArchive && !isLegacy) || data.version !== HISTORY_FILE_VERSION ||
-    !Array.isArray(data.entries) || data.entries.length > 100 ||
+    !Array.isArray(data.entries) || data.entries.length > HISTORY_MAX_IMPORT_ENTRIES ||
     !data.entries.every(isValidImportedHistoryEntry)){
     throw new Error('対応していない履歴形式、または不正なデータです。');
   }
-  // prototypeを含む未知のプロパティは捨て、表示対象の文字列と配列だけを複製する。
+  // 未知のプロパティを破棄。鍵はbooleanだけを保持し、旧JSONではfalseを補う。
   return data.entries.map(entry => ({
     id:entry.id, timestamp:entry.timestamp, code:entry.code,
     kind:entry.kind, output:entry.output,
     variables:entry.variables.map(pair => [pair[0],pair[1]]),
-    warnings:[...entry.warnings]
+    warnings:[...entry.warnings], locked:entry.locked === true
   }));
 }
 
@@ -590,21 +602,38 @@ function historyEntriesEqual(a, b){
 }
 
 function mergeHistoryImport(imported){
-  const combined = [...historyEntries];
+  const combined = historyEntries.map(entry => ({...entry, locked:entry.locked === true}));
+  const signature = entry => JSON.stringify([
+    entry.timestamp, entry.code, entry.kind, entry.output, entry.variables, entry.warnings
+  ]);
+  // 取り込み上限の拡張に合わせ、重複照合はMapで線形時間に抑える。
+  const existingBySignature = new Map(combined.map(entry => [signature(entry), entry]));
+  const usedIds = new Set(combined.map(entry => entry.id));
   let added = 0;
+  let protectedUpdated = 0;
   for(const entry of imported){
-    if(combined.some(existing => historyEntriesEqual(existing, entry))) continue;
-    const copy = {...entry};
-    if(combined.some(existing => existing.id === copy.id)){
+    const key = signature(entry);
+    const existing = existingBySignature.get(key);
+    if(existing){
+      // 重複レコードの片方でもロックされていたら保護を優先。
+      if(entry.locked === true && existing.locked !== true){
+        existing.locked = true;
+        protectedUpdated++;
+      }
+      continue;
+    }
+    const copy = {...entry, locked:entry.locked === true};
+    while(usedIds.has(copy.id)){
       copy.id = crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     }
+    usedIds.add(copy.id);
     combined.push(copy);
+    existingBySignature.set(key, copy);
     added++;
   }
-  // RUN日時順にする。既存と同時刻なら既存の並びを保つ（安定ソート）。
   combined.sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
-  return {all:combined, kept:combined.slice(0,HISTORY_LIMIT),
-    omitted:Math.max(0,combined.length - HISTORY_LIMIT), added};
+  const kept = limitHistoryEntries(combined);
+  return {all:combined, kept, omitted:combined.length - kept.length, added, protectedUpdated};
 }
 
 historyExport.addEventListener('click', () => {
@@ -615,6 +644,10 @@ historyExport.addEventListener('click', () => {
       exportedAt:new Date().toISOString(), entries:historyEntries
     };
     const blob = new Blob([JSON.stringify(archive,null,2)],{type:'application/json;charset=utf-8'});
+    if(blob.size > HISTORY_MAX_FILE_BYTES || historyEntries.length > HISTORY_MAX_IMPORT_ENTRIES){
+      historyTransferMessage('履歴がJSON読み込みの安全上限を超えています。書き出しを中止しました。',true);
+      return;
+    }
     const url = URL.createObjectURL(blob);
     const date = new Date();
     const pad = n => String(n).padStart(2,'0');
@@ -635,10 +668,10 @@ historyExport.addEventListener('click', () => {
 historyImport.addEventListener('click', () => historyImportFile.click());
 historyImportFile.addEventListener('change', async () => {
   const file = historyImportFile.files?.[0];
-  historyImportFile.value = ''; // 同じファイルの再選択も可能にする。
+  historyImportFile.value = '';
   if(!file) return;
   if(file.size > HISTORY_MAX_FILE_BYTES){
-    historyTransferMessage('ファイルが大きすぎます（上限1MB）。読み込みを中止しました。',true);
+    historyTransferMessage('ファイルが大きすぎます（上限8MB）。読み込みを中止しました。',true);
     return;
   }
   try{
@@ -648,16 +681,15 @@ historyImportFile.addEventListener('change', async () => {
       return;
     }
     const merged = mergeHistoryImport(imported);
-    if(!merged.added){
+    if(!merged.added && !merged.protectedUpdated){
       historyTransferMessage('すべて読み込み済みです。履歴は変更していません。');
       return;
     }
     if(merged.omitted && !window.confirm(
-      `履歴は最大${HISTORY_LIMIT}件です。統合後、古い${merged.omitted}件が一覧から外れます。続けますか？`)){
+      `通常履歴は最大${HISTORY_LIMIT}件です。統合後、ロックされていない古い${merged.omitted}件が一覧から外れます。続けますか？`)){
       historyTransferMessage('読み込みを取り消しました。履歴は変更していません。');
       return;
     }
-    // 保存が失敗した場合、現在の履歴は変更しない（部分読み込み禁止）。
     if(!persistHistory(merged.kept)){
       historyTransferMessage('ブラウザへ履歴を保存できませんでした。現在の履歴は変更していません。',true);
       return;
@@ -665,7 +697,7 @@ historyImportFile.addEventListener('change', async () => {
     historyEntries = merged.kept;
     selectedHistoryId = null;
     renderHistory();
-    historyTransferMessage(`読み込み完了：新規${merged.added}件、現在${historyEntries.length}件${merged.omitted ? `（古い${merged.omitted}件を整理）` : ''}。コードは自動実行されません。`);
+    historyTransferMessage(`読み込み完了：新規${merged.added}件、保護更新${merged.protectedUpdated}件、現在${historyEntries.length}件${merged.omitted ? `（通常履歴${merged.omitted}件を整理）` : ''}。コードは自動実行されません。`);
   }catch(error){
     historyTransferMessage(error instanceof SyntaxError ?
       'JSONの形式が正しくありません。履歴は変更していません。' :
@@ -677,6 +709,44 @@ function historyDate(timestamp){
   const date = new Date(timestamp);
   const pad = value => String(value).padStart(2, '0');
   return `${date.getFullYear()}/${pad(date.getMonth() + 1)}/${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+// 履歴カードの選択とロックは入れ子にせず、二つの独立したbuttonで操作する。
+function historyLockIcon(locked){
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('width', '19');
+  svg.setAttribute('height', '19');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '2');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  svg.setAttribute('aria-hidden', 'true');
+  const rect = document.createElementNS(ns, 'rect');
+  rect.setAttribute('x', '5'); rect.setAttribute('y', '11');
+  rect.setAttribute('width', '14'); rect.setAttribute('height', '10'); rect.setAttribute('rx', '2');
+  const shackle = document.createElementNS(ns, 'path');
+  shackle.setAttribute('d', locked ? 'M8 11V7a4 4 0 0 1 8 0v4' : 'M8 11V7a4 4 0 0 1 8 0');
+  svg.append(rect, shackle);
+  return svg;
+}
+
+function toggleHistoryLock(id){
+  const current = historyEntries.find(entry => entry.id === id);
+  if(!current) return;
+  const next = historyEntries.map(entry => entry.id === id ? {...entry, locked:entry.locked !== true} : entry);
+  if(!persistHistory(next)){
+    historyTransferMessage('ロック状態を保存できませんでした。履歴は変更していません。', true);
+    return;
+  }
+  historyEntries = next;
+  historyTransferMessage('');
+  renderHistory();
+  const toggle = [...$('history-list').querySelectorAll('.history-lock-toggle')]
+    .find(button => button.dataset.historyId === id);
+  toggle?.focus();
 }
 
 function renderHistory(){
@@ -692,16 +762,39 @@ function renderHistory(){
   const list = $('history-list');
   list.replaceChildren();
   for(const entry of historyEntries){
-    const button = element('button', 'challenge-history-item');
-    button.type = 'button';
-    button.setAttribute('aria-pressed', String(entry.id === selectedHistoryId));
+    const card = element('div', 'challenge-history-item');
+    card.dataset.locked = String(entry.locked === true);
+    card.dataset.selected = String(entry.id === selectedHistoryId);
+
+    const select = element('button', 'history-item-select');
+    select.type = 'button';
+    select.setAttribute('aria-label', `${historyDate(entry.timestamp)}の履歴を選択`);
+    select.setAttribute('aria-pressed', String(entry.id === selectedHistoryId));
+    select.addEventListener('click', () => {
+      selectedHistoryId = entry.id;
+      renderHistory();
+      const selectedButton = [...list.querySelectorAll('.history-item-select')]
+        .find(button => button.dataset.historyId === entry.id);
+      selectedButton?.focus();
+    });
+    select.dataset.historyId = entry.id;
+
+    const top = element('div', 'history-item-top');
+    const meta = element('span', 'history-item-meta', `${historyDate(entry.timestamp)} · ${entry.kind === 'result' ? 'RESULT' : '確認あり'}`);
+    const toggle = element('button', 'history-lock-toggle');
+    toggle.type = 'button';
+    toggle.dataset.historyId = entry.id;
+    toggle.setAttribute('aria-label', entry.locked === true ? 'この履歴のロックを解除' : 'この履歴をロックして保護');
+    toggle.setAttribute('aria-pressed', String(entry.locked === true));
+    toggle.title = entry.locked === true ? 'ロック解除' : 'ロックして保護';
+    toggle.append(historyLockIcon(entry.locked === true));
+    toggle.addEventListener('click', () => toggleHistoryLock(entry.id));
+    // 鍵を左端に固定し、履歴タイトルと操作領域を視覚的に分離します。
+    top.append(toggle, meta);
+
     const preview = entry.code.split('\n').map(line => line.trim()).filter(Boolean).slice(0, 2).join(' / ');
-    button.append(
-      element('span', 'history-item-meta', `${historyDate(entry.timestamp)} · ${entry.kind === 'result' ? 'RESULT' : '確認あり'}`),
-      element('span', 'history-preview', preview || '（空のコード）')
-    );
-    button.addEventListener('click', () => { selectedHistoryId = entry.id; renderHistory(); });
-    list.append(button);
+    card.append(select, top, element('span', 'history-preview', preview || '（空のコード）'));
+    list.append(card);
   }
 
   const detail = $('history-detail');
@@ -740,12 +833,19 @@ function renderHistory(){
   });
   const remove = element('button', 'history-action', '1件削除');
   remove.type = 'button';
+  remove.disabled = entry.locked === true;
+  if(remove.disabled) remove.title = 'ロックを解除すると削除できます';
   remove.addEventListener('click', () => {
-    historyEntries = historyEntries.filter(item => item.id !== entry.id);
+    if(entry.locked === true) return;
+    const next = historyEntries.filter(item => item.id !== entry.id);
+    if(!persistHistory(next)){
+      historyTransferMessage('履歴を保存できませんでした。削除していません。',true);
+      return;
+    }
+    historyEntries = next;
     selectedHistoryId = null;
-    persistHistory();
     renderHistory();
-    (historyEntries.length ? $('history-list').firstElementChild : $('history-close')).focus();
+    (historyEntries.length ? $('history-list').querySelector('.history-item-select') : $('history-close')).focus();
   });
   actions.append(restore, remove);
   detail.append(actions);
@@ -1385,13 +1485,24 @@ historyDialog.addEventListener('click', event => {
   if(outside) historyDialog.close();
 });
 $('history-clear').addEventListener('click', () => {
-  if(!window.confirm('すべての履歴を削除しますか？')) return;
-  historyEntries = [];
+  const normalCount = historyEntries.filter(entry => entry.locked !== true).length;
+  const lockedCount = historyEntries.length - normalCount;
+  if(!normalCount){
+    historyTransferMessage('ロック中の履歴は削除されません。');
+    return;
+  }
+  const kept = historyEntries.filter(entry => entry.locked === true);
+  if(!persistHistory(kept)){
+    historyTransferMessage('履歴を保存できませんでした。削除していません。',true);
+    return;
+  }
+  historyEntries = kept;
   selectedHistoryId = null;
-  persistHistory();
   renderHistory();
-  $('history-close').focus();
+  historyTransferMessage(`通常履歴${normalCount}件を削除しました。ロック中${lockedCount}件は保護されています。`);
+  (historyEntries.length ? $('history-list').querySelector('.history-item-select') : $('history-close')).focus();
 });
+
 $('step-next').addEventListener('click', () => {
   if(!hasCurrentResult() || activeStep < 0) return;
   if(activeStep === currentSteps.length - 1) showResultPage();
