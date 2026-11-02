@@ -8510,6 +8510,78 @@
       return results;
     }
 
+
+    // L-UI15: 製品画面の実寸・キーボード操作・保存と復元を検証します。
+    async function checkWorkspaceUiCases(){
+      const key='c-visualizer-lite:workspace-layout:v1';
+      const saved=localStorage.getItem(key);
+      localStorage.removeItem(key);
+      const results=[], frame=createUiTestFrame();
+      const record=(name, condition)=>results.push({testCase:{name:'L-UI15 '+name},
+        result:{passed:!!condition,failures:condition?[]:[name],actual:{output:'ワークスペース操作',warningCount:0}}});
+      const pause=()=>new Promise(resolve=>setTimeout(resolve,80));
+      try{
+        await new Promise(resolve=>frame.addEventListener('load',resolve,{once:true}));
+        const ui=frame.contentWindow,doc=ui.document;
+        const cm=doc.querySelector('.CodeMirror').CodeMirror;
+        const w=doc.getElementById('workspace-width-resizer');
+        const h=doc.getElementById('workspace-height-resizer');
+        const reset=doc.getElementById('workspace-layout-reset');
+        const rect=selector=>doc.querySelector(selector).getBoundingClientRect();
+        const keydown=(el,key)=>el.dispatchEvent(new ui.KeyboardEvent('keydown',{key,bubbles:true,cancelable:true}));
+        const initialWidth=rect('.code-panel').width;
+        const initialHeight=rect('.CodeMirror').height;
+        const active=ui.matchMedia('(min-width:901px) and (pointer:fine)').matches;
+        record('標準高さと無指定CSS',initialHeight===390 && !doc.querySelector('.workspace').style.gridTemplateColumns && reset.hidden);
+        record('入力機器に応じた有効条件',w.hidden===!active && h.hidden===!active);
+        if(!active)return results;
+        const code=cm.getValue();
+        const initialSummary=rect('.action-area').width;
+        keydown(w,'ArrowRight'); await pause();
+        record('左右連動・外形とサマリー幅保持',Math.abs(rect('.code-panel').width-initialWidth-10)<1 && rect('.action-area').width===initialSummary);
+        record('左右の保存',JSON.parse(localStorage.getItem(key)).ratio>0);
+        record('FA1 Defaultの表示名と操作群への配置',reset.textContent==='Default' && reset.parentElement===doc.querySelector('.editor-heading-actions') && reset.nextElementSibling===doc.querySelector('.editor-font-controls'));
+        const controls=['#workspace-layout-reset','#editor-font-decrease','#editor-font-reset','#editor-font-increase','#editor-light-toggle'].map(s=>rect(s));
+        record('FA1 DefaultからLightまでの表示順',controls.every((r,i)=>!i||controls[i-1].right<=r.left));
+        const styleKeys=['height','paddingTop','paddingRight','paddingBottom','paddingLeft','borderTopWidth','borderTopStyle','borderTopColor','borderRadius','backgroundColor','color','fontSize','lineHeight'];
+        const rs=ui.getComputedStyle(reset),ms=ui.getComputedStyle(doc.getElementById('editor-font-decrease'));
+        record('FA1 A−と共通のボタン外観',styleKeys.every(k=>rs[k]===ms[k]));
+        record('FA1 CODE見出し内で非重複',controls[0].left>=rect('#secret-code-open').right && controls[4].right<=rect('.code-panel .panel-heading').right);
+        keydown(h,'ArrowDown'); await pause();
+        record('CODE高さのみ変更',rect('.CodeMirror').height===400 && cm.getValue()===code);
+        record('縦横同時保存',JSON.parse(localStorage.getItem(key)).height===400);
+        keydown(w,'ArrowDown');const keyDownIgnored=rect('.code-panel').width;
+        // 逆方向キーでは寸法が変わらないことを確認します。
+        keydown(h,'ArrowRight');await pause();
+        record('軸方向を限定',rect('.code-panel').width===keyDownIgnored && rect('.CodeMirror').height===400);
+        keydown(w,'Home');await pause();
+        record('横Homeは縦設定を保持',Math.abs(rect('.code-panel').width-initialWidth)<1 && rect('.CodeMirror').height===400);
+        keydown(h,'Home');await pause();
+        record('縦Homeと保存解除',rect('.CodeMirror').height===390 && localStorage.getItem(key)===null);
+        for(let i=0;i<180;i++){keydown(w,'ArrowLeft');keydown(h,'ArrowUp');}
+        await pause();
+        record('最小幅と高さ',Math.abs(rect('.code-panel').width-380)<1 && rect('.CodeMirror').height===200);
+        cm.setSelection({line:0,ch:0},{line:0,ch:4});
+        const selected=cm.getSelection(); cm.replaceRange(' ',{line:0,ch:0});cm.undo();
+        record('入力とUndoを保持',cm.getValue()===code);
+        reset.click();await pause();
+        record('両軸リセットとフォーカス',Math.abs(rect('.code-panel').width-initialWidth)<1 && rect('.CodeMirror').height===390 && localStorage.getItem(key)===null && doc.activeElement===w);
+        keydown(w,'ArrowRight');keydown(h,'ArrowDown');
+        frame.style.width='900px';await pause();
+        record('900pxで無効化',w.hidden && h.hidden && rect('.CodeMirror').height===390 && !doc.querySelector('.workspace').style.gridTemplateColumns);
+        frame.style.width='1200px';await pause();
+        record('PC復帰で再適用',!w.hidden && rect('.CodeMirror').height===400 && !!doc.querySelector('.workspace').style.gridTemplateColumns);
+        reset.click();
+        doc.getElementById('editor-font-increase').click();
+        keydown(h,'ArrowDown');reset.click();await pause();
+        record('文字サイズリセットと独立',ui.getComputedStyle(cm.getWrapperElement()).fontSize==='16px');
+        record('FA1 Default後は非表示・文字サイズ表示保持',reset.hidden && ui.getComputedStyle(reset).display==='none' && doc.getElementById('editor-font-reset').textContent==='16px' && localStorage.getItem(key)===null);
+        doc.getElementById('editor-font-reset').click();
+      }catch(error){record('例外: '+String(error),false);}
+      finally{frame.remove();if(saved===null)localStorage.removeItem(key);else localStorage.setItem(key,saved);}
+      return results;
+    }
+
     async function runAllTests(){
       const results = testCases.map(testCase => ({ testCase, result:checkCase(testCase) }));
       results.push(...await checkDecisionUiCases());
@@ -8524,6 +8596,7 @@
       results.push(...await checkPhase2UiCases());
       results.push(...await checkEditorFontUiCases());
       results.push(...await checkHistoryPortabilityUiCases());
+      results.push(...await checkWorkspaceUiCases());
       const passed = results.filter(item => item.result.passed).length;
       const failed = results.length - passed;
 

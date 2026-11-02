@@ -3100,6 +3100,37 @@ body {
   box-shadow: 0 0 10px rgb(255 230 0 / 24%);
 }
 
+/* L-UI15: 既存の16px間隔と枠に重ね、標準のコンテンツ寸法を維持します。 */
+.workspace-resizer, .workspace-layout-reset { display: none; }
+@media (min-width: 901px) and (pointer: fine) {
+  .workspace-resizable { position: relative; }
+  .workspace-resizable .workspace-resizer:not([hidden]) {
+    display: block;
+    position: absolute;
+    z-index: 9;
+    touch-action: none;
+  }
+  .workspace-resizer-vertical { top: 0; width: 12px; cursor: col-resize; }
+  .workspace-resizer-horizontal { height: 8px; cursor: row-resize; }
+  .workspace-resizer::after {
+    content: "";
+    position: absolute;
+    background: transparent;
+    border-radius: 2px;
+  }
+  .workspace-resizer-vertical::after { width: 2px; inset: 0 auto 0 5px; }
+  .workspace-resizer-horizontal::after { height: 2px; inset: 3px 12px auto; }
+  .workspace-resizer:hover::after, .workspace-resizer:focus-visible::after {
+    background: var(--line-strong);
+  }
+  .workspace-resizer:focus-visible { outline: 2px solid var(--accent-yellow); outline-offset: -2px; }
+  .workspace-resizable .workspace-layout-reset:not([hidden]) {
+    display: inline-flex;
+  }
+  .is-resizing-width, .is-resizing-width * { cursor: col-resize !important; user-select: none; }
+  .is-resizing-height, .is-resizing-height * { cursor: row-resize !important; user-select: none; }
+}
+
 /* PC (901px以上): 出力データの文字サイズのみ調整。見出しは元のまま。 */
 @media (min-width: 901px) {
   .output-card output,
