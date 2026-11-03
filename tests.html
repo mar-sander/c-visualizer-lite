@@ -8985,6 +8985,68 @@
       return results;
     }
 
+
+    // L-ARRAY3: 教材原本2025_v2の補完と独立した境界期待値。
+    function checkArrayConditionalCases(){
+      const results=[],same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+      const record=(name,ok,detail='')=>results.push({testCase:{name:'L-ARRAY3 '+name},result:{passed:!!ok,failures:ok?[]:[detail||name],actual:{output:'配列×条件・独立期待値',warningCount:0}}});
+      const run=body=>{document.getElementById('codeInput').value=makeMainCode(body);document.getElementById('scanfInput').value='';visualizeCode();return window.cVisualizerLiteResult;};
+      const make=(values,min=false,split=false,n=values.length)=>
+        (split?'int i;\nint '+(min?'min':'max')+';\nint ':'int i, '+(min?'min':'max')+', ')+'data['+values.length+'] = {'+values.join(', ')+'};\n'+
+        (min?'min':'max')+' = data[0];\nfor(i = 1; '+(min&&n===5?'i <= 4':'i < '+n)+'; i++){\nif('+(min?'min >':'max <')+' data[i]){\n'+(min?'min':'max')+' = data[i];\n}\n}\nprintf("'+(min?'MIN':'MAX')+' = %d\\n", '+(min?'min':'max')+');\nreturn 0;';
+      for(const min of [false,true])for(const split of [false,true])for(const values of [[38,12,78,91,55],[99,4,3,2,1],[1,2,3,4,99],[5,5,5,5,5],[4,-9,8,20,2]]){
+        const r=run(make(values,min,split)),name=(min?'MIN':'MAX')+' '+(split?'分割':'混合')+' '+values;
+        record(name+' 結果・変数・配列',!r.hasWarnings&&r.output===(min?'MIN':'MAX')+' = '+(min?Math.min(...values):Math.max(...values))+'\n'&&same(r.arrays[0]?.values,values),JSON.stringify(r));
+        const decisions=r.steps.filter(s=>s.branchDecision);let best=values[0];
+        record(name+' 判定数',decisions.length===4);
+        decisions.forEach((s,j)=>{const truth=min?best>values[j+1]:best<values[j+1],a=s.arrayViews?.[0]?.accesses?.[0];record(name+' 比較 '+j,s.branchDecision.result===truth&&s.branchDecision.comparison.left.value===best&&s.branchDecision.comparison.right.value===values[j+1]&&a?.resolvedIndex===j+1&&a.value===values[j+1]&&new Map(s.variablesAtStep).get('i')===String(j+1));if(truth)best=values[j+1];});
+      }
+      for(const n of [1,2,10]){const values=Array.from({length:10},(_,i)=>i);const r=run(make(values,false,false,n));record(n+' 境界/圧縮',!r.hasWarnings&&r.output==='MAX = '+(n-1)+'\n'&&new Map(r.variables).get('i')===String(n)&&!!r.steps.find(s=>s.stepKind==='loop-omission')===(n>7));}
+      for(const [name,decl,condition,body] of [
+        ['未初期化要素','int a[2];','x < a[i]','x = a[i];'],
+        ['範囲外','int a[1] = {5};','x < a[i]','x = a[i];'],
+        ['未宣言添字','int a[2] = {5};','x < a[k]','x = a[i];'],
+        ['非int添字','int a[2] = {5};\nfloat k = 0.5f;','x < a[k]','x = a[i];'],
+        ['配列でない','int a = 5;','x < a[i]','x = a[i];'],
+        ['本文read失敗','int a[2];','i == 1','x = a[i];'],
+        ['複雑添字','int a[2] = {5};','x < a[i+1]','x = a[i];'],
+        ['複数read','int a[2] = {5};','a[0] < a[i]','x = a[i];'],
+        ['本文write拒否','int a[2] = {5};','i == 1','a[i] = 9;'],
+        ['入れ子if拒否','int a[2] = {5};','i == 1','if(x < a[i]){\nx = a[i];\n}']
+      ]){const r=run(decl+'\nint i;\nint x = 0;\nfor(i = 1; i < 2; i++){\nif('+condition+'){\n'+body+'\n}\n}\nprintf("WRONG");\nreturn 0;');record(name+' 安全停止',r.hasWarnings&&r.output===''&&new Map(r.variables).get('x')==='0');}
+      for(const decl of ['int i, x, a[2] = {1, 2, 3};','int i, x, a[2], x;','int i, x = missing, a[2];','int a[2], i, a;','int i,,a[2];','float i, a[2];','int i = 3, a[2], x = 1 / 0;']){const r=run(decl+'\nprintf("WRONG");\nreturn 0;');record('原子性 '+decl,r.hasWarnings&&r.output===''&&r.variables.length===0&&r.arrays.length===0);}
+      let r=run('int a[2] = {3}, i = 1, x = i + 2;\nprintf("%d", x);\nreturn 0;');record('配列が先・左順scalar初期化',!r.hasWarnings&&r.output==='3'&&same(r.arrays[0].values,[3,0]));
+      r=run('int x = 7;\nint i, x, a[2];\nprintf("WRONG");');record('既存scalar重複の原子性',r.hasWarnings&&r.output===''&&same(r.variables,[['x','7']])&&r.arrays.length===0);
+      return results;
+    }
+
+
+    async function checkArrayConditionalUiCases(){
+      const frame=createUiTestFrame(),results=[],same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+      const record=(name,ok)=>results.push({testCase:{name:'L-ARRAY3 UI '+name},result:{passed:!!ok,failures:ok?[]:[name],actual:{output:'STEP/履歴/比較表示',warningCount:0}}});
+      try{
+        await new Promise(resolve=>frame.addEventListener('load',resolve,{once:true}));
+        const ui=frame.contentWindow,doc=ui.document,cm=doc.querySelector('.CodeMirror').CodeMirror;
+        for(const min of [false,true])for(const n of [0,1,4,10]){
+          const values=n===10?[3,1,5,8,2,11,0,20,4,99]:[38,12,78,91,55],v=min?'min':'max';
+          const body='int i, '+v+', data['+values.length+'] = {'+values.join(',')+'};\n'+v+' = data[0];\nfor(i = 1; i < '+(n+1)+'; i++){\nif('+v+(min?' >':' <')+' data[i'+(n===10?' - 1':'')+']){\n'+v+' = data[i];\n}\n}\nreturn 0;';
+          // 圧縮試験は添字計算へ拡張せず0開始、10要素を全参照します。
+          const code=n===10?makeMainCode('int i, '+v+', data[10] = {'+values.join(',')+'};\n'+v+' = data[0];\nfor(i = 0; i < 10; i++){\nif('+v+(min?' >':' <')+' data[i]){\n'+v+' = data[i];\n}\n}\nreturn 0;'):makeMainCode(body);
+          cm.setValue(code);ui.executeCode('input');await waitForUiResult(ui);const r=ui.cVisualizerLiteResult,frozen=JSON.stringify(r);record(v+' '+n+' RUN',!r.hasWarnings);
+          const observe=k=>{const step=r.steps[k],cards=[...doc.querySelectorAll('#flow-content .lite-array-card')],views=step.arrayViews||[];return cards.length===views.length&&views.every((view,j)=>same([...cards[j].querySelectorAll('.lite-array-value')].map(x=>x.textContent),view.values.map((x,i)=>view.initialized[i]?String(x):'—'))&&(!view.accesses[0]||cards[j].querySelector('[data-access="read"]')?.textContent.includes(String(view.accesses[0].value))))&&doc.getElementById('output-value').textContent===(step.outputAtStep||'—');};
+          doc.querySelector('.result-flow-button').click();let forward=true,backward=true;
+          for(let k=0;k<r.steps.length;k++){forward=observe(k)&&forward;doc.getElementById('step-next').click();}
+          record(v+' '+n+' 全STEP前進とRESULT',forward&&!!doc.querySelector('.result-state'));
+          doc.querySelector('.result-flow-button').click();for(let k=1;k<r.steps.length;k++)doc.getElementById('step-next').click();
+          for(let k=r.steps.length-1;k>=0;k--){backward=observe(k)&&backward;doc.getElementById('step-prev').click();}
+          record(v+' '+n+' 全STEP後退・snapshot不変',backward&&JSON.stringify(r)===frozen);
+          const entry=ui.eval('historyEntries[0]');record(v+' '+n+' 履歴最終値・JSON往復',entry.code===code&&entry.variables.some(([name,value])=>name===v&&value===new Map(r.variables).get(v))&&same(ui.parseHistoryImport(JSON.stringify({version:1,entries:[entry]}))[0].variables,entry.variables));
+          record(v+' '+n+' 圧縮境界',!!r.steps.find(s=>s.stepKind==='loop-omission')===(n===10));
+        }
+      }catch(e){record('例外 '+String(e),false)}finally{frame.remove()}
+      return results;
+    }
+
     async function runAllTests(){
       const results = testCases.map(testCase => ({ testCase, result:checkCase(testCase) }));
       results.push(...await checkDecisionUiCases());
@@ -9004,6 +9066,8 @@
       results.push(...await checkArrayIntegrationUiCases());
       results.push(...checkArrayForEngineCases());
       results.push(...await checkArrayForUiCases());
+      results.push(...checkArrayConditionalCases());
+      results.push(...await checkArrayConditionalUiCases());
       const passed = results.filter(item => item.result.passed).length;
       const failed = results.length - passed;
 

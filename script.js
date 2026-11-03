@@ -1926,7 +1926,7 @@ function visualizeCode(){
     return { ok:true, value:after };
   }
 
-  function processSimpleLine(rawLine, index, insideIf = false, insideFor = false, insideWhile = false){
+  function processSimpleLine(rawLine, index, insideIf = false, insideFor = false, insideWhile = false, allowConditionalArrayRead = false){
     const lineNo = index + 1;
     const rawTrimmed = rawLine.trim();
     const trimmed = executableLines[index].trim();
@@ -1972,6 +1972,60 @@ function visualizeCode(){
         return { title:'配列要素を含む式を計算できません', access:result.arrayAccess };
       }
       return { title:'式を計算できません', access:null };
+    }
+
+    // L-ARRAY3: 基本int混合宣言は全宣言子を検査してから左順に確定します。
+    const mixedHeader = structuralCode.trim().match(/^(int|float|double|char)\s+([\s\S]*);$/);
+    const mixedParts = mixedHeader ? splitScalarDeclarators(mixedHeader[2]) : null;
+    const isMixed = mixedHeader && containsArrayElementSyntax(mixedHeader[2]) &&
+      (!mixedParts || mixedParts.length > 1);
+    if(isMixed){
+      if(insideLoop || insideIf || mixedHeader[1] !== 'int' || !mixedParts || mixedParts.some(p => !p)){
+        return stopArrayLine(!mixedParts && looksLikeArrayDeclaration(structuralCode) ? '配列宣言の書き方を確認' : '混合宣言の書き方を確認', 'main直下で基本的なint変数と1次元int配列を宣言してください。');
+      }
+      const stagedValues = Object.assign(Object.create(null), variables);
+      const stagedTypes = Object.assign(Object.create(null), variableTypes);
+      const names = new Set(), pending = [];
+      for(const part of mixedParts){
+        const array = parseArrayDeclaration('int ' + part + ';');
+        const scalar = !array.matched && part.match(/^([A-Za-z_]\w*)\s*(?:=\s*(.+))?$/);
+        if((array.matched && !array.ok) || (!array.matched && !scalar)){
+          return stopArrayLine('混合宣言の書き方を確認', array.message || '宣言子の書き方が未対応です。');
+        }
+        const name = array.matched ? array.name : scalar[1];
+        if(names.has(name) || getSymbolKind(name)){
+          return stopArrayLine('宣言する名前を確認', '変数・配列の名前が重複しています。宣言全体を確定しません。');
+        }
+        names.add(name);
+        if(array.matched){ pending.push({array}); continue; }
+        const expr = scalar[2];
+        let value = UNINITIALIZED, result = null;
+        if(expr !== undefined){
+          if(containsArrayElementSyntax(expr)){
+            return stopArrayLine('混合宣言の初期値を確認', '混合宣言の初期値では配列を参照できません。');
+          }
+          result = evaluateExpression(expr, stagedValues, null, stagedTypes);
+          const converted = result.ok ? convertScalarValue(result.value, 'int') : result;
+          if(!converted.ok) return stopArrayLine('混合宣言の初期値を確認', escapeHtml(converted.error));
+          value = converted.value;
+        }
+        stagedValues[name] = value; stagedTypes[name] = 'int';
+        pending.push({name, expr, value, result});
+      }
+      for(const item of pending){
+        if(item.array){
+          const a = item.array;
+          rememberArray(a.name, {type:'int', length:a.length, values:[...a.values]});
+          const text = '配列 ' + a.name + ' の箱を' + a.length + '個用意しました。' + (a.hasInitializer ? '初期値を順番に入れ、省略要素は0で初期化しました。' : '各要素は未初期化です。');
+          addAnalysis(analysis, lineNo, text);
+          addStep(lineNo, text, true, [makeArrayView({name:a.name}, true)]);
+        }else{
+          declareScalar(item.name, item.value, 'int');
+          const explanation = item.expr === undefined ? {analysis:item.name + ' は未初期化のint変数です。', step:item.name + ' の箱を作りました。中身はまだ入っていません。'} : makeInitialValueExplanation(item.name, item.expr, item.result, 'int', item.value);
+          addAnalysis(analysis, lineNo, explanation.analysis); addStep(lineNo, explanation.step);
+        }
+      }
+      return;
     }
 
     const arrayDeclaration = parseArrayDeclaration(structuralCode.trim());
@@ -2035,7 +2089,7 @@ function visualizeCode(){
 
     let hasSupportedArrayRead = false;
     if(containsArrayElementSyntax(structuralCode)){
-      if(insideIf || insideWhile){
+      if(insideWhile || (insideIf && !(allowConditionalArrayRead && isArrayReadAssignment(structuralCode)))){
         return stopArrayLine(
           'この場所の配列操作は未対応',
           '現在のVisualizerでは、配列要素の参照・代入はmain直下、またはmain直下にあるfor文の本体へ直接書いた文だけで実行できます。if／while内では実行しません。'
@@ -2699,6 +2753,20 @@ function visualizeCode(){
     return unsupported('分岐内の文は未対応', 'if側・else側に未対応の文があります。if文全体は実行しません。');
   }
 
+  // 配列readの限定解除: main直下forの直接if、単純比較とscalarへのreadのみ。
+  function isArrayReadAssignment(code){
+    const m = code.match(/^[A-Za-z_]\w*\s*=\s*(.+);$/);
+    return !!m && !!parseSupportedArrayAccess(m[1]);
+  }
+  function isArrayReadCondition(code){
+    const found = findComparison(code);
+    if(!found.ok || !found.comparison) return false;
+    const c = found.comparison;
+    const left = code.slice(0,c.index).trim(), right = code.slice(c.index+c.operator.length).trim();
+    const scalar = value => /^[A-Za-z_]\w*$/.test(value);
+    return (!!parseSupportedArrayAccess(left) && scalar(right)) || (scalar(left) && !!parseSupportedArrayAccess(right));
+  }
+
   function inspectSupportedIf(startIndex, options = {}){
     const containerEndIndex = Math.min(
       options.containerEndIndex ?? Math.max(startIndex, executionEndIndex - 1),
@@ -2775,7 +2843,7 @@ function visualizeCode(){
           );
         }
 
-        if(containsArrayElementSyntax(structuralCode)){
+        if(containsArrayElementSyntax(structuralCode) && !(options.allowArrayRead && depth === 1 && isArrayReadAssignment(structuralCode))){
           return failure(
             'この場所での配列要素の参照／代入は未対応',
             'このStageでは配列要素へアクセスできないため、外側のif文全体は実行しません。'
@@ -2899,7 +2967,7 @@ function visualizeCode(){
           ? unsupportedNestedIfForm(structuralCode)
           : failure('if文の書き方を確認', '対応範囲を確定できないif文のため、処理全体は実行しません。');
       }
-      if(containsArrayElementSyntax(headerMatch[1])){
+      if(containsArrayElementSyntax(headerMatch[1]) && !(options.allowArrayRead && depth === 1 && isArrayReadCondition(headerMatch[1]))){
         return failure(
           'if条件での配列要素readはまだ未対応',
           'このStageでは配列要素を条件式で使用できないため、if文全体は実行しません。'
@@ -2995,7 +3063,9 @@ function visualizeCode(){
       };
     }
 
-    return parseIf(startIndex, 1, true);
+    const node = parseIf(startIndex, 1, true);
+    if(node.ok) node.allowArrayRead = options.allowArrayRead === true && !node.conditionalChain;
+    return node;
   }
 
   function describeNestedIfBoundaries(node){
@@ -3133,12 +3203,13 @@ function visualizeCode(){
   }
 
   function executeIfNode(node, context = {}){
+    context = {...context, allowArrayRead:node.allowArrayRead === true};
     if(node.conditionalChain) return executeConditionalChain(node, context);
     const stopOnRuntimeError = context.stopOnRuntimeError === true;
     const parentLoopLabel = context.insideWhile === true ? 'while文' : 'for文';
     const nested = node.depth > 1;
     const lineNo = node.startIndex + 1;
-    const result = evaluateExpression(node.condition, variables, null, variableTypes);
+    const result = evaluateExpression(node.condition, variables, node.allowArrayRead ? resolveArrayRead : null, variableTypes);
 
     if(!result.ok){
       const skippedTarget = node.hasElse ? 'if側とelse側の処理' : '中の処理';
@@ -3146,7 +3217,7 @@ function visualizeCode(){
         addAnalysis(analysis, lineNo, `${nested ? '入れ子の' : ''}if文の条件 <code>${escapeHtml(node.condition)}</code> を評価できませんでした。${skippedTarget}は実行せず、プログラムの実行を停止します。`);
         addHint(hints, lineNo, `${nested ? '入れ子の' : ''}if文の条件を評価できません`, escapeHtml(result.error));
         warningLines.add(lineNo);
-        addStep(lineNo, `${nested ? '入れ子の' : ''}if文の条件を評価できないため、プログラムの実行を停止します。`);
+        addStep(lineNo, `${nested ? '入れ子の' : ''}if文の条件を評価できないため、プログラムの実行を停止します。`, false, (result.access || result.arrayAccess) ? [makeArrayView(result.access || result.arrayAccess)] : []);
         return {
           status:'execution-stopped',
           stopKind:'runtime-error',
@@ -3219,7 +3290,7 @@ function visualizeCode(){
         : (conditionMet ? '波かっこの中の処理を実行します。' : '波かっこの中の処理は実行しません。');
       if(nested){
         addAnalysis(analysis, lineNo, `入れ子のif文の条件 <code>${escapeHtml(node.condition)}</code> を判定しました。${conditionExplanation}${nestedBranchExplanation}`);
-        addStep(lineNo, `入れ子のif文の条件 ${escapeHtml(node.condition)} を判定しました。${nestedBranchExplanation}`, true, [], branchDecision);
+        addStep(lineNo, `入れ子のif文の条件 ${escapeHtml(node.condition)} を判定しました。${nestedBranchExplanation}`, true, result.arrayAccess ? [makeArrayView(result.arrayAccess)] : [], branchDecision);
       }else{
         addAnalysis(analysis, lineNo, `${conditionExplanation}${outerBranchExplanation}`);
         const stepExplanation = node.hasElse
@@ -3227,7 +3298,7 @@ function visualizeCode(){
             ? '条件が成立したため、if文の中へ進みます。else文の中は実行しません。'
             : '条件が成立しなかったため、if文の中は実行せず、else文の中へ進みます。')
           : (conditionMet ? '条件が成立したため、if文の中へ進みます。' : '条件が成立しなかったため、if文の中は実行しません。');
-        addStep(lineNo, `${escapeHtml(node.condition)}を判定しました。<br>${stepExplanation}`, true, [], branchDecision);
+        addStep(lineNo, `${escapeHtml(node.condition)}を判定しました。<br>${stepExplanation}`, true, result.arrayAccess ? [makeArrayView(result.arrayAccess)] : [], branchDecision);
       }
 
       if(conditionMet){
@@ -3281,12 +3352,13 @@ function visualizeCode(){
         index,
         true,
         context.insideFor === true,
-        context.insideWhile === true
+        context.insideWhile === true,
+        context.allowArrayRead === true
       );
       if(simpleResult === 'program-ended'){
         return { status:'program-ended', stopIndex:index };
       }
-      if(simpleResult === 'execution-error' || simpleResult === 'scanf-error'){
+      if(simpleResult === 'execution-error' || simpleResult === 'scanf-error' || simpleResult === 'array-error'){
         return {
           status:'execution-stopped',
           stopKind:'runtime-error',
@@ -4150,6 +4222,7 @@ function visualizeCode(){
       if(/^if\b/.test(structuralBodyCode)){
         const ifNode = inspectSupportedIf(index, {
           containerEndIndex:Math.max(index, safeEndIndex - 1),
+          allowArrayRead:forDepth === 1,
           validateSimpleStatement:validateIfSimpleStatement
         });
         if(!ifNode.ok){
