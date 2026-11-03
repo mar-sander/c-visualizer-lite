@@ -7,6 +7,7 @@
   <title>C Code Visualizer Lite | 試験運用版</title>
   <link rel="stylesheet" href="vendor/codemirror/codemirror.css">
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="tips.css">
 </head>
 <body>
   <div class="app-shell">
@@ -22,6 +23,14 @@
             <option value="">SAMPLE</option>
           </select>
         </label>
+        <div id="tips-control">
+          <button type="button" id="tips-open" aria-label="学習サポート" title="学習サポート"
+            aria-expanded="false" aria-controls="tips-menu" aria-haspopup="true">&#8942;</button>
+          <div id="tips-menu" hidden>
+            <div class="tips-menu-heading">TIPS / 学習サポート</div>
+            <div id="tips-menu-items"></div>
+          </div>
+        </div>
       </div>
     </header>
     <main>
@@ -125,6 +134,16 @@ int main(void){
   <div id="run-error-flash" class="run-error-flash" aria-hidden="true">
     <span>ERROR</span>
   </div>
+  <dialog id="tips-dialog" aria-labelledby="tips-dialog-title">
+    <div class="tips-dialog-heading">
+      <h2 id="tips-dialog-title">forループの動きを動画で見る</h2>
+      <button type="button" id="tips-dialog-close" aria-label="動画を閉じる">×</button>
+    </div>
+    <video id="tips-video" controls playsinline preload="metadata">
+      <source src="assets/for_loop_value_trace_4x3_v2.mp4" type="video/mp4">
+      お使いのブラウザーでは動画を再生できません。
+    </video>
+  </dialog>
   <!-- 既存解析エンジンの入出力先。画面へは解析済みの実データを反映します。 -->
   <div class="engine-sandbox" aria-hidden="true">
     <div id="codeEditor"><pre id="codeLineNumbers"></pre><pre id="codeHighlight"></pre></div>
@@ -138,5 +157,6 @@ int main(void){
   <script src="script.js"></script>
   <script src="app.js"></script>
   <script src="workspace.js"></script>
+  <script src="tips.js"></script>
 </body>
 </html>

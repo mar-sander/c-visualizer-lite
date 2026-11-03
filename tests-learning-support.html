@@ -1,0 +1,44 @@
+<!doctype html><html lang="ja"><meta charset="utf-8"><title>L-TIPS1 tests</title>
+<h1>Learning support regression</h1><p id="counts">Running</p><ol id="results"></ol>
+<iframe id="app" src="index.html" style="width:100%;height:900px"></iframe>
+<script>
+(async()=>{
+ const rows=[],record=(name,pass)=>{rows.push({name,pass:!!pass});if(!pass)throw Error(name)},wait=ms=>new Promise(r=>setTimeout(r,ms));
+ const until=async fn=>{for(let n=0;n<200;n++){if(fn())return;await wait(25)}throw Error('timeout')};
+ const frame=document.getElementById('app');await new Promise(r=>frame.onload=r);const ui=frame.contentWindow,d=ui.document,$=id=>d.getElementById(id);
+ const snapshot=()=>JSON.stringify({code:d.querySelector('.CodeMirror').CodeMirror.getValue(),input:$('scanfInput').value,sample:$('sample-select').value,result:ui.cVisualizerLiteResult,step:ui.eval('activeStep'),history:ui.eval('historyEntries'),storage:{...ui.localStorage},flow:$('flow-content').textContent,summary:d.querySelector('.final-summary').textContent,output:$('output-value').textContent,slider:$('step-slider').value});
+ const open=()=>{$('tips-open').click();d.querySelector('.tips-menu-item').click()};
+ try{
+ record('SAMPLE直後にボタン',d.querySelector('.sample-picker').nextElementSibling.id==='tips-control');
+ record('初期状態は非表示',!$('tips-dialog').open&&$('tips-menu').hidden);
+ record('最初の教材名',d.querySelector('.tips-menu-item').textContent==='forループの動きを動画で見る');
+ for(const state of ['未実行','RESULT','FLOW','コード編集中']){
+ if(state==='RESULT'){d.querySelector('.CodeMirror').CodeMirror.setValue('#include <stdio.h>\nint main(void){\nint i;\nfor(i=0;i<3;i++){\nprintf("%d",i);\n}\nreturn 0;\n}');$('scanfInput').value='42\n7';$('visualize').click()}
+ if(state==='RESULT')await until(()=>d.querySelector('.result-flow-button')&&!ui.eval('resultRevealPending')&&!ui.eval('resultReveal'));
+ if(state==='FLOW'){d.querySelector('.result-flow-button').click();$('step-next').click();$('step-next').click()}
+ if(state==='コード編集中')d.querySelector('.CodeMirror').CodeMirror.replaceRange('// editing\n',{line:0,ch:0});
+ const before=snapshot();
+ $('tips-open').click();record(state+' メニュー開く',!$('tips-menu').hidden&&$('tips-open').getAttribute('aria-expanded')==='true');
+ $('tips-open').click();record(state+' メニュー閉じる', $('tips-menu').hidden);
+ for(const way of ['button','backdrop','escape']){
+ open();record(state+' '+way+' modal', $('tips-dialog').open&&$('tips-menu').hidden&&d.activeElement===$('tips-dialog-close'));
+ if(way==='button')$('tips-dialog-close').click();
+ if(way==='backdrop')$('tips-dialog').dispatchEvent(new ui.MouseEvent('click',{bubbles:true,clientX:0,clientY:0}));
+ if(way==='escape')$('tips-dialog').dispatchEvent(new ui.Event('cancel',{cancelable:true}));
+ await until(()=>!$('tips-dialog').open&&$('tips-video').paused&&$('tips-video').currentTime===0&&d.activeElement===$('tips-open'));record(state+' '+way+' 閉じて停止',true);
+ const after=snapshot();if(after!==before){const a=JSON.parse(before),b=JSON.parse(after);throw Error('changed fields: '+Object.keys(a).filter(k=>JSON.stringify(a[k])!==JSON.stringify(b[k])).join(','))}
+ record(state+' '+way+' コード・INPUT・結果・STEP・履歴・storage維持',true);
+ }
+ }
+ $('tips-open').click();d.dispatchEvent(new ui.KeyboardEvent('keydown',{key:'Escape',bubbles:true}));record('メニューEsc', $('tips-menu').hidden);
+ $('tips-open').click();$('history-open').dispatchEvent(new ui.PointerEvent('pointerdown',{bubbles:true}));record('メニュー外タップ', $('tips-menu').hidden);
+ $('tips-open').click();$('sample-select').focus();record('Tabでメニューを離れると閉じる', $('tips-menu').hidden);
+ record('標準動画controls・inline・自動再生なし',$('tips-video').controls&&$('tips-video').playsInline&&!$('tips-video').autoplay);
+ record('採用動画パス',$('tips-video').querySelector('source').getAttribute('src')==='assets/for_loop_value_trace_4x3_v2.mp4');
+ }catch(e){rows.push({name:String(e.stack||e),pass:false})}
+ ui.document.querySelectorAll('dialog[open]').forEach(x=>x.close());
+ window.tipsTestResults={total:rows.length,pass:rows.filter(x=>x.pass).length,fail:rows.filter(x=>!x.pass).length,rows};
+ document.getElementById('counts').textContent=JSON.stringify({...window.tipsTestResults,rows:undefined});
+ rows.forEach(x=>{const li=document.createElement('li');li.textContent=(x.pass?'PASS ':'FAIL ')+x.name;document.getElementById('results').append(li)});
+})();
+</script></html>
