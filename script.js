@@ -2078,10 +2078,12 @@ function visualizeCode(){
         if(result.type !== 'int'){
           return stopArrayLine('この配列への代入は未対応', 'int配列には、現在の対応範囲にある整数式だけを代入してください。');
         }
+        const previousValue = location.array.values[location.access.resolvedIndex];
         location.array.values[location.access.resolvedIndex] = result.value;
         const writeAccess = {
           ...location.access,
           mode:'write',
+          previousValue,
           value:result.value
         };
         const resolutionExplanation = describeVariableIndexResolution(writeAccess);
@@ -4335,7 +4337,8 @@ function visualizeCode(){
       for(let lineNo = firstLineNo; lineNo <= lastLineNo; lineNo++){
         analysisLengths[lineNo] = (analysis[lineNo] || []).length;
       }
-      return { analysisLengths, stepLength:steps.length };
+      return { analysisLengths, stepLength:steps.length,
+        arrayViews:arrayOrder.map(name => makeArrayView({name}, true)) };
     }
 
     function beginIteration(iterationNumber){
@@ -4448,6 +4451,8 @@ function visualizeCode(){
             text:omissionText(omittedFirst, omittedLast),
             stepKind:'loop-omission',
             omittedRange:{first:omittedFirst, last:omittedLast, kind:'for', sourceLine:firstLineNo},
+            // 最終表示反復の開始直前＝省略区間終了時。強調を持ち越しません。
+            ...(lastRecord.before.arrayViews.length ? {arrayViews:lastRecord.before.arrayViews} : {}),
             outputAtStep:omittedState.outputAtStep,
             variablesAtStep:omittedState.variablesAtStep.map(([name, value]) => [name, value])
           });
@@ -5029,7 +5034,11 @@ function visualizeCode(){
       accesses:(view.accesses || []).map(access => ({
         ...access,
         value:access.value === UNINITIALIZED || access.value === undefined ? null : access.value,
-        initialized:access.value !== UNINITIALIZED && access.value !== undefined
+        initialized:access.value !== UNINITIALIZED && access.value !== undefined,
+        ...(Object.prototype.hasOwnProperty.call(access, 'previousValue') ? {
+          previousValue:access.previousValue === UNINITIALIZED ? null : access.previousValue,
+          previousInitialized:access.previousValue !== UNINITIALIZED
+        } : {})
       }))
     };
   }

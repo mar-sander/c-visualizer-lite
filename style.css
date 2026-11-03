@@ -3272,3 +3272,6 @@ body {
     font-size: 20px;
   }
 }
+
+/* L-ARRAY2: 既存の箱の中で代入前後を表示します。 */
+.lite-array-history{ color:var(--muted); white-space:nowrap; font-size:11px; }
