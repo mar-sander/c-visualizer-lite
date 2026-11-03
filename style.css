@@ -1207,6 +1207,7 @@ button:focus-visible,select:focus-visible {
 }
 
 .sample-picker {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1215,15 +1216,44 @@ button:focus-visible,select:focus-visible {
 }
 
 .sample-picker select {
+  -webkit-appearance: none;
+  appearance: none;
   min-height: 44px;
   max-width: 185px;
-  padding: 8px 11px;
+  /* Retain native text inset (+4px) and total intrinsic width (+20px). */
+  padding: 8px 27px 8px 15px;
   border: 1px solid var(--line-strong);
   border-radius: 12px;
   background: var(--surface2);
   color: var(--text);
   font: inherit;
   font-size: 13px
+}
+
+/* L-UI16: decorative chevron about 5px left of the former native arrow. */
+.sample-picker::after {
+  content: "";
+  position: absolute;
+  right: 11px;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  box-sizing: border-box;
+  border-right: 2px solid var(--text);
+  border-bottom: 2px solid var(--text);
+  transform: translateY(-70%) rotate(45deg);
+  pointer-events: none
+}
+
+@media (forced-colors: active) {
+  .sample-picker select {
+    appearance: auto;
+    padding: 8px 11px
+  }
+
+  .sample-picker::after {
+    display: none
+  }
 }
 
 .sample-picker select:focus-visible,.scanf-field input:focus-visible {
