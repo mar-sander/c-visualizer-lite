@@ -79,7 +79,10 @@ int main(void){
           </div>
           <div id="step-controls" class="step-controls" aria-label="STEP操作">
             <button type="button" id="step-prev" class="step-button" disabled>← 前へ</button>
-            <span id="step-count" class="step-count">— / —</span>
+            <div class="step-navigator">
+              <input type="range" id="step-slider" class="step-slider" min="1" max="1" step="1" value="1" aria-label="表示するSTEP" aria-describedby="step-count" disabled>
+              <span id="step-count" class="step-count">— / —</span>
+            </div>
             <button type="button" id="step-next" class="step-button" disabled>次へ →</button>
           </div>
         </section>

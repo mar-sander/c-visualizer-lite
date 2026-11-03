@@ -516,6 +516,73 @@ h2 {
   font-variant-numeric: tabular-nums
 }
 
+.step-navigator {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px
+}
+
+.step-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  min-width: 0;
+  height: 44px;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  accent-color: var(--mint);
+  touch-action: pan-y
+}
+
+.step-slider::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--line-strong)
+}
+
+.step-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  margin-top: -4.5px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--mint)
+}
+
+.step-slider::-moz-range-track {
+  height: 3px;
+  border: 0;
+  border-radius: 2px;
+  background: var(--line-strong)
+}
+
+.step-slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--mint)
+}
+
+.step-slider:focus-visible {
+  outline: 2px solid var(--mint);
+  outline-offset: 2px;
+  border-radius: 4px
+}
+
+@media (max-width: 400px) {
+  .step-controls .step-button {
+    min-width: 76px;
+    padding-inline: 8px
+  }
+}
+
 .action-area {
   margin-top: 16px
 }
