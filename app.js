@@ -925,6 +925,10 @@ function showIdle(title, message){
   $('step-prev').disabled = true;
   $('step-next').disabled = true;
   $('step-count').textContent = '— / —';
+  $('step-slider').disabled = true;
+  $('step-slider').max = '1';
+  $('step-slider').value = '1';
+  $('step-slider').removeAttribute('aria-valuetext');
   outputCard.hidden = false;
 }
 
@@ -956,10 +960,10 @@ function renderLiteArray(array, showAccess = false){
     element('span', 'lite-array-type', `${array.type}[${array.length}]`));
   card.append(header);
   const accesses = showAccess ? array.accesses || [] : [];
-  const variableAccess = accesses.find(access => access.indexKind === 'variable');
-  if(variableAccess && Number.isInteger(variableAccess.resolvedIndex)){
+  for(const variableAccess of accesses.filter(access => access.indexKind === 'variable')){
+    if(!Number.isInteger(variableAccess.resolvedIndex)) continue;
     card.append(element('div', 'lite-array-resolution',
-      `${array.name}[${variableAccess.sourceIndex}] → ${array.name}[${variableAccess.resolvedIndex}]`));
+      `${variableAccess.role ? variableAccess.role + '：' : ''}${array.name}[${variableAccess.sourceIndex}] → ${array.name}[${variableAccess.resolvedIndex}]${variableAccess.role ? `（${variableAccess.value}）` : ''}`));
   }
   const scroll = element('div', 'lite-array-scroll');
   scroll.tabIndex = 0;
@@ -968,9 +972,11 @@ function renderLiteArray(array, showAccess = false){
   const row = element('div', 'lite-array-row');
   array.values.forEach((value, index) => {
     const display = array.initialized[index] ? String(value) : '—';
-    const access = accesses.find(item => item.index === index);
-    const label = access?.mode === 'read' ? '参照' : access?.mode === 'write' ? '代入' : '';
+    const cellAccesses = accesses.filter(item => item.index === index);
+    const access = cellAccesses.find(item => item.mode === 'write') || cellAccesses[0];
+    const label = cellAccesses.map(item => item.role || (item.mode === 'read' ? '参照' : '代入')).join('／');
     const cell = element('div', 'lite-array-cell');
+    if(cellAccesses.length > 1) cell.style.minWidth = `${Math.max(58, label.length * 12 + 16)}px`;
     cell.setAttribute('aria-label', `${array.name}[${index}]：${array.initialized[index] ? display : 'まだ値を入れていない'}${label ? `、${label}` : ''}`);
     if(label){
       cell.dataset.access = access.mode;
@@ -1254,6 +1260,15 @@ function renderStep(){
         ? describeScanfPurpose(step.scanfInput)
       : decodeEngineExplanation(step.text))
   );
+  if(step.arrayLoopContext?.length){
+    const indexNames = new Set((step.arrayViews || []).flatMap(view => view.accesses || [])
+      .map(access => access.indexVariable).filter(Boolean));
+    const values = step.variablesAtStep.filter(([name]) => indexNames.has(name))
+      .map(([name, value]) => `${name} = ${value}`);
+    explanation.append(element('p', 'array-loop-context',
+      step.arrayLoopContext.map(item => `${item.label}：${item.state}`).join(' ／ ') +
+      (values.length ? ` ｜ ${values.join('、')}` : '')));
+  }
   const decision = step.branchDecision ? renderDecisionStep(step.branchDecision)
     : step.loopDecision?.kind === 'for' ? renderForDecisionStep(step.loopDecision)
     : step.loopDecision?.kind === 'while' ? renderWhileDecisionStep(step.loopDecision) : null;
@@ -1292,6 +1307,10 @@ function renderStep(){
   $('step-prev').disabled = false;
   $('step-next').disabled = false;
   $('step-count').textContent = `${activeStep + 1} / ${currentSteps.length}`;
+  $('step-slider').disabled = false;
+  $('step-slider').max = String(currentSteps.length);
+  $('step-slider').value = String(activeStep + 1);
+  $('step-slider').setAttribute('aria-valuetext', `STEP ${activeStep + 1} / ${currentSteps.length}`);
   outputCard.hidden = false;
   setOutput(step.outputAtStep);
   $('feedback').textContent = '';
@@ -1608,6 +1627,17 @@ $('step-next').addEventListener('click', () => {
   if(!hasCurrentResult() || activeStep < 0) return;
   if(activeStep === currentSteps.length - 1) showResultPage();
   else { activeStep++; renderStep(); }
+});
+$('step-slider').addEventListener('input', event => {
+  if(!hasCurrentResult() || activeStep < 0 || !currentSteps.length) return;
+  const index = Math.max(0, Math.min(currentSteps.length - 1, event.target.valueAsNumber - 1));
+  if(!Number.isInteger(index) || index === activeStep) return;
+  const navigatorTop = event.target.getBoundingClientRect().top;
+  activeStep = index;
+  renderStep();
+  // CodeMirrorの行追従やSTEPごとの高さ変化で、操作中のつまみが画面外へ逃げないようにします。
+  const shift = event.target.getBoundingClientRect().top - navigatorTop;
+  if(Math.abs(shift) > 0.5) window.scrollBy({top:shift, left:0, behavior:'instant'});
 });
 $('step-prev').addEventListener('click', () => {
   if(!hasCurrentResult() || activeStep < 0) return;

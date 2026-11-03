@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>L-ARRAY4 RC2 STEP Navigator 検証</title><body><h1>L-ARRAY4 RC2 STEP Navigator 検証</h1>
+<p id="counts">実行中</p><ol id="results"></ol>
+<script>window.navigatorTextbookCode="#include <stdio.h>\n\nint main(void){\n    int i, j, d, kokugo[5] = {75, 26, 93, 49, 100};\n\n    for(i = 0; i < 4; i++){\n        for(j = i + 1; j < 5; j++){\n            if(kokugo[i] < kokugo[j]){\n                d = kokugo[i];\n                kokugo[i] = kokugo[j];\n                kokugo[j] = d;\n            }\n        }\n    }\n\n    for(i = 0; i < 5; i++){\n        printf(\"kokugo[%d] = %d\\n\", i, kokugo[i]);\n    }\n\n    return 0;\n}\n";</script>
+<script>// FLOW STEP Navigator focused tests. No full regression suite is started here.
+(async () => {
+  const rows = [];
+  const record = (name, pass, detail = '') => rows.push({name, pass:!!pass, detail});
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const frame = document.createElement('iframe');
+  frame.title = 'STEP Navigator検証';
+  frame.style.cssText = 'position:fixed;left:-10000px;width:1200px;height:1000px;border:0';
+  const loaded = new Promise(resolve => frame.addEventListener('load', resolve, {once:true}));
+  frame.src = 'index.html'; document.body.append(frame);
+  try {
+    await loaded;
+    const ui = frame.contentWindow, doc = ui.document;
+    const editor = doc.querySelector('.CodeMirror').CodeMirror;
+    const slider = doc.getElementById('step-slider');
+    record('未実行時はスライダー無効', slider.disabled && doc.getElementById('step-count').textContent === '— / —');
+    const run = async code => {
+      editor.setValue(code); ui.executeCode('input');
+      for(let n = 0; n < 200 && !doc.querySelector('.result-flow-button'); n++) await new Promise(r => setTimeout(r, 10));
+      return ui.cVisualizerLiteResult;
+    };
+    const r = await run(window.navigatorTextbookCode);
+    record('RC1ソート・97 STEP', !r.hasWarnings && r.steps.length === 97 && r.output === 'kokugo[0] = 100\nkokugo[1] = 93\nkokugo[2] = 75\nkokugo[3] = 49\nkokugo[4] = 26\n');
+    const frozen = JSON.stringify(r), history = ui.eval('JSON.stringify(historyEntries)'), summary = doc.querySelector('.final-summary').textContent;
+    const calls = {run:0, engine:0, history:0};
+    for(const [name, key] of [['executeCode','run'], ['visualizeCode','engine'], ['saveHistory','history']]) {
+      const original = ui[name]; ui[name] = (...args) => { calls[key]++; return original(...args); };
+    }
+    doc.querySelector('.result-flow-button').click();
+    const jump = n => {slider.value = String(n); slider.dispatchEvent(new ui.Event('input', {bubbles:true}));};
+    const observe = n => {
+      const step = r.steps[n - 1], cards = [...doc.querySelectorAll('#flow-content .lite-array-card')];
+      return slider.value === String(n) && slider.min === '1' && slider.max === String(r.steps.length) && !slider.disabled &&
+        doc.getElementById('step-count').textContent === n + ' / ' + r.steps.length &&
+        doc.querySelector('.step-top').textContent.includes('STEP ' + String(n).padStart(2,'0')) &&
+        doc.getElementById('output-value').textContent === (step.outputAtStep || '—') &&
+        cards.length === (step.arrayViews || []).length && (step.arrayViews || []).every((view, j) =>
+          same([...cards[j].querySelectorAll('.lite-array-value')].map(x => x.textContent),view.values.map((x,i) => view.initialized[i] ? String(x) : '—')) &&
+          view.accesses.every(a => cards[j].querySelectorAll('.lite-array-cell')[a.index]?.textContent.includes(a.role || (a.mode === 'read' ? '参照' : '代入')))) &&
+        (!step.branchDecision || doc.querySelector('#flow-content .decision-card').textContent.includes(step.branchDecision.result ? 'TRUE' : 'FALSE'));
+    };
+    for(const n of [1,97,13,1,9,10,11,12,13,14,15,14,13,95,96,97,1]) {jump(n);record('直接移動 '+n+'：snapshot・OUTPUT・強調・判定',observe(n));}
+    for(const direction of ['前進', '後退']) {
+      const order = Array.from({length:r.steps.length},(_,i)=>direction==='前進'?i+1:r.steps.length-i);
+      record('全97 STEPへ任意移動 '+direction, order.every(n=>{jump(n);return observe(n);}));
+    }
+    jump(13);doc.getElementById('step-next').click();record('次へ→スライダー同期',observe(14));
+    doc.getElementById('step-prev').click();record('前へ→スライダー同期',observe(13));
+    jump(1);doc.getElementById('step-prev').click();record('先頭の前へは既存どおりRESULT',!!doc.querySelector('.result-state') && doc.getElementById('step-controls').hidden);
+    doc.querySelector('.result-flow-button').click();record('RESULT→FLOWで1へ同期',observe(1));
+    jump(97);doc.getElementById('step-next').click();record('最終の次へは既存どおりRESULT',!!doc.querySelector('.result-state') && doc.getElementById('step-controls').hidden);
+    record('操作によるRUN・解析・履歴追加なし',same(calls,{run:0,engine:0,history:0})&&history===ui.eval('JSON.stringify(historyEntries)'));
+    record('解析snapshot・RESULT・VARIABLES不変',JSON.stringify(r)===frozen&&doc.querySelector('.final-summary').textContent===summary);
+    const rect = node => node.getBoundingClientRect();
+    for(const width of [320,390,768,1024,1440]) {
+      frame.style.width = width + 'px';await new Promise(r=>setTimeout(r,50));
+      doc.querySelector('.result-flow-button').click();jump(13);
+      const a=rect(slider),b=rect(doc.getElementById('step-count')),p=rect(doc.getElementById('step-prev')),next=rect(doc.getElementById('step-next'));
+      record(width+'px：スライダー上・番号下・左右ボタン・横溢れなし',a.bottom<=b.top&&p.right<=a.left&&a.right<=next.left&&a.width>=60&&doc.documentElement.scrollWidth<=width);
+      jump(97);doc.getElementById('step-next').click();
+    }
+    // Restore wrappers before running new inputs; only navigation is forbidden from invoking them.
+    const one = await run('#include <stdio.h>\nint main(void){\nreturn 0;\n}');
+    doc.querySelector('.result-flow-button').click();jump(1);
+    record('1 STEP：範囲1..1・inputで不変',one.steps.length===1&&slider.min==='1'&&slider.max==='1'&&slider.value==='1'&&doc.getElementById('step-count').textContent==='1 / 1');
+    const few = await run('#include <stdio.h>\nint main(void){\nint x = 1;\nprintf("%d", x);\nreturn 0;\n}');
+    doc.querySelector('.result-flow-button').click();jump(few.steps.length);
+    record('少数STEP：再RUN後に範囲更新・最終OUTPUT',few.steps.length===3&&slider.max==='3'&&slider.value==='3'&&doc.getElementById('output-value').textContent==='1');
+    editor.setValue('');ui.executeCode('input');
+    record('無効化後に古いSTEPへ移動しない',doc.getElementById('step-controls').hidden||slider.disabled);
+  } catch(e) { record('検証例外',false,String(e.stack||e)); }
+  finally {frame.remove();}
+  window.navigatorTestResults={total:rows.length,pass:rows.filter(x=>x.pass).length,fail:rows.filter(x=>!x.pass).length,rows};
+  document.getElementById('counts').textContent=window.navigatorTestResults.pass+' PASS / '+window.navigatorTestResults.fail+' FAIL';
+  for(const row of rows){const li=document.createElement('li');li.textContent=(row.pass?'PASS ':'FAIL ')+row.name+(row.detail?' — '+row.detail:'');document.getElementById('results').append(li);}
+})();
+</script></body></html>

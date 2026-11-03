@@ -3328,14 +3328,14 @@
         expect:{ output:'1', warningMax:0 }
       },
       {
-        name:'Stage1B 複数array readはunsupported維持',
+        name:'L-ARRAY4 対応へ移行：Stage1B 複数array read',
         code:makeMainCode(`    int a[2] = {1, 2};\n    int x = 0;\n    x = a[0] + a[1];\n    return 0;`),
-        expect:{ variables:['x = 0'], warningMin:1, hintsInclude:['1つの文で複数要素を使う形'] }
+        expect:{ variables:['x = 3'], warningMax:0 }
       },
       {
-        name:'Stage1B 同一statementのreadとwriteはunsupported維持',
+        name:'L-ARRAY4 対応へ移行：Stage1B 同一statementのreadとwrite',
         code:makeMainCode(`    int a[2] = {1, 2};\n    a[1] = a[0] + 1;\n    return 0;`),
-        expect:{ arrays:[{ name:'a', values:['1', '2'] }], warningMin:1, hintsInclude:['同じ文での配列参照／代入は未対応'] }
+        expect:{ arrays:[{name:'a',values:['1','2']}], warningMax:0 }
       },
       {
         name:'Stage1B if内array accessはunsupported維持',
@@ -3415,14 +3415,14 @@
         expect:{ arrays:[{ name:'a', values:['1'] }], warningMin:1, hintsInclude:['配列要素の更新演算'] }
       },
       {
-        name:'Stage2A 複数variable index readはunsupported維持',
+        name:'L-ARRAY4 対応へ移行：Stage2A 複数variable index read',
         code:makeMainCode(`    int a[2] = {1, 2};\n    int i = 0;\n    int j = 1;\n    int x = 9;\n    x = a[i] + a[j];\n    return 0;`),
-        expect:{ variables:['x = 9'], warningMin:1, hintsInclude:['1つの文で複数要素を使う形'] }
+        expect:{ variables:['x = 3'], warningMax:0 }
       },
       {
-        name:'Stage2A variable index read＋writeはunsupported維持',
+        name:'L-ARRAY4 対応へ移行：Stage2A variable index read＋write',
         code:makeMainCode(`    int a[2] = {1, 2};\n    int i = 0;\n    int j = 1;\n    a[i] = a[j];\n    return 0;`),
-        expect:{ arrays:[{ name:'a', values:['1', '2'] }], warningMin:1, hintsInclude:['同じ文での配列参照／代入は未対応'] }
+        expect:{ arrays:[{name:'a',values:['2','2']}], warningMax:0 }
       },
       {
         name:'Stage2A if内variable index accessはunsupported維持',
@@ -3522,9 +3522,9 @@
         expect:{ arrays:[{ name:'a', values:['1'] }], variables:['i = 9'], warningMin:1, hintsInclude:['要素更新は実行しません'] }
       },
       {
-        name:'Stage2B for bodyのmultiple accessはunsupported維持',
+        name:'L-ARRAY4 対応へ移行：Stage2B for bodyのmultiple access',
         code:makeMainCode(`    int a[2] = {1, 2};\n    int i = 9;\n    int sum = 0;\n    for(i = 0; i < 1; i++){\n        sum = a[i] + a[0];\n    }\n    return 0;`),
-        expect:{ variables:['i = 9', 'sum = 0'], warningMin:1, hintsInclude:['複数要素の使用'] }
+        expect:{ variables:['i = 1','sum = 2'], warningMax:0 }
       },
       {
         name:'Stage2B for bodyのarray scanfはunsupported維持',
@@ -3533,14 +3533,14 @@
         expect:{ arrays:[{ name:'a', values:['—'] }], variables:['i = 9'], warningMin:1, hintsInclude:['for文内のscanfは未対応'] }
       },
       {
-        name:'Stage2B for内ifのarray accessはunsupported維持',
+        name:'L-ARRAY4 対応へ移行：Stage2B for内ifのarray access',
         code:makeMainCode(`    int a[1] = {1};\n    int i = 9;\n    for(i = 0; i < 1; i++){\n        if(i == 0){\n            printf("%d", a[i]);\n        }\n    }\n    return 0;`),
-        expect:{ output:'出力はまだありません。', variables:['i = 9'], warningMin:1, hintsInclude:['この場所での配列要素の参照／代入は未対応'] }
+        expect:{ output:'1',variables:['i = 1'],warningMax:0 }
       },
       {
-        name:'Stage2B nested for内array accessはunsupported維持',
+        name:'L-ARRAY4 対応へ移行：Stage2B nested for内array access',
         code:makeMainCode(`    int a[1] = {1};\n    int i = 9;\n    int j = 9;\n    for(i = 0; i < 1; i++){\n        for(j = 0; j < 1; j++){\n            printf("%d", a[i]);\n        }\n    }\n    return 0;`),
-        expect:{ output:'出力はまだありません。', variables:['i = 9', 'j = 9'], warningMin:1, hintsInclude:['入れ子for内の配列操作は未対応'] }
+        expect:{ output:'1',variables:['i = 1','j = 1'],warningMax:0 }
       },
       {
         name:'Stage2B for header内array accessはunsupported維持',
@@ -3633,9 +3633,9 @@
         expect:{ output:'出力はまだありません。', warningMin:1, hintsInclude:['配列 a は宣言されていません'], executedExcludes:['printf("WRONG'] }
       },
       {
-        name:'Stage3C scalar initializerのmultiple array accessは非対応維持',
+        name:'L-ARRAY4 scalar initializerのmultiple array access',
         code:makeMainCode(`    int a[2] = {1, 2};\n    int x = a[0] + a[1];\n    return 0;`),
-        expect:{ arrays:[{ name:'a', values:['1', '2'] }], warningMin:1, hintsInclude:['1つの文で複数要素を使う形'] }
+        expect:{ arrays:[{ name:'a', values:['1', '2'] }], variables:['x = 3'], warningMax:0 }
       },
       {
         name:'Stage3C prototype系identifierをarrayとして保存・参照可能',
@@ -8914,8 +8914,8 @@
       r=run('int a[10] = {0};\nint i;\n'+loop(10,'a[i] = i + 1;\nif(i == 7){\nreturn 0;\n}')+'\nprintf("WRONG");');
       record('圧縮後のreturn: 最終反復前snapshotと更新停止',!r.hasWarnings&&r.output===''&&new Map(r.variables).get('i')==='7'&&same(r.arrays[0].values,[1,2,3,4,5,6,7,8,0,0])&&same(r.steps.find(s=>s.stepKind==='loop-omission').arrayViews[0].values,[1,2,3,4,5,6,7,0,0,0]));
       for(const [name,body] of [
-        ['0回for内if','int a[1] = {0};\nint i;\nfor(i = 0; i < 0; i++){\nif(i == 0){\na[i] = 8;\n}\n}'],
-        ['二重for','int a[1] = {0};\nint i;\nint j;\nfor(i = 0; i < 1; i++){\nfor(j = 0; j < 1; j++){\na[j] = 8;\n}\n}'],
+        ['0回for内ifの未対応更新','int a[1] = {0};\nint i;\nfor(i = 0; i < 0; i++){\nif(i == 0){\na[i]++;\n}\n}'],
+        ['二重forの未対応更新','int a[1] = {0};\nint i;\nint j;\nfor(i = 0; i < 1; i++){\nfor(j = 0; j < 1; j++){\na[j]++;\n}\n}'],
         ['forヘッダ','int a[1] = {0};\nint i;\nfor(i = 0; i < a[0]; i++){\nprintf("WRONG");\n}'],
         ['while内配列','int a[1] = {0};\nint i = 0;\nwhile(i < 1){\na[i] = 8;\ni++;\n}']
       ]){
@@ -9010,8 +9010,8 @@
         ['配列でない','int a = 5;','x < a[i]','x = a[i];'],
         ['本文read失敗','int a[2];','i == 1','x = a[i];'],
         ['複雑添字','int a[2] = {5};','x < a[i+1]','x = a[i];'],
-        ['複数read','int a[2] = {5};','a[0] < a[i]','x = a[i];'],
-        ['本文write拒否','int a[2] = {5};','i == 1','a[i] = 9;'],
+        ['複数read右側範囲外','int a[2] = {5};','a[0] < a[2]','x = a[i];'],
+        ['本文write範囲外','int a[2] = {5};','i == 1','a[2] = 9;'],
         ['入れ子if拒否','int a[2] = {5};','i == 1','if(x < a[i]){\nx = a[i];\n}']
       ]){const r=run(decl+'\nint i;\nint x = 0;\nfor(i = 1; i < 2; i++){\nif('+condition+'){\n'+body+'\n}\n}\nprintf("WRONG");\nreturn 0;');record(name+' 安全停止',r.hasWarnings&&r.output===''&&new Map(r.variables).get('x')==='0');}
       for(const decl of ['int i, x, a[2] = {1, 2, 3};','int i, x, a[2], x;','int i, x = missing, a[2];','int a[2], i, a;','int i,,a[2];','float i, a[2];','int i = 3, a[2], x = 1 / 0;']){const r=run(decl+'\nprintf("WRONG");\nreturn 0;');record('原子性 '+decl,r.hasWarnings&&r.output===''&&r.variables.length===0&&r.arrays.length===0);}
@@ -9047,6 +9047,53 @@
       return results;
     }
 
+    function array4Code(values, ascending=false, name='data', limit=values.length-1){
+      return makeMainCode('int i, j, d, '+name+'['+values.length+'] = {'+values.join(',')+'};\nfor(i = 0; i < '+limit+'; i++){\nfor(j = i + 1; j < '+values.length+'; j++){\nif('+name+'[i] '+(ascending?'>':'<')+' '+name+'[j]){\nd = '+name+'[i];\n'+name+'[i] = '+name+'[j];\n'+name+'[j] = d;\n}\n}\n}\nfor(i = 0; i < '+values.length+'; i++){\nprintf("'+name+'[%d] = %d\\n", i, '+name+'[i]);\n}\nreturn 0;');
+    }
+    function checkArray4Cases(){
+      const results=[],same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+      const record=(name,ok,detail='')=>results.push({testCase:{name:'L-ARRAY4 '+name},result:{passed:!!ok,failures:ok?[]:[detail||name],actual:{output:'全比較・逐次代入・安全性',warningCount:0}}});
+      const run=code=>{document.getElementById('codeInput').value=code;document.getElementById('scanfInput').value='';visualizeCode();return window.cVisualizerLiteResult;};
+      for(const values of [[75,26,93,49,100],[7,7,2,7],[-4,0,8,-1],[1,2,3,4],[4,3,2,1],[0],[5,5,5], [3,8]])for(const ascending of [false,true]){
+        const name=values.length===5?'kokugo':'scores',code=array4Code(values,ascending,name),r=run(code),a=[...values];let d=null,cursor=0;
+        const events=r.steps.filter(s=>s.branchDecision||code.split('\n')[s.lineNo-1]?.trim().match(/^(?:d =|scores\[[ij]\] =|kokugo\[[ij]\] =)/));
+        for(let i=0;i<a.length-1;i++)for(let j=i+1;j<a.length;j++){
+          const label=values+' '+ascending+' '+i+','+j,truth=ascending?a[i]>a[j]:a[i]<a[j],step=events[cursor++],accesses=step?.arrayViews?.[0]?.accesses;
+          record(label+' 比較・独立添字',step?.branchDecision?.result===truth&&same(step.arrayViews[0].values,a)&&same(accesses?.map(x=>[x.index,x.value]),[[i,a[i]],[j,a[j]]])&&new Map(step.variablesAtStep).get('i')===String(i)&&new Map(step.variablesAtStep).get('j')===String(j));
+          if(truth){d=a[i];let st=events[cursor++];record(label+' 一時変数代入',new Map(st?.variablesAtStep).get('d')===String(d)&&same(st?.arrayViews[0].values,a));const old=a[i];a[i]=a[j];st=events[cursor++];record(label+' 配列から配列',same(st?.arrayViews[0].values,a)&&same(st?.arrayViews[0].accesses.map(x=>[x.mode,x.index,x.value]),[['read',j,a[j]],['write',i,a[j]]])&&st.arrayViews[0].accesses[1].previousValue===old);const prev=a[j];a[j]=d;st=events[cursor++];record(label+' 変数から配列',same(st?.arrayViews[0].values,a)&&st.arrayViews[0].accesses[0].previousValue===prev);}
+        }
+        record(values+' '+ascending+' 全イベント・最終出力',cursor===events.length&&!r.hasWarnings&&same(r.arrays[0].values,a)&&r.output===a.map((x,i)=>name+'['+i+'] = '+x+'\n').join(''));
+      }
+      let r=run(array4Code([3,1,2],false,'a',0));record('外側0反復',!r.hasWarnings&&same(r.arrays[0].values,[3,1,2])&&!r.steps.some(s=>s.branchDecision));
+      for(const [label,body,expected] of [
+        ['複数配列・同一要素read/write','int a[2] = {4,7};\nint b[2] = {2,3};\nint x = 0;\nx = a[0] + a[1] + b[1];\na[0] = a[0] + b[0];\nprintf("%d %d %d", x, a[0], b[1]);','14 6 3'],
+        ['内側0反復','int i, j, a[1] = {8};\nfor(i = 0; i < 2; i++){\nfor(j = 1; j < 1; j++){\na[0] = 0;\n}\n}\nprintf("%d", a[0]);','8'],
+        ['条件false時に不正添字を評価しない','int i, a[1] = {3};\nfor(i = 0; i < 1; i++){\nif(i == 9){\na[9] = a[10];\n}\n}\nprintf("%d", a[0]);','3']
+      ]){r=run(makeMainCode(body+'\nreturn 0;'));record(label,!r.hasWarnings&&r.output===expected);}
+      for(const [label,decl,statement] of [
+        ['範囲外RHS','int a[2] = {8,9};','a[0] = a[2];'],['未初期化RHS','int a[2];\na[0] = 8;','a[0] = a[1];'],['非int添字','int a[2] = {8,9};\nfloat k = 0.0f;','a[0] = a[k];'],['未宣言添字','int a[2] = {8,9};','a[0] = a[k];'],['負添字','int a[2] = {8,9};','a[-1] = a[0];'],['式途中失敗','int a[2] = {8,9};','a[0] = a[1] / 0;'],['複数read右失敗','int a[2] = {8,9};','a[0] = a[1] + a[2];']
+      ]){r=run(makeMainCode(decl+'\n'+statement+'\nprintf("WRONG");\nreturn 0;'));record(label+' 誤代入なし',r.hasWarnings&&r.output===''&&r.arrays[0].values[0]===8);}
+      for(const bad of ['a[j + 1] = a[0];','a[0] += a[1];','a[0] = mystery(a[1]);','a[0] = a[1]++;']){r=run(makeMainCode('int i = 9, j = 0, a[2] = {8,9};\nfor(i = 0; i < 2; i++){\na[0] = 1;\nif(i == 0){\n'+bad+'\n}\n}\nprintf("WRONG");'));record('事前停止 '+bad,r.hasWarnings&&r.output===''&&new Map(r.variables).get('i')==='9'&&same(r.arrays[0].values,[8,9]));}
+      // A different algorithm using only supported simple indices: selection via a tracked index.
+      r=run(makeMainCode('int i, j, m, d, a[4] = {3,8,1,5};\nfor(i = 0; i < 3; i++){\nm = i;\nfor(j = i + 1; j < 4; j++){\nif(a[j] > a[m]){\nm = j;\n}\n}\nd = a[i];\na[i] = a[m];\na[m] = d;\n}\nprintf("%d %d %d %d", a[0],a[1],a[2],a[3]);'));record('P1 別方式・選択ソート',!r.hasWarnings&&r.output==='8 5 3 1');
+      return results;
+    }
+    async function checkArray4UiCases(){
+      const frame=createUiTestFrame(),results=[],same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+      const record=(name,ok)=>results.push({testCase:{name:'L-ARRAY4 UI '+name},result:{passed:!!ok,failures:ok?[]:[name],actual:{output:'STEP/RESULT/履歴',warningCount:0}}});
+      try{
+        await new Promise(r=>frame.addEventListener('load',r,{once:true}));const ui=frame.contentWindow,doc=ui.document,cm=doc.querySelector('.CodeMirror').CodeMirror;
+        for(const values of [[75,26,93,49,100],[1,2,3,4,5,6,7,8,9]]){
+          const code=array4Code(values,false,'kokugo');cm.setValue(code);ui.executeCode('input');await waitForUiResult(ui);const r=ui.cVisualizerLiteResult,frozen=JSON.stringify(r);record(values.length+' RUN',!r.hasWarnings);
+          const observe=k=>{const step=r.steps[k],cards=[...doc.querySelectorAll('#flow-content .lite-array-card')];return cards.length===(step.arrayViews||[]).length&&(step.arrayViews||[]).every((view,j)=>same([...cards[j].querySelectorAll('.lite-array-value')].map(el=>el.textContent),view.values.map((v,i)=>view.initialized[i]?String(v):'—'))&&view.accesses.every(a=>{const cell=cards[j].querySelectorAll('.lite-array-cell')[a.index];return cell?.textContent.includes(a.role||(a.mode==='read'?'参照':'代入'))}))&&doc.getElementById('output-value').textContent===(step.outputAtStep||'—');};
+          doc.querySelector('.result-flow-button').click();let forward=true,back=true;for(let k=0;k<r.steps.length;k++){forward=observe(k)&&forward;if(r.steps[k].branchDecision){const context=doc.querySelector('.array-loop-context')?.textContent||'';forward=forward&&context.includes('外側for')&&context.includes('内側for')&&context.includes('i = ')&&context.includes('j = ');}doc.getElementById('step-next').click();}record(values.length+' 全STEP前進・反復位置・役割・配列・出力',forward);
+          doc.querySelector('.result-flow-button').click();for(let k=1;k<r.steps.length;k++)doc.getElementById('step-next').click();for(let k=r.steps.length-1;k>=0;k--){back=observe(k)&&back;doc.getElementById('step-prev').click();}record(values.length+' 全STEP後退・不変性',back&&JSON.stringify(r)===frozen);
+          const entry=ui.eval('historyEntries[0]');record(values.length+' 履歴・JSON・最終配列',entry.code===code&&entry.output===r.output&&entry.variables.some(([name,value])=>name==='kokugo (int['+values.length+'])'&&value==='['+r.arrays[0].values.join(', ')+']')&&same(ui.parseHistoryImport(JSON.stringify({version:1,entries:[entry]}))[0].variables,entry.variables));
+          record(values.length+' 圧縮STEP',r.steps.some(s=>s.stepKind==='loop-omission')===(values.length===9));
+        }
+      }catch(e){record('例外 '+e,false)}finally{frame.remove()}return results;
+    }
+
     async function runAllTests(){
       const results = testCases.map(testCase => ({ testCase, result:checkCase(testCase) }));
       results.push(...await checkDecisionUiCases());
@@ -9068,6 +9115,8 @@
       results.push(...await checkArrayForUiCases());
       results.push(...checkArrayConditionalCases());
       results.push(...await checkArrayConditionalUiCases());
+      results.push(...checkArray4Cases());
+      results.push(...await checkArray4UiCases());
       const passed = results.filter(item => item.result.passed).length;
       const failed = results.length - passed;
 

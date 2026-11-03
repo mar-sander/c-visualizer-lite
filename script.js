@@ -1247,9 +1247,6 @@ function evaluateArithmeticExpression(expr, variables, resolveArrayAccess = null
       if(!resolveArrayAccess){
         return { ok:false, error:'この場所での配列要素の参照は現在未対応です。' };
       }
-      if(arrayAccesses.length >= 1){
-        return { ok:false, error:'1つの式で複数の配列要素を参照する形は現在未対応です。' };
-      }
       const resolved = resolveArrayAccess(arrayAccess);
       if(!resolved.ok) return resolved;
       arrayAccesses.push(resolved.access);
@@ -1378,7 +1375,7 @@ function stripWrappingParentheses(expr){
 
 // 条件チェーンの事前検査専用。変数の値や型を参照せず、演算も行いません。
 // 未到達の式の0除算・未初期化等は実行時まで評価しません。
-function inspectConditionalExpressionSyntax(expression){
+function inspectConditionalExpressionSyntax(expression, allowArrays = false){
   const source = stripWrappingParentheses(expression);
   const found = findComparison(source);
   if(!found.ok) return false;
@@ -1400,6 +1397,7 @@ function inspectConditionalExpressionSyntax(expression){
         return true;
       }
       if(token?.startsWith("'")) return parseCharacterLiteral(token).ok;
+      if(allowArrays && parseSupportedArrayAccess(token)) return true;
       return token !== undefined && /^(?:[A-Za-z_]\w*|\d+|(?:\d+\.\d*|\.\d+)[fF]?)$/.test(token);
     }
     function term(){
@@ -1443,13 +1441,8 @@ function evaluateExpression(expr, variables, resolveArrayAccess = null, variable
   if(!left.ok) return left;
   const right = evaluateArithmeticExpression(rightExpr, variables, resolveArrayAccess, variableTypes);
   if(!right.ok){
-    if(left.arrayAccess && !right.access && !right.arrayAccess){
-      return { ...right, arrayAccess:left.arrayAccess };
-    }
-    return right;
-  }
-  if(left.arrayAccess && right.arrayAccess){
-    return { ok:false, error:'1つの式で複数の配列要素を参照する形は現在未対応です。' };
+    return { ...right, arrayAccess:right.arrayAccess || left.arrayAccess || null,
+      arrayAccesses:[...(left.arrayAccesses || []), ...(right.arrayAccesses || [])] };
   }
 
   const conditions = {
@@ -1469,6 +1462,7 @@ function evaluateExpression(expr, variables, resolveArrayAccess = null, variable
     readable:`${left.readable} ${operator} ${right.readable}`,
     usedVars:[...left.usedVars, ...right.usedVars],
     arrayAccess:left.arrayAccess || right.arrayAccess || null,
+    arrayAccesses:[...(left.arrayAccesses || []).map(a => ({...a, role:'比較左辺'})), ...(right.arrayAccesses || []).map(a => ({...a, role:'比較右辺'}))],
     comparison:{
       operator,
       leftValue:left.value,
@@ -1702,6 +1696,23 @@ function visualizeCode(){
     };
   }
 
+  function makeArrayViews(accesses){
+    const views = new Map();
+    for(const access of accesses){
+      if(!access) continue;
+      if(!views.has(access.name)){
+        const view = makeArrayView(access, true);
+        if(!view) continue;
+        views.set(access.name, view);
+      }
+      views.get(access.name).accesses.push({...access});
+    }
+    return [...views.values()];
+  }
+  function resultArrayViews(result){
+    return makeArrayViews(result.arrayAccesses || (result.arrayAccess ? [result.arrayAccess] : []));
+  }
+
   function resolveArrayLocation(access){
     const symbolKind = getSymbolKind(access.name);
     if(symbolKind === null){
@@ -1863,14 +1874,14 @@ function visualizeCode(){
         lineNo,
         `${stepPrefix}${escapeHtml(resolutionExplanation)}${name} の中身に ${escapeHtml(assigned)} を代入しました。計算：${escapeHtml(result.readable)} = ${escapeHtml(assigned)}`,
         true,
-        result.arrayAccess ? [makeArrayView(result.arrayAccess)] : []
+        resultArrayViews(result)
       );
     }else{
       addStep(
         lineNo,
         `${stepPrefix}${escapeHtml(resolutionExplanation)}${name} の中身を ${escapeHtml(beforeDisplay)} から ${escapeHtml(assigned)} に変えました。計算：${escapeHtml(result.readable)} = ${escapeHtml(assigned)}`,
         true,
-        result.arrayAccess ? [makeArrayView(result.arrayAccess)] : []
+        resultArrayViews(result)
       );
     }
     return { ok:true, value:converted.value, arrayAccess:result.arrayAccess || null };
@@ -2089,7 +2100,7 @@ function visualizeCode(){
 
     let hasSupportedArrayRead = false;
     if(containsArrayElementSyntax(structuralCode)){
-      if(insideWhile || (insideIf && !(allowConditionalArrayRead && isArrayReadAssignment(structuralCode)))){
+      if(insideWhile || (insideIf && !(allowConditionalArrayRead && isArrayReadAssignment(trimmed)))){
         return stopArrayLine(
           'この場所の配列操作は未対応',
           '現在のVisualizerでは、配列要素の参照・代入はmain直下、またはmain直下にあるfor文の本体へ直接書いた文だけで実行できます。if／while内では実行しません。'
@@ -2102,12 +2113,6 @@ function visualizeCode(){
       if(arrayWriteMatch){
         const access = parseSupportedArrayAccess(arrayWriteMatch[1]);
         const expr = arrayWriteMatch[2].trim();
-        if(containsArrayElementSyntax(codeOutsideStringAndLineComment(expr))){
-          return stopArrayLine(
-            '同じ文での配列参照／代入は未対応',
-            '配列要素へ代入する式の中で、別の配列要素を参照する形は現在未対応です。'
-          );
-        }
 
         const location = resolveArrayLocation(access);
         if(!location.ok){
@@ -2121,7 +2126,7 @@ function visualizeCode(){
           );
         }
 
-        const result = evaluateExpression(expr, variables, null, variableTypes);
+        const result = evaluateExpression(expr, variables, resolveArrayRead, variableTypes);
         if(!result.ok){
           return stopArrayLine(
             '代入する式を計算できません',
@@ -2148,9 +2153,9 @@ function visualizeCode(){
         );
         addStep(
           lineNo,
-          `${escapeHtml(resolutionExplanation)}${access.name}[${writeAccess.resolvedIndex}]は、配列${access.name}の${writeAccess.resolvedIndex}番の要素です。その要素へ${result.value}を代入しました。`,
+          `${escapeHtml(resolutionExplanation)}代入元：${escapeHtml(expr)}（${escapeHtml(result.readable)} = ${result.value}）。代入先：${access.name}[${writeAccess.resolvedIndex}]。${previousValue === UNINITIALIZED ? "未初期化" : previousValue} → ${result.value}。`,
           true,
-          [makeArrayView(writeAccess)]
+          makeArrayViews([...(result.arrayAccesses || []).map(a => ({...a, role:'代入元'})), {...writeAccess, ...(result.arrayAccesses?.length ? {role:'代入先'} : {})}])
         );
         return;
       }
@@ -2163,10 +2168,10 @@ function visualizeCode(){
         /^printf\s*\(/.test(trimmed) ||
         (!insideIf && !insideLoop && /^int\s+[A-Za-z_]\w*\s*=/.test(trimmed));
 
-      if(supportedAccessMatches.length !== 1 || !isSimpleReadStatement){
+      if(!isSimpleReadStatement || (!isSupportedArrayStatement(trimmed) && !( !insideIf && !insideLoop && /^int\s+[A-Za-z_]\w*\s*=/.test(trimmed) && supportedAccessMatches.length >= 1))){
         return stopArrayLine(
           'この配列要素の使い方は未対応',
-          '添字には、整数または宣言済みのint変数を1つだけ使用できます。<code>a[i + 1]</code>のような計算式、1つの文で複数要素を使う形、配列要素の更新演算はまだ実行しません。'
+          '添字には、整数または宣言済みのint変数を1つだけ使用できます。<code>a[i + 1]</code>のような計算式、配列要素の更新演算はまだ実行しません。'
         );
       }
       hasSupportedArrayRead = true;
@@ -2449,7 +2454,7 @@ function visualizeCode(){
           lineNo,
           `${escapeHtml(resolutionExplanation)}${explanation.step}`,
           true,
-          result.arrayAccess ? [makeArrayView(result.arrayAccess)] : []
+          resultArrayViews(result)
         );
       }else{
         if(hasSupportedArrayRead){
@@ -2587,7 +2592,7 @@ function visualizeCode(){
           lineNo,
           `${escapeHtml(resolutionExplanation)}画面に「${escapeHtml(visibleText)}」を表示しました。${charDescriptions.length ? ` 文字 ${charDescriptions.join('、')} を出力しました。` : ''}`,
           true,
-          arrayAccess ? [makeArrayView(arrayAccess)] : []
+          makeArrayViews(results.flatMap(result => result.arrayAccesses || []))
         );
       }else{
         if(hasSupportedArrayRead){
@@ -2753,18 +2758,28 @@ function visualizeCode(){
     return unsupported('分岐内の文は未対応', 'if側・else側に未対応の文があります。if文全体は実行しません。');
   }
 
-  // 配列readの限定解除: main直下forの直接if、単純比較とscalarへのreadのみ。
+  function isSupportedArrayStatement(code){
+    const assignment = code.match(/^([A-Za-z_]\w*(?:\s*\[[^\[\]]+\])?)\s*=\s*(.+);$/);
+    if(assignment){
+      const target = assignment[1].trim();
+      return (/^[A-Za-z_]\w*$/.test(target) || !!parseSupportedArrayAccess(target)) &&
+        inspectConditionalExpressionSyntax(assignment[2], true);
+    }
+    const print = matchSimplePrintfStatement(code);
+    if(!print) return false;
+    const format = parsePrintfFormat(print[1]);
+    const args = print[2] === undefined ? [] : splitArgs(print[2]);
+    return format.ok && args.length === format.specifiers.length &&
+      !(print[2] !== undefined && (!print[2].trim() || /,\s*$/.test(print[2]))) &&
+      args.every(arg => inspectConditionalExpressionSyntax(arg, true));
+  }
+
+  // for内の直接ifだけに配列操作を許可します。入れ子if・whileの既存境界は維持します。
   function isArrayReadAssignment(code){
-    const m = code.match(/^[A-Za-z_]\w*\s*=\s*(.+);$/);
-    return !!m && !!parseSupportedArrayAccess(m[1]);
+    return isSupportedArrayStatement(code);
   }
   function isArrayReadCondition(code){
-    const found = findComparison(code);
-    if(!found.ok || !found.comparison) return false;
-    const c = found.comparison;
-    const left = code.slice(0,c.index).trim(), right = code.slice(c.index+c.operator.length).trim();
-    const scalar = value => /^[A-Za-z_]\w*$/.test(value);
-    return (!!parseSupportedArrayAccess(left) && scalar(right)) || (scalar(left) && !!parseSupportedArrayAccess(right));
+    return inspectConditionalExpressionSyntax(code, true);
   }
 
   function inspectSupportedIf(startIndex, options = {}){
@@ -2843,7 +2858,7 @@ function visualizeCode(){
           );
         }
 
-        if(containsArrayElementSyntax(structuralCode) && !(options.allowArrayRead && depth === 1 && isArrayReadAssignment(structuralCode))){
+        if(containsArrayElementSyntax(structuralCode) && !(options.allowArrayRead && depth === 1 && isArrayReadAssignment(executableLines[index].trim()))){
           return failure(
             'この場所での配列要素の参照／代入は未対応',
             'このStageでは配列要素へアクセスできないため、外側のif文全体は実行しません。'
@@ -3290,7 +3305,7 @@ function visualizeCode(){
         : (conditionMet ? '波かっこの中の処理を実行します。' : '波かっこの中の処理は実行しません。');
       if(nested){
         addAnalysis(analysis, lineNo, `入れ子のif文の条件 <code>${escapeHtml(node.condition)}</code> を判定しました。${conditionExplanation}${nestedBranchExplanation}`);
-        addStep(lineNo, `入れ子のif文の条件 ${escapeHtml(node.condition)} を判定しました。${nestedBranchExplanation}`, true, result.arrayAccess ? [makeArrayView(result.arrayAccess)] : [], branchDecision);
+        addStep(lineNo, `入れ子のif文の条件 ${escapeHtml(node.condition)} を判定しました。${nestedBranchExplanation}`, true, resultArrayViews(result), branchDecision);
       }else{
         addAnalysis(analysis, lineNo, `${conditionExplanation}${outerBranchExplanation}`);
         const stepExplanation = node.hasElse
@@ -3298,7 +3313,7 @@ function visualizeCode(){
             ? '条件が成立したため、if文の中へ進みます。else文の中は実行しません。'
             : '条件が成立しなかったため、if文の中は実行せず、else文の中へ進みます。')
           : (conditionMet ? '条件が成立したため、if文の中へ進みます。' : '条件が成立しなかったため、if文の中は実行しません。');
-        addStep(lineNo, `${escapeHtml(node.condition)}を判定しました。<br>${stepExplanation}`, true, result.arrayAccess ? [makeArrayView(result.arrayAccess)] : [], branchDecision);
+        addStep(lineNo, `${escapeHtml(node.condition)}を判定しました。<br>${stepExplanation}`, true, resultArrayViews(result), branchDecision);
       }
 
       if(conditionMet){
@@ -4161,7 +4176,8 @@ function visualizeCode(){
       const supportedSimpleStatement =
         /^return\s+0\s*;?$/.test(structuralBodyCode) ||
         /^[A-Za-z_]\w*\s*=\s*.+;$/.test(structuralBodyCode) ||
-        printfMatch !== null;
+        printfMatch !== null ||
+        (containsArrayElementSyntax(structuralBodyCode) && isSupportedArrayStatement(trimmed));
       if(!supportedSimpleStatement){
         return invalid(
           'if分岐内の文は未対応',
@@ -4173,40 +4189,8 @@ function visualizeCode(){
 
     function validateDirectArrayStatement(trimmed, structuralBodyCode){
       if(!containsArrayElementSyntax(structuralBodyCode)) return { ok:true, matched:false };
-      if(forDepth !== 1){
-        return {
-          ok:false,
-          title:'入れ子for内の配列操作は未対応',
-          message:'現在はmain直下にあるfor文の本体へ直接書いた文だけが配列要素を使えます。入れ子for内では実行しません。'
-        };
-      }
-
-      const arrayWriteMatch = trimmed.match(
-        /^([A-Za-z_]\w*\s*\[\s*(?:[+-]?\d+|[A-Za-z_]\w*)\s*\])\s*=\s*(.+);$/
-      );
-      if(arrayWriteMatch){
-        if(containsArrayElementSyntax(codeOutsideStringAndLineComment(arrayWriteMatch[2]))){
-          return {
-            ok:false,
-            title:'同じ文での配列参照／代入は未対応',
-            message:'for文の1つのstatement内で、配列要素をreadしながら別の配列要素へwriteする形は現在未対応です。'
-          };
-        }
-        return { ok:true, matched:true };
-      }
-
-      const supportedAccessMatches = [...structuralBodyCode.matchAll(
-        /\b[A-Za-z_]\w*\s*\[\s*(?:[+-]?\d+|[A-Za-z_]\w*)\s*\]/g
-      )];
-      const isSupportedReadStatement =
-        /^[A-Za-z_]\w*\s*=\s*.+;$/.test(structuralBodyCode) ||
-        matchSimplePrintfStatement(trimmed) !== null;
-      if(supportedAccessMatches.length !== 1 || !isSupportedReadStatement){
-        return {
-          ok:false,
-          title:'for文本体の配列操作は未対応',
-          message:'for文の本体へ直接書いた文では、整数または宣言済みのint変数を添字にして、配列要素を1つ参照または代入できます。添字の計算式・複数要素の使用・要素更新は実行しません。'
-        };
+      if(!isSupportedArrayStatement(trimmed)){
+        return {ok:false, title:'for文本体の配列操作は未対応', message:'単純添字を使った代入・式・printfだけに対応しています。添字の計算式・要素更新は実行しません。未対応の文を含むfor全体を実行しません。'};
       }
       return { ok:true, matched:true };
     }
@@ -4222,7 +4206,7 @@ function visualizeCode(){
       if(/^if\b/.test(structuralBodyCode)){
         const ifNode = inspectSupportedIf(index, {
           containerEndIndex:Math.max(index, safeEndIndex - 1),
-          allowArrayRead:forDepth === 1,
+          allowArrayRead:true,
           validateSimpleStatement:validateIfSimpleStatement
         });
         if(!ifNode.ok){
@@ -4508,6 +4492,10 @@ function visualizeCode(){
           record.iterationNumber,
           (item, prefix) => ({
             ...item,
+            ...(item.arrayViews?.length ? {arrayLoopContext:item.arrayLoopContext || [
+              ...parentLocation.map(location => ({...location})),
+              {label:node.explanationLabel || 'for', state:forIterationState(node, record.iterationNumber)}
+            ]} : {}),
             text:belongsToNestedFor(item.lineNo) || hasForHierarchyPrefix(item.text)
               ? item.text
               : `${prefix}${item.text}`
