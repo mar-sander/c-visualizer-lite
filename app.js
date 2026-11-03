@@ -101,6 +101,11 @@ editorLightToggle.addEventListener('click', () => {
 });
 
 const sampleBody = {
+  arrayFor:[
+    'int a[5] = {0};', 'int i;', '',
+    'for(i = 0; i < 5; i++){', '    a[i] = i * 10;',
+    '    printf("%d\\n", a[i]);', '}'
+  ],
   arrayBasic:['int a[3] = {10, 20, 30};', 'a[1] = 50;', 'printf("%d\\n", a[1]);'],
   add:['int a = 10;', 'int b = 3;', 'int c = a + b;', 'printf("%d\\n", c);'],
   sub:['int a = 10;', 'int b = 3;', 'int c = a - b;', 'printf("%d\\n", c);'],
@@ -163,7 +168,8 @@ const UNLOCKED_OPTIONS = {
     ['add', '足し算'], ['sub', '引き算'], ['mul', '掛け算'],
     ['div', '割り算'], ['all', '四則演算まとめ'], ['precedence', '括弧と計算順序'],
     ['scanfTwo', '2つの数を入力する'], ['ifBasic', 'if文の基本'],
-    ['ifElse', 'if〜else文'], ['scanfIf', '入力して条件判定'], ['arrayBasic', '配列の基本']
+    ['ifElse', 'if〜else文'], ['scanfIf', '入力して条件判定'], ['arrayBasic', '配列の基本'],
+    ['arrayFor', '配列とfor文']
   ]
 };
 const UNLOCK_LABELS = {
@@ -972,6 +978,10 @@ function renderLiteArray(array, showAccess = false){
     }
     cell.append(element('span', 'lite-array-value', display),
       element('span', 'lite-array-index', `[${index}]`));
+    if(access?.mode === 'write' && Object.prototype.hasOwnProperty.call(access, 'previousValue')){
+      const before = access.previousInitialized ? String(access.previousValue) : '—';
+      cell.append(element('small', 'lite-array-history', `${before} → ${display}`));
+    }
     row.append(cell);
   });
   scroll.append(row);
@@ -1256,6 +1266,18 @@ function renderStep(){
   const scalarChanged = step.variablesAtStep.some(([name, value]) => previousVariables.get(name) !== value);
   const change = (isOmission || step.branchDecision || step.loopDecision?.kind === 'for' || step.loopDecision?.kind === 'while' ||
     (step.arrayViews?.length && !scalarChanged)) ? null : renderValueChange(activeStep);
+  const omittedVariables = isOmission && step.arrayViews?.length ? element('div', 'value-card') : null;
+  if(omittedVariables){
+    omittedVariables.append(element('small', '', '省略区間終了時の変数'));
+    const boxes = element('div', 'scalar-boxes');
+    for(const [name, value] of step.variablesAtStep){
+      const variable = element('div', 'scalar-variable');
+      variable.append(element('span', 'scalar-variable-name', name),
+        element('span', 'scalar-variable-value', value === '未初期化' ? '—' : value));
+      boxes.append(variable);
+    }
+    omittedVariables.append(boxes);
+  }
   const nextStep = currentSteps[activeStep + 1];
   const next = element('div', 'next-line');
   next.append(
@@ -1264,6 +1286,7 @@ function renderStep(){
   );
   flow.replaceChildren(top, track, code, explanation, ...(decision ? [decision] : []),
     ...(input ? [input] : []), ...(change ? [change] : []),
+    ...(omittedVariables ? [omittedVariables] : []),
     ...(step.arrayViews || []).map(array => renderLiteArray(array, true)), next);
   $('step-controls').hidden = false;
   $('step-prev').disabled = false;
