@@ -570,6 +570,15 @@ h2 {
   background: var(--mint)
 }
 
+/* L-UI17: reuse the existing disabled state without changing thumb geometry. */
+.step-slider:disabled::-webkit-slider-thumb {
+  background: var(--text-dim)
+}
+
+.step-slider:disabled::-moz-range-thumb {
+  background: var(--text-dim)
+}
+
 .step-slider:focus-visible {
   outline: 2px solid var(--mint);
   outline-offset: 2px;
