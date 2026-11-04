@@ -1,0 +1,40 @@
+<!doctype html><meta charset="utf-8"><title>L-MASK1 FA1 RC2 visibility tests</title>
+<h1>L-MASK1 Final Adjustment 1 — RC2</h1><pre id="counts">実行中</pre><ol id="results"></ol>
+<script>
+(async()=>{
+  const rows=[],record=(name,pass)=>rows.push({name,pass:!!pass});
+  const key='c-visualizer-lite-unlocks-v1',saved=localStorage.getItem(key);
+  const frame=document.createElement('iframe');frame.style.cssText='width:1200px;height:800px;border:0';
+  const wait=ms=>new Promise(r=>setTimeout(r,ms));
+  try{
+    localStorage.setItem(key,JSON.stringify({version:1,unlocked:['mask']}));
+    const loaded=new Promise(r=>frame.onload=r);frame.src='index.html';document.body.append(frame);await loaded;
+    const ui=frame.contentWindow,d=ui.document,cm=d.querySelector('.CodeMirror').CodeMirror;
+    const code='#include <stdio.h>\nint main(void){\nint value = 42;\nprintf("%d", value);\nreturn 0;\n}';
+    const colors=()=>{
+      const pre=d.querySelectorAll('.CodeMirror-code pre')[2],walker=d.createTreeWalker(pre,ui.NodeFilter.SHOW_TEXT),out=[];
+      while(walker.nextNode()){const n=walker.currentNode;for(const c of n.textContent)out.push([c,ui.getComputedStyle(n.parentElement).color]);}return out;
+    };
+    for(const light of [false,true]){
+      const label=light?'Light':'Dark';
+      d.querySelector('.editor-frame').classList.toggle('is-light',light);cm.setValue(code);cm.clearHistory();await wait(50);
+      const before=colors();
+      if(d.getElementById('editor-mask-toggle').getAttribute('aria-pressed')==='false')d.getElementById('editor-mask-toggle').click();
+      cm.setSelection({line:2,ch:0},{line:2,ch:15});cm.getWrapperElement().dispatchEvent(new ui.KeyboardEvent('keyup',{key:'Shift',bubbles:true}));await wait(180);
+      let el=d.querySelector('[data-code-mask]'),css=ui.getComputedStyle(el);
+      record(label+' 非開示の黄色と透明文字を維持',css.backgroundColor==='rgb(255, 230, 0)'&&css.color==='rgba(0, 0, 0, 0)');
+      record(label+' 非開示枠を維持',css.boxShadow.includes('rgb(214, 188, 0)'));
+      for(const type of ['pointerdown','pointerup'])el.dispatchEvent(new ui.PointerEvent(type,{pointerId:5,clientX:10,clientY:10,bubbles:true}));
+      el=d.querySelector('.cm-code-mask-open');css=ui.getComputedStyle(el);
+      record(label+' 開示枠は黄色48%',css.boxShadow.includes('rgba(214, 188, 0, 0.48)'));
+      record(label+' 開示背景は黄色6%',css.backgroundColor==='rgba(255, 230, 0, 0.06)');
+      record(label+' シンタックス文字色不変',JSON.stringify(colors())===JSON.stringify(before));
+      record(label+' 本文・コードUndo不変',cm.getValue()===code&&cm.historySize().undo===0);
+      await wait(400);
+    }
+  }catch(e){record('例外 '+e.stack,false)}finally{frame.remove();saved===null?localStorage.removeItem(key):localStorage.setItem(key,saved)}
+  window.maskVisibilityResults={total:rows.length,pass:rows.filter(r=>r.pass).length,fail:rows.filter(r=>!r.pass).length,rows};
+  document.getElementById('counts').textContent=JSON.stringify({...window.maskVisibilityResults,rows:undefined});
+  rows.forEach(r=>{const li=document.createElement('li');li.textContent=(r.pass?'PASS ':'FAIL ')+r.name;document.getElementById('results').append(li)});
+})();
+</script>

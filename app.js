@@ -100,6 +100,132 @@ editorLightToggle.addEventListener('click', () => {
   editorLightToggle.setAttribute('aria-checked', String(isLight));
 });
 
+// L-MASK1: marks belong only to this editor session; never persist or replace code.
+const codeMasks = new Set();
+let maskEnabled = false;
+let maskButton = null;
+let maskComposing = false;
+let maskPointer = null;
+let maskCommitTimer = 0;
+let maskLastTap = null;
+let maskSuppressUntil = 0;
+const maskWrapper = editor.getWrapperElement();
+const maskCompare = CodeMirror.cmpPos;
+
+function renderUnlockedMask(){
+  if(!unlockedIds.has('mask') || maskButton) return;
+  maskButton = document.createElement('button');
+  maskButton.id = 'editor-mask-toggle';
+  maskButton.type = 'button';
+  maskButton.className = 'editor-light-toggle editor-mask-toggle';
+  maskButton.textContent = 'MASK';
+  maskButton.setAttribute('aria-pressed', 'false');
+  maskButton.title = '選択した同一行の文字を隠す。クリックで開示、ダブルクリックで解除';
+  editorLightToggle.after(maskButton);
+  maskButton.addEventListener('click', () => {
+    maskEnabled = !maskEnabled;
+    maskButton.setAttribute('aria-pressed', String(maskEnabled));
+    clearTimeout(maskCommitTimer);
+  });
+}
+
+function removeCodeMask(item){
+  item.mark.clear();
+  codeMasks.delete(item);
+  if(maskLastTap?.item === item) maskLastTap = null;
+}
+
+function paintCodeMask(item, from, to){
+  item.mark = editor.markText(from, to, {
+    className:'cm-code-mask ' + (item.revealed ? 'cm-code-mask-open' : 'cm-code-mask-hidden'),
+    attributes:{'data-code-mask':String(item.id)},
+    inclusiveLeft:false, inclusiveRight:false, addToHistory:false
+  });
+}
+let nextCodeMaskId = 0;
+function commitCodeMask(){
+  if(!maskEnabled || maskComposing || maskPointer || performance.now() < maskSuppressUntil) return;
+  const ranges = editor.listSelections();
+  if(ranges.length !== 1 || ranges[0].empty()) return;
+  const from = ranges[0].from(), to = ranges[0].to();
+  if(from.line !== to.line) return;
+  for(const item of codeMasks){
+    const pos = item.mark.find();
+    if(pos && maskCompare(from, pos.to) < 0 && maskCompare(to, pos.from) > 0) return;
+  }
+  const item = {id:++nextCodeMaskId, revealed:false};
+  editor.operation(() => {
+    paintCodeMask(item, from, to);
+    codeMasks.add(item);
+    editor.setSelection(to, to);
+  });
+}
+function scheduleCodeMask(){
+  clearTimeout(maskCommitTimer);
+  maskCommitTimer = setTimeout(commitCodeMask, 120);
+}
+function maskAtEvent(event){
+  const span = event.target.closest?.('[data-code-mask]');
+  return span && [...codeMasks].find(item => String(item.id) === span.dataset.codeMask);
+}
+// Track the whole gesture: cursorActivity during a drag must never create a mark.
+maskWrapper.addEventListener('pointerdown', event => {
+  clearTimeout(maskCommitTimer);
+  maskPointer = {id:event.pointerId, x:event.clientX, y:event.clientY, item:maskAtEvent(event)};
+}, true);
+document.addEventListener('pointerup', event => {
+  if(!maskPointer || maskPointer.id !== event.pointerId) return;
+  const down = maskPointer;
+  maskPointer = null;
+  if(down.item && codeMasks.has(down.item) && Math.hypot(event.clientX-down.x,event.clientY-down.y)<6){
+    clearTimeout(maskCommitTimer);
+    const item = down.item, now = performance.now();
+    if(maskLastTap?.item === item && now-maskLastTap.time < 350){
+      maskSuppressUntil = now + 500;
+      removeCodeMask(item);
+    }else{
+      maskLastTap = {item,time:now};
+      const pos = item.mark.find();
+      if(pos) editor.operation(() => {
+        item.mark.clear(); item.revealed = !item.revealed;
+        paintCodeMask(item, pos.from, pos.to);
+      });
+    }
+    // Avoid leaving native word selection after double click/tap.
+    editor.setSelection(editor.getCursor(), editor.getCursor());
+  }else{
+    scheduleCodeMask();
+  }
+}, true);
+document.addEventListener('pointercancel', () => { maskPointer=null; clearTimeout(maskCommitTimer); });
+maskWrapper.addEventListener('dblclick', event => {
+  if(maskAtEvent(event) || (maskLastTap && performance.now()-maskLastTap.time < 350) || performance.now() < maskSuppressUntil){
+    event.preventDefault(); event.stopPropagation();
+    clearTimeout(maskCommitTimer);
+  }
+}, true);
+maskWrapper.addEventListener('keyup', event => {
+  // Only an explicit keyboard selection gesture commits. Editing/IME never does.
+  if(event.key === 'Shift' || (event.shiftKey && /^(Arrow|Home|End)/.test(event.key))) scheduleCodeMask();
+});
+maskWrapper.addEventListener('compositionstart', () => {maskComposing=true; clearTimeout(maskCommitTimer);});
+maskWrapper.addEventListener('compositionend', () => {maskComposing=false;});
+// Touch selection handles can finish after the touchend's last editor poll.
+maskWrapper.addEventListener('touchend', () => {
+  clearTimeout(maskCommitTimer); maskCommitTimer=setTimeout(commitCodeMask,350);
+}, {passive:true});
+editor.on('beforeChange', (_cm, change) => {
+  clearTimeout(maskCommitTimer);
+  for(const item of [...codeMasks]){
+    const pos = item.mark.find();
+    if(!pos || change.origin === 'setValue' ||
+      (maskCompare(change.from,pos.to)<0 && maskCompare(change.to,pos.from)>0) ||
+      (maskCompare(change.from,change.to)===0 && maskCompare(change.from,pos.from)>0 && maskCompare(change.from,pos.to)<0)){
+      removeCodeMask(item);
+    }
+  }
+});
+
 const sampleBody = {
   arrayFor:[
     'int a[5] = {0};', 'int i;', '',
@@ -161,7 +287,7 @@ const sampleBody = {
 };
 
 // 常時表示の選択肢はHTML側に置き、解除対象だけをID単位で追加します。
-const UNLOCK_CODES = new Map([['getsample', 'samples']]);
+const UNLOCK_CODES = new Map([['getsample', 'samples'], ['getmask', 'mask']]);
 const UNLOCK_KEY = 'c-visualizer-lite-unlocks-v1';
 const UNLOCKED_OPTIONS = {
   samples:[
@@ -173,7 +299,8 @@ const UNLOCKED_OPTIONS = {
   ]
 };
 const UNLOCK_LABELS = {
-  samples:'SAMPLE UNLOCKED'
+  samples:'SAMPLE UNLOCKED',
+  mask:'MASK UNLOCKED'
 };
 const unlockedIds = loadUnlocks();
 const secretCodeDialog = $('secret-code-dialog');
@@ -234,6 +361,7 @@ function showUnlockFeedback(unlockId){
 }
 
 renderUnlockedSamples();
+renderUnlockedMask();
 $('secret-code-open').addEventListener('click', () => {
   resetUnlockFeedback();
   secretCodeInput.value = '';
@@ -251,6 +379,7 @@ $('secret-code-form').addEventListener('submit', event => {
   unlockedIds.add(unlockId);
   persistUnlocks();
   renderUnlockedSamples();
+renderUnlockedMask();
   secretCodeInput.value = '';
   // 正しいSECRET CODEなら、解放済みでも成功演出を毎回再生する。
   showUnlockFeedback(unlockId);
