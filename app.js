@@ -138,6 +138,8 @@ function removeCodeMask(item){
 function paintCodeMask(item, from, to){
   item.mark = editor.markText(from, to, {
     className:'cm-code-mask ' + (item.revealed ? 'cm-code-mask-open' : 'cm-code-mask-hidden'),
+    startStyle:item.revealed ? 'cm-code-mask-start' : '',
+    endStyle:item.revealed ? 'cm-code-mask-end' : '',
     attributes:{'data-code-mask':String(item.id)},
     inclusiveLeft:false, inclusiveRight:false, addToHistory:false
   });
