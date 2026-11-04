@@ -17,7 +17,9 @@
     { id: 'nested-for-video', label: 'for二重ループを動画で見る', kind: 'video',
       src: 'assets/for_nested_loop_3x3_visual_trace_v3_fixed.mp4' },
     { id: 'while-video', label: 'whileループの動きを動画で見る', kind: 'video',
-      src: 'assets/while_loop_value_trace_4x3_v1.mp4' }
+      src: 'assets/while_loop_value_trace_4x3_v1.mp4' },
+    { id: 'array-max-video', label: '配列の最大値探索を動画で見る', kind: 'video',
+      src: 'assets/array_max_value_trace_4x3_v1.mp4' }
   ];
 
   const closeMenu = (restoreFocus = false) => {
