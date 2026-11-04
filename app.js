@@ -1045,12 +1045,15 @@ function clearErrorLines(){
   errorLines.clear();
 }
 
-function markErrorLines(warnings){
+function markErrorLines(warnings, diagnostics){
   clearErrorLines();
-  for(const warning of warnings){
-    const match = /^(\d+)行目：/.exec(warning);
-    if(!match) continue;
-    const line = Number(match[1]) - 1;
+  // Current engine supplies locations; retain text fallback for older result data.
+  const lineNumbers = Array.isArray(diagnostics)
+    ? diagnostics.map(item => item.lineNo)
+    : warnings.map(warning => Number(/^(\d+)行目：/.exec(warning)?.[1]));
+  for(const lineNo of lineNumbers){
+    if(!Number.isInteger(lineNo) || lineNo < 1) continue;
+    const line = lineNo - 1;
     if(line < 0 || line >= editor.lineCount() || errorLines.has(line)) continue;
     errorLines.add(line);
     editor.addLineClass(line, 'gutter', 'CodeMirror-error-gutter');
@@ -1408,7 +1411,7 @@ function showFailure(result){
   cancelResultReveal();
   playRunErrorFeedback();
   const warnings = (result.warningText || []).filter(Boolean);
-  markErrorLines(warnings);
+  markErrorLines(warnings, result.diagnostics);
   if(!warnings.length) warnings.push('対応範囲で処理の流れを確認できませんでした。入力を見直してください。');
   const box = element('div', 'failure-state');
   box.append(element('h3', '', '確認が必要です'));
