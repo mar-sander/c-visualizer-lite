@@ -13,7 +13,9 @@
   // 項目を追加する際は、このデータだけ増やして表示先の処理を登録します。
   const topics = [
     { id: 'for-video', label: 'forループの動きを動画で見る', kind: 'video',
-      src: 'assets/for_loop_value_trace_4x3_v2.mp4' }
+      src: 'assets/for_loop_value_trace_4x3_v2.mp4' },
+    { id: 'nested-for-video', label: 'for二重ループを動画で見る', kind: 'video',
+      src: 'assets/for_nested_loop_3x3_visual_trace_v3_fixed.mp4' }
   ];
 
   const closeMenu = (restoreFocus = false) => {
