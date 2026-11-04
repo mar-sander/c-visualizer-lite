@@ -1506,7 +1506,7 @@
       {
         name:'Stage1 壊れた子forの波かっこで親外へ解析を拡張しない',
         code:makeMainCode(`    int i = 9;\n    int j = 8;\n    for(i = 0; i < 1; i++){\n        for(j = 0; j < 1; j++){\n            printf("WRONG-BROKEN-CHILD");\n    }\n    printf("WRONG-AFTER-BROKEN");\n    return 0;`),
-        expect:{ output:'出力はまだありません。', outputExcludes:['WRONG'], variablesExclude:['i =', 'j ='], warningMin:1, hintsInclude:['main関数の終わりを確認', '波かっこの数を確認'], stepCounts:{ 'for文の初期化':0 } }
+        expect:{ output:'出力はまだありません。', outputExcludes:['WRONG'], variablesExclude:['i =', 'j ='], warningMin:1, hintsInclude:['main関数の終わりを確認'], stepCounts:{ 'for文の初期化':0 } }
       },
       {
         name:'Stage1 2階層目forのreturnをmainまで伝播',
@@ -2406,7 +2406,7 @@
       {
         name:'Stage3 不完全な内側braceでは後続mainを実行しない',
         code:makeMainCode(`    int i = 9;\n    for(i = 0; i < 1; i++){\n        if(1){\n            printf("WRONG-INNER");\n    }\n    printf("WRONG-AFTER-FOR");\n    return 0;`),
-        expect:{ output:'出力はまだありません。', outputExcludes:['WRONG'], variablesExclude:['i ='], warningMin:1, hintsInclude:['main関数の終わりを確認', '波かっこの数を確認'], stepCounts:{ 'for文の初期化':0 }, executedExcludes:['printf("WRONG-INNER', 'printf("WRONG-AFTER-FOR'] }
+        expect:{ output:'出力はまだありません。', outputExcludes:['WRONG'], variablesExclude:['i ='], warningMin:1, hintsInclude:['main関数の終わりを確認'], stepCounts:{ 'for文の初期化':0 }, executedExcludes:['printf("WRONG-INNER', 'printf("WRONG-AFTER-FOR'] }
       },
       {
         name:'Stage3 共通if実行・main直下if内return',

@@ -511,6 +511,8 @@ function addAnalysis(map, lineNo, text){
 function addHint(list, lineNo, title, text){
   const prefix = lineNo ? `${lineNo}行目：` : '';
   list.push(`<div class="warning-line"><strong>${prefix}${title}</strong><br>${text}</div>`);
+  // Keep source locations separate from localized display text.
+  (list.diagnostics ??= []).push({ lineNo:lineNo ?? null, title, message:text });
 }
 
 function shouldProbablyEndWithSemicolon(trimmed){
@@ -986,10 +988,10 @@ function findMainExecutionRange(lines){
         }
       }
       if(opened && depth === 0){
-        return { startIndex, endIndex, closed:true };
+        return { startIndex, openIndex, endIndex, closed:true };
       }
     }
-    return { startIndex, endIndex:lines.length - 1, closed:false };
+    return { startIndex, openIndex, endIndex:lines.length - 1, closed:false };
   }
   return null;
 }
@@ -1034,7 +1036,21 @@ function splitArgs(text){
   const result = [];
   let current = '';
   let depth = 0;
+  let quote = null;
+  let escaped = false;
   for(const ch of text){
+    if(quote){
+      current += ch;
+      if(escaped) escaped = false;
+      else if(ch === '\\') escaped = true;
+      else if(ch === quote) quote = null;
+      continue;
+    }
+    if(ch === "'" || ch === '"'){
+      quote = ch;
+      current += ch;
+      continue;
+    }
     if(ch === '(') depth++;
     if(ch === ')') depth--;
     if(ch === ',' && depth === 0){
@@ -1606,7 +1622,12 @@ function formatPrintfString(parsed, values){
 }
 
 function matchSimplePrintfStatement(text){
-  return String(text).trim().match(/^printf\s*\(\s*"((?:\\.|[^"\\])*)"\s*(?:,\s*(.*))?\)\s*;$/);
+  const match = String(text).trim().match(/^printf\s*\(\s*"((?:\\.|[^"\\])*)"\s*(?:,\s*(.*))?\)\s*;$/);
+  if(match && match[2] !== undefined &&
+     (!match[2].trim() || /,\s*$/.test(match[2]) || splitArgs(match[2]).some(arg => !arg))){
+    return null;
+  }
+  return match;
 }
 
 function visualizeCode(){
@@ -1633,12 +1654,13 @@ function visualizeCode(){
   // 同じソース上のfor文が親ループから複数回呼ばれても、本体進入回数を累積します。
   const forEnteredIterationTotals = new Map();
   let output = '';
-  let braceBalance = 0;
+  const unclosedBraceIndices = [];
+  const extraClosingBraceIndices = [];
   let hasMain = mainRange !== null;
   let hasReturn = false;
-  const hasReturnInMain = mainRange?.closed
+  const hasReturnInMain = mainRange
     ? executableLines
-      .slice(mainRange.startIndex + 1, mainRange.endIndex)
+      .slice(mainRange.startIndex + 1, mainRange.closed ? mainRange.endIndex : lines.length)
       .some(line => /^return\s+0\s*;$/.test(line.trim()))
     : false;
   let scanfValueIndex = 0;
@@ -1646,10 +1668,13 @@ function visualizeCode(){
   let inputRequest = null;
   let stepNo = 1;
 
-  for(const executableLine of executableLines){
-    for(const ch of bracesOutsideString(executableLine)){
-      if(ch === '{') braceBalance++;
-      if(ch === '}') braceBalance--;
+  for(let index = 0; index < executableLines.length; index++){
+    for(const ch of bracesOutsideString(executableLines[index])){
+      if(ch === '{') unclosedBraceIndices.push(index);
+      if(ch === '}'){
+        if(unclosedBraceIndices.length) unclosedBraceIndices.pop();
+        else extraClosingBraceIndices.push(index);
+      }
     }
   }
 
@@ -2285,7 +2310,7 @@ function visualizeCode(){
 
     if(insideIf && !/^(?:int|float|double|char)\s+/.test(trimmed) &&
        !/^[A-Za-z_]\w*\s*=/.test(trimmed) && !/^printf\s*\(/.test(trimmed) &&
-       !/^return\s+0\s*;?$/.test(trimmed)){
+       !/^return\s+0\s*;$/.test(trimmed)){
       addAnalysis(analysis, lineNo, 'この処理はif側・else側の中では現在未対応のため、実行しません。');
       addHint(hints, lineNo, '分岐内では未対応', 'if側・else側では、既存の変数への代入、printf、return 0; だけを実行できます。');
       warningLines.add(lineNo);
@@ -2329,7 +2354,7 @@ function visualizeCode(){
       return;
     }
 
-    if(/^return\s+0\s*;?$/.test(trimmed)){
+    if(/^return\s+0\s*;$/.test(trimmed)){
       hasReturn = true;
       addAnalysis(analysis, lineNo, 'プログラムを正常に終了するための文です。');
       addStep(lineNo, 'プログラムを終了します。');
@@ -2362,8 +2387,8 @@ function visualizeCode(){
       const pending = [];
       const declaredHere = new Set();
       for(const { name, expr } of multipleDeclaration.declarators){
-        if(declaredHere.has(name) || getSymbolKind(name) === 'array'){
-          addHint(hints, lineNo, '宣言する名前を確認', `${escapeHtml(name)} はこの宣言文で重複しているか、配列名として使用されています。`);
+        if(declaredHere.has(name) || getSymbolKind(name) !== null){
+          addHint(hints, lineNo, '宣言する名前を確認', `${escapeHtml(name)} はこの宣言文で重複しているか、すでに変数名・配列名として使用されています。`);
           warningLines.add(lineNo);
           return;
         }
@@ -2422,6 +2447,11 @@ function visualizeCode(){
           '同じ名前がすでに使われています',
           `<code>${name}</code> は、すでに配列の名前として宣言されています。int変数と配列には同じ名前を使用できません。`
         );
+      }
+      if(getSymbolKind(name) === 'scalar'){
+        addHint(hints, lineNo, '同じ名前がすでに使われています', `<code>${name}</code> は同じmain内ですでに宣言されています。再宣言する行を確認してください。`);
+        warningLines.add(lineNo);
+        return;
       }
       if(expr === undefined){
         declareScalar(name, UNINITIALIZED, declarationType);
@@ -2672,8 +2702,8 @@ function visualizeCode(){
     warningLines.add(index + 1);
   }
 
-  function warnUnsupportedIf(startIndex, endIndex, title, message){
-    const lineNo = startIndex + 1;
+  function warnUnsupportedIf(startIndex, endIndex, title, message, causeIndex = startIndex){
+    const lineNo = causeIndex + 1;
     addAnalysis(analysis, lineNo, message);
     addHint(hints, lineNo, title, message);
     warningLines.add(lineNo);
@@ -2751,7 +2781,7 @@ function visualizeCode(){
       return unsupported('分岐内の更新文は未対応', 'if側・else側の更新文は未対応です。if文全体は実行しません。');
     }
     const printfMatch = matchSimplePrintfStatement(trimmed);
-    if(/^return\s+0\s*;?$/.test(structuralCode) ||
+    if(/^return\s+0\s*;$/.test(structuralCode) ||
        /^[A-Za-z_]\w*\s*=\s*.+;$/.test(structuralCode) || printfMatch){
       return { ok:true };
     }
@@ -2791,25 +2821,27 @@ function visualizeCode(){
     const safeEndIndex = Math.min(outerRange.endIndex, containerEndIndex);
     const validateSimpleStatement = options.validateSimpleStatement ?? validateMainIfStatement;
 
-    function failure(title, message){
-      return { ok:false, title, message, endIndex:safeEndIndex };
+    function failure(title, message, causeIndex = startIndex){
+      return { ok:false, title, message, causeIndex, endIndex:safeEndIndex };
     }
 
-    function unsupportedNestedIfForm(structuralCode){
+    function unsupportedNestedIfForm(structuralCode, causeIndex){
       const nextLineBrace = inlineIfBodyCode(structuralCode) === '';
       if(nextLineBrace){
         return failure(
           '入れ子のif文の書き方は未対応',
-          '入れ子のif文では、開き波かっこをif文と同じ行に書いてください。外側のif文全体は実行しません。'
+          '入れ子のif文では、開き波かっこをif文と同じ行に書いてください。外側のif文全体は実行しません。',
+          causeIndex
         );
       }
       return failure(
         '入れ子のif文の書き方は未対応',
-        '波かっこを省略した入れ子のif文は現在未対応です。外側のif文全体は実行しません。'
+        '波かっこを省略した入れ子のif文は現在未対応です。外側のif文全体は実行しません。',
+        causeIndex
       );
     }
 
-    function parseBranch(bodyStartIndex, depth){
+    function parseBranch(bodyStartIndex, depth, ownerIndex){
       const nestedIfs = [];
 
       for(let index = bodyStartIndex; index <= safeEndIndex; index++){
@@ -2822,11 +2854,12 @@ function visualizeCode(){
 
         if(/^if\b/.test(structuralCode)){
           const nestedHeader = structuralCode.match(/^if\s*\((.*)\)\s*\{$/);
-          if(!nestedHeader) return unsupportedNestedIfForm(structuralCode);
+          if(!nestedHeader) return unsupportedNestedIfForm(structuralCode, index);
           if(depth >= 2){
             return failure(
               '3階層以上のifは未対応',
-              '3階層以上に入れ子になったif文は現在未対応です。外側のif文全体は実行しません。'
+              '3階層以上に入れ子になったif文は現在未対応です。外側のif文全体は実行しません。',
+              index
             );
           }
 
@@ -2840,28 +2873,32 @@ function visualizeCode(){
         if(/^else\b/.test(structuralCode)){
           return failure(
             'このelse付きif文は未対応',
-            '対応するif文を安全に確定できないelseがあります。外側のif文全体は実行しません。'
+            '対応するif文を安全に確定できないelseがあります。外側のif文全体は実行しません。',
+            index
           );
         }
 
         if(/^scanf\b/.test(structuralCode) || /\bscanf\s*\(/.test(structuralCode)){
           return failure(
             '分岐内のscanfは未対応',
-            'if側・else側の中にscanfがある形は現在未対応です。外側のif文全体は実行しません。'
+            'if側・else側の中にscanfがある形は現在未対応です。外側のif文全体は実行しません。',
+            index
           );
         }
 
         if(looksLikeArrayDeclaration(structuralCode)){
           return failure(
             '分岐内の配列宣言は未対応',
-            '配列宣言はmain直下だけに対応しています。未実行側を含め、配列宣言がある外側のif文全体は実行しません。'
+            '配列宣言はmain直下だけに対応しています。未実行側を含め、配列宣言がある外側のif文全体は実行しません。',
+            index
           );
         }
 
         if(containsArrayElementSyntax(structuralCode) && !(options.allowArrayRead && depth === 1 && isArrayReadAssignment(executableLines[index].trim()))){
           return failure(
             'この場所での配列要素の参照／代入は未対応',
-            'このStageでは配列要素へアクセスできないため、外側のif文全体は実行しません。'
+            'このStageでは配列要素へアクセスできないため、外側のif文全体は実行しません。',
+            index
           );
         }
 
@@ -2869,14 +2906,16 @@ function visualizeCode(){
         if(unsupportedControl){
           return failure(
             '入れ子のブロックは未対応',
-            `${unsupportedControl.label}を含むif文の入れ子は現在未対応です。外側のif文全体は実行しません。`
+            `${unsupportedControl.label}を含むif文の入れ子は現在未対応です。外側のif文全体は実行しません。`,
+            index
           );
         }
 
         if(bracesOutsideString(executableLines[index]).length > 0){
           return failure(
             '入れ子のブロックは未対応',
-            '対応範囲を確定できないブロックがif文内にあります。外側のif文全体は実行しません。'
+            '対応範囲を確定できないブロックがif文内にあります。外側のif文全体は実行しません。',
+            index
           );
         }
 
@@ -2885,14 +2924,14 @@ function visualizeCode(){
         if(validateSimpleStatement){
           const validation = validateSimpleStatement(index, structuralCode);
           if(!validation.ok){
-            return failure(validation.title, validation.message);
+            return failure(validation.title, validation.message, validation.causeIndex ?? index);
           }
         }
       }
 
       return failure(
         '閉じ波かっこを確認',
-        'if文の処理範囲を最後まで確認できないため、外側のif文全体は実行しません。'
+        'if文の処理範囲を最後まで確認できないため、外側のif文全体は実行しません。', ownerIndex
       );
     }
 
@@ -2907,12 +2946,12 @@ function visualizeCode(){
         const header = elseHeaderCode.match(/^else\s+if\s*\((.*)\)\s*\{$/);
         const fallback = /^else\s*\{$/.test(elseHeaderCode);
         if(!header && !fallback){
-          return failure('else ifの書き方を確認', 'else ifでは条件と開き波かっこを同じ行に書いてください。条件チェーン全体は実行しません。');
+          return failure('else ifの書き方を確認', 'else ifでは条件と開き波かっこを同じ行に書いてください。条件チェーン全体は実行しません。', elseIndex);
         }
         if(header && containsArrayElementSyntax(header[1])){
-          return failure('if条件での配列要素readはまだ未対応', '配列要素を条件式に含む条件チェーン全体は実行しません。');
+          return failure('if条件での配列要素readはまだ未対応', '配列要素を条件式に含む条件チェーン全体は実行しません。', elseIndex);
         }
-        const body = parseBranch(elseIndex + 1, depth);
+        const body = parseBranch(elseIndex + 1, depth, elseIndex);
         if(!body.ok) return body;
         branches.push({
           branchKind:fallback ? 'else' : 'else-if', condition:header ? header[1].trim() : null,
@@ -2925,10 +2964,10 @@ function visualizeCode(){
         elseIndex = afterClose ? body.endIndex : (/^else\b/.test(candidateCode) ? candidate : -1);
         elseHeaderCode = afterClose || candidateCode;
         if(afterClose && !/^else\b/.test(afterClose)){
-          return failure('閉じ波かっこを確認', '条件チェーンの閉じ波かっこの後ろに未対応のコードがあります。全体は実行しません。');
+          return failure('閉じ波かっこを確認', '条件チェーンの閉じ波かっこの後ろに未対応のコードがあります。全体は実行しません。', body.endIndex);
         }
         if(fallback && elseIndex >= 0){
-          return failure('elseの位置を確認', 'elseは条件チェーンの最後に1回だけ書いてください。全体は実行しません。');
+          return failure('elseの位置を確認', 'elseは条件チェーンの最後に1回だけ書いてください。全体は実行しません。', elseIndex);
         }
         previousBranch = body;
       }
@@ -2936,8 +2975,9 @@ function visualizeCode(){
         ok:true, depth, startIndex:ifIndex, endIndex:previousBranch.endIndex,
         conditionalChain:{ branches }
       };
-      if(!inspectChainSyntax(node)){
-        return failure('条件チェーンの構文を確認', '未選択側を含め、条件式または本文に不正・未対応の式があります。条件チェーン全体は実行しません。');
+      const syntaxCause = inspectChainSyntax(node);
+      if(syntaxCause !== null){
+        return failure('条件チェーンの構文を確認', '未選択側を含め、条件式または本文に不正・未対応の式があります。条件チェーン全体は実行しません。', syntaxCause);
       }
       return node;
     }
@@ -2945,33 +2985,34 @@ function visualizeCode(){
     // 本文と内側ifも構文だけを検査します。未定義変数等の実行時エラーはここでは調べません。
     function inspectChainSyntax(node){
       const branches = node.conditionalChain?.branches ?? [
-        { condition:node.condition, bodyStartIndex:node.ifBodyStartIndex, endIndex:node.ifEndIndex, nestedIfs:node.ifNestedIfs },
-        ...(node.hasElse ? [{ condition:null, bodyStartIndex:node.elseBodyStartIndex, endIndex:node.elseEndIndex, nestedIfs:node.elseNestedIfs }] : [])
+        { startIndex:node.startIndex, condition:node.condition, bodyStartIndex:node.ifBodyStartIndex, endIndex:node.ifEndIndex, nestedIfs:node.ifNestedIfs },
+        ...(node.hasElse ? [{ startIndex:node.elseIndex, condition:null, bodyStartIndex:node.elseBodyStartIndex, endIndex:node.elseEndIndex, nestedIfs:node.elseNestedIfs }] : [])
       ];
-      return branches.every(branch => {
-        if(branch.condition !== null && !inspectConditionalExpressionSyntax(branch.condition)) return false;
+      for(const branch of branches){
+        if(branch.condition !== null && !inspectConditionalExpressionSyntax(branch.condition)) return branch.startIndex;
         const nestedMap = new Map(branch.nestedIfs.map(child => [child.startIndex, child]));
         for(let index = branch.bodyStartIndex; index < branch.endIndex; index++){
           const nested = nestedMap.get(index);
           if(nested){
-            if(!inspectChainSyntax(nested)) return false;
+            const nestedCause = inspectChainSyntax(nested);
+            if(nestedCause !== null) return nestedCause;
             index = nested.endIndex;
             continue;
           }
           const code = executableLines[index].trim();
           const assignment = code.match(/^[A-Za-z_]\w*\s*=\s*(.+);$/);
-          if(assignment && !inspectConditionalExpressionSyntax(assignment[1])) return false;
+          if(assignment && !inspectConditionalExpressionSyntax(assignment[1])) return index;
           const print = matchSimplePrintfStatement(code);
           if(print){
             const format = parsePrintfFormat(print[1]);
             const args = print[2] === undefined ? [] : splitArgs(print[2]);
-            if(print[2] !== undefined && (!print[2].trim() || /,\s*$/.test(print[2]))) return false;
+            if(print[2] !== undefined && (!print[2].trim() || /,\s*$/.test(print[2]))) return index;
             if(!format.ok || args.length !== format.specifiers.length ||
-               args.some(arg => !inspectConditionalExpressionSyntax(arg))) return false;
+               args.some(arg => !inspectConditionalExpressionSyntax(arg))) return index;
           }
         }
-        return true;
-      });
+      }
+      return null;
     }
 
     function parseIf(ifIndex, depth, allowElse){
@@ -2979,17 +3020,17 @@ function visualizeCode(){
       const headerMatch = structuralCode.match(/^if\s*\((.*)\)\s*\{$/);
       if(!headerMatch){
         return depth > 1
-          ? unsupportedNestedIfForm(structuralCode)
-          : failure('if文の書き方を確認', '対応範囲を確定できないif文のため、処理全体は実行しません。');
+          ? unsupportedNestedIfForm(structuralCode, ifIndex)
+          : failure('if文の書き方を確認', '対応範囲を確定できないif文のため、処理全体は実行しません。', ifIndex);
       }
       if(containsArrayElementSyntax(headerMatch[1]) && !(options.allowArrayRead && depth === 1 && isArrayReadCondition(headerMatch[1]))){
         return failure(
           'if条件での配列要素readはまだ未対応',
-          'このStageでは配列要素を条件式で使用できないため、if文全体は実行しません。'
+          'このStageでは配列要素を条件式で使用できないため、if文全体は実行しません。', ifIndex
         );
       }
 
-      const ifBranch = parseBranch(ifIndex + 1, depth);
+      const ifBranch = parseBranch(ifIndex + 1, depth, ifIndex);
       if(!ifBranch.ok) return ifBranch;
 
       let elseIndex = -1;
@@ -2999,7 +3040,7 @@ function visualizeCode(){
 
       if(afterClose !== ''){
         if(!/^else\b/.test(afterClose)){
-          return failure('閉じ波かっこを確認', 'if文の閉じ波かっこの後ろに未対応のコードがあります。外側のif文全体は実行しません。');
+          return failure('閉じ波かっこを確認', 'if文の閉じ波かっこの後ろに未対応のコードがあります。外側のif文全体は実行しません。', ifBranch.endIndex);
         }
         elseIndex = ifBranch.endIndex;
         elseHeaderCode = afterClose;
@@ -3032,7 +3073,7 @@ function visualizeCode(){
       if(!allowElse){
         return failure(
           '入れ子のif〜elseは未対応',
-          '入れ子のif文にelseを付ける形は現在未対応です。外側のif文全体は実行しません。'
+          '入れ子のif文にelseを付ける形は現在未対応です。外側のif文全体は実行しません。', elseIndex
         );
       }
 
@@ -3043,20 +3084,20 @@ function visualizeCode(){
       if(!/^else\s*\{$/.test(elseHeaderCode)){
         return failure(
           'このelse付きif文は未対応',
-          'elseには同じ行に開き波かっこを書いてください。波かっこの省略、次の行に開き波かっこを書く形は実行しません。'
+          'elseには同じ行に開き波かっこを書いてください。波かっこの省略、次の行に開き波かっこを書く形は実行しません。', elseIndex
         );
       }
 
-      const elseBranch = parseBranch(elseIndex + 1, depth);
+      const elseBranch = parseBranch(elseIndex + 1, depth, elseIndex);
       if(!elseBranch.ok) return elseBranch;
       const afterElseIndex = nextSignificantLine(elseBranch.endIndex + 1, safeEndIndex + 1);
       if(afterElseIndex <= safeEndIndex && /^else\b/.test(codeOutsideStringAndLineComment(executableLines[afterElseIndex]).trim())){
-        return failure('elseの位置を確認', 'elseは条件チェーンの最後に1回だけ書いてください。if文全体は実行しません。');
+        return failure('elseの位置を確認', 'elseは条件チェーンの最後に1回だけ書いてください。if文全体は実行しません。', afterElseIndex);
       }
       if(elseBranch.closingCode !== '}'){
         return failure(
           '閉じ波かっこを確認',
-          'else文の終わりを安全に確定できないため、外側のif文全体は実行しません。'
+          'else文の終わりを安全に確定できないため、外側のif文全体は実行しません。', elseBranch.endIndex
         );
       }
 
@@ -3655,11 +3696,12 @@ function visualizeCode(){
     const header = parseWhileHeader(structuralCode);
     const bodyItems = [];
 
-    function failure(message, title = 'while文は未対応'){
+    function failure(message, title = 'while文は未対応', causeIndex = startIndex){
       return {
         ok:false,
         title,
         message,
+        causeIndex,
         endIndex:safeEndIndex,
         closed:range.closed
       };
@@ -3713,7 +3755,7 @@ function visualizeCode(){
       }
 
       const supportedSimpleStatement =
-        /^return\s+0\s*;?$/.test(structuralBodyCode) ||
+        /^return\s+0\s*;$/.test(structuralBodyCode) ||
         /^[A-Za-z_]\w*\s*=\s*.+;$/.test(structuralBodyCode) ||
         printfMatch !== null;
       if(!supportedSimpleStatement){
@@ -3734,7 +3776,7 @@ function visualizeCode(){
       }
 
       if(hasMultipleStatementsOnOneLine(trimmed)){
-        return failure('while文の本体に1行で複数の文が書かれています。本体を部分実行せず、条件判定前に停止します。', 'while文本体の改行を確認');
+        return failure('while文の本体に1行で複数の文が書かれています。本体を部分実行せず、条件判定前に停止します。', 'while文本体の改行を確認', index);
       }
       if(/^if\b/.test(structuralBodyCode)){
         const ifNode = inspectSupportedIf(index, {
@@ -3742,12 +3784,13 @@ function visualizeCode(){
           validateSimpleStatement:validateIfSimpleStatement
         });
         if(!ifNode.ok){
-          return failure(ifNode.message, ifNode.title);
+          return failure(ifNode.message, ifNode.title, ifNode.causeIndex);
         }
         if(ifNode.endIndex >= safeEndIndex){
           return failure(
             'while文内のif文の終わりを外側whileの本体内で確認できません。while文全体を実行しません。',
-            'while文内ifの閉じ波かっこを確認'
+            'while文内ifの閉じ波かっこを確認',
+            index
           );
         }
         bodyItems.push({ type:'if', node:ifNode });
@@ -3755,50 +3798,50 @@ function visualizeCode(){
         continue;
       }
       if(/^else\b/.test(structuralBodyCode)){
-        return failure('対応するif文を安全に確定できないelseがあります。while文全体を実行しません。', 'このelse付きif文は未対応');
+        return failure('対応するif文を安全に確定できないelseがあります。while文全体を実行しません。', 'このelse付きif文は未対応', index);
       }
       if(/^scanf\b/.test(structuralBodyCode) || /\bscanf\s*\(/.test(structuralBodyCode)){
-        return failure('while文の本体内にscanfがあります。現在のVisualizerではwhile内scanfに対応していないため、while文全体を実行しません。', 'while文内のscanfは未対応');
+        return failure('while文の本体内にscanfがあります。現在のVisualizerではwhile内scanfに対応していないため、while文全体を実行しません。', 'while文内のscanfは未対応', index);
       }
       if(/^int\b/.test(structuralBodyCode)){
-        return failure('while文の本体内で変数を宣言する形は現在未対応です。while文全体を実行しません。', 'while文内の変数宣言は未対応');
+        return failure('while文の本体内で変数を宣言する形は現在未対応です。while文全体を実行しません。', 'while文内の変数宣言は未対応', index);
       }
       if(containsArrayElementSyntax(structuralBodyCode)){
-        return failure('現在はwhile文の本体から配列要素を参照・代入できません。while文全体を条件判定前に停止します。', 'while文内の配列操作は未対応');
+        return failure('現在はwhile文の本体から配列要素を参照・代入できません。while文全体を条件判定前に停止します。', 'while文内の配列操作は未対応', index);
       }
       if(/^break\b/.test(structuralBodyCode)){
-        return failure('while文の本体内にbreakがあります。現在のVisualizerではbreakに対応していないため、while文全体を実行しません。', 'breakは未対応');
+        return failure('while文の本体内にbreakがあります。現在のVisualizerではbreakに対応していないため、while文全体を実行しません。', 'breakは未対応', index);
       }
       if(/^continue\b/.test(structuralBodyCode)){
-        return failure('while文の本体内にcontinueがあります。現在のVisualizerではcontinueに対応していないため、while文全体を実行しません。', 'continueは未対応');
+        return failure('while文の本体内にcontinueがあります。現在のVisualizerではcontinueに対応していないため、while文全体を実行しません。', 'continueは未対応', index);
       }
 
       const nestedControl = unsupportedControlInfo(structuralBodyCode);
       if(nestedControl){
-        return failure(`while文の本体内に${nestedControl.label}があります。現在のVisualizerでは、この制御構造をwhile文内で実行できないため、while文全体を実行しません。`, 'while文内の制御構造は未対応');
+        return failure(`while文の本体内に${nestedControl.label}があります。現在のVisualizerでは、この制御構造をwhile文内で実行できないため、while文全体を実行しません。`, 'while文内の制御構造は未対応', index);
       }
       if(bracesOutsideString(executableLines[index]).length > 0){
-        return failure('while文の本体内に、現在のVisualizerでは実行できないブロック構造があります。while文全体を実行しません。', 'while文内のブロックは未対応');
+        return failure('while文の本体内に、現在のVisualizerでは実行できないブロック構造があります。while文全体を実行しません。', 'while文内のブロックは未対応', index);
       }
 
       const variableUpdate = parseVariableUpdate(structuralBodyCode, true, true);
       if(/\+\+|--/.test(structuralBodyCode) && variableUpdate === null){
-        return failure('while文の本体に、式中で副作用を利用する++ / --があります。現在は単独更新文だけに対応しているため、while文全体を実行しません。', '式中の++・--は未対応');
+        return failure('while文の本体に、式中で副作用を利用する++ / --があります。現在は単独更新文だけに対応しているため、while文全体を実行しません。', '式中の++・--は未対応', index);
       }
 
       const looksLikePrintf = /^printf\b/.test(structuralBodyCode);
       const printfMatch = looksLikePrintf ? matchSimplePrintfStatement(trimmed) : null;
       if(looksLikePrintf && (!printfMatch || printfMatch[1].includes('%%'))){
-        return failure('while文の本体に、既存の単純printfとして安全に実行できない文があります。while文全体を実行しません。', 'while文本体のprintfは未対応');
+        return failure('while文の本体に、既存の単純printfとして安全に実行できない文があります。while文全体を実行しません。', 'while文本体のprintfは未対応', index);
       }
 
       const supportedSimpleStatement =
-        /^return\s+0\s*;?$/.test(structuralBodyCode) ||
+        /^return\s+0\s*;$/.test(structuralBodyCode) ||
         variableUpdate !== null ||
         /^[A-Za-z_]\w*\s*=\s*.+;$/.test(structuralBodyCode) ||
         printfMatch !== null;
       if(!supportedSimpleStatement){
-        return failure('while文の本体に、現在のVisualizerでは実行できない文があります。本体を部分実行せず、条件判定前に停止します。', 'while文本体の文は未対応');
+        return failure('while文の本体に、現在のVisualizerでは実行できない文があります。本体を部分実行せず、条件判定前に停止します。', 'while文本体の文は未対応', index);
       }
 
       bodyItems.push({ type:'simple', index });
@@ -3816,11 +3859,11 @@ function visualizeCode(){
   }
 
   function warnUnsupportedWhile(startIndex, inspection){
-    const lineNo = startIndex + 1;
+    const lineNo = (inspection.causeIndex ?? startIndex) + 1;
     addAnalysis(analysis, lineNo, `${inspection.message} while文の条件と本体は実行していません。`);
     addHint(hints, lineNo, inspection.title, inspection.message);
     warningLines.add(lineNo);
-    addStep(lineNo, 'このwhile文は現在のVisualizerでは実行できないため、プログラムの実行を停止します。', false);
+    addStep(startIndex + 1, 'このwhile文は現在のVisualizerでは実行できないため、プログラムの実行を停止します。', false);
     addSkippedLineWarnings(startIndex, executableLines[startIndex].trim());
 
     for(let index = startIndex + 1; index <= inspection.endIndex && index < executionEndIndex; index++){
@@ -4104,11 +4147,12 @@ function visualizeCode(){
     const header = parseForHeader(structuralCode);
     const bodyItems = [];
 
-    function failure(message, title = 'for文は未対応'){
+    function failure(message, title = 'for文は未対応', causeIndex = startIndex){
       return {
         ok:false,
         title,
         message,
+        causeIndex,
         endIndex:safeEndIndex,
         closed:range.closed
       };
@@ -4174,7 +4218,7 @@ function visualizeCode(){
       }
 
       const supportedSimpleStatement =
-        /^return\s+0\s*;?$/.test(structuralBodyCode) ||
+        /^return\s+0\s*;$/.test(structuralBodyCode) ||
         /^[A-Za-z_]\w*\s*=\s*.+;$/.test(structuralBodyCode) ||
         printfMatch !== null ||
         (containsArrayElementSyntax(structuralBodyCode) && isSupportedArrayStatement(trimmed));
@@ -4210,12 +4254,13 @@ function visualizeCode(){
           validateSimpleStatement:validateIfSimpleStatement
         });
         if(!ifNode.ok){
-          return failure(ifNode.message, ifNode.title);
+          return failure(ifNode.message, ifNode.title, ifNode.causeIndex);
         }
         if(ifNode.endIndex >= safeEndIndex){
           return failure(
             'for文内のif文の終わりを外側forの本体内で確認できません。for文全体を実行しません。',
-            'for文内ifの閉じ波かっこを確認'
+            'for文内ifの閉じ波かっこを確認',
+            index
           );
         }
         bodyItems.push({ type:'if', node:ifNode });
@@ -4227,7 +4272,8 @@ function visualizeCode(){
         if(forDepth >= MAX_FOR_NESTING_DEPTH){
           return failure(
             `for文の入れ子は最大${MAX_FOR_NESTING_DEPTH}階層まで対応しています。4階層目以降を含む外側のfor文全体は実行しません。`,
-            `for文の入れ子は最大${MAX_FOR_NESTING_DEPTH}階層まで対応`
+            `for文の入れ子は最大${MAX_FOR_NESTING_DEPTH}階層まで対応`,
+            index
           );
         }
 
@@ -4236,12 +4282,13 @@ function visualizeCode(){
           containerEndIndex:Math.max(index, safeEndIndex - 1)
         });
         if(!nestedForNode.ok){
-          return failure(nestedForNode.message, nestedForNode.title);
+          return failure(nestedForNode.message, nestedForNode.title, nestedForNode.causeIndex);
         }
         if(nestedForNode.endIndex >= safeEndIndex){
           return failure(
             '子for文の終わりを親for文の本体内で確認できません。外側のfor文全体を実行しません。',
-            '入れ子forの閉じ波かっこを確認'
+            '入れ子forの閉じ波かっこを確認',
+            index
           );
         }
         bodyItems.push({ type:'for', node:nestedForNode });
@@ -4250,45 +4297,45 @@ function visualizeCode(){
       }
 
       if(hasMultipleStatementsOnOneLine(trimmed)){
-        return failure('for文の本体に1行で複数の文が書かれています。本体を部分実行せず、この地点で停止します。', 'for文本体の改行を確認');
+        return failure('for文の本体に1行で複数の文が書かれています。本体を部分実行せず、この地点で停止します。', 'for文本体の改行を確認', index);
       }
       if(/^scanf\b/.test(structuralBodyCode) || /\bscanf\s*\(/.test(structuralBodyCode)){
-        return failure('for文の本体内にscanfがあります。現在のVisualizerではfor内scanfに対応していないため、for文全体を実行しません。', 'for文内のscanfは未対応');
+        return failure('for文の本体内にscanfがあります。現在のVisualizerではfor内scanfに対応していないため、for文全体を実行しません。', 'for文内のscanfは未対応', index);
       }
       const nestedControl = unsupportedControlInfo(structuralBodyCode);
       if(nestedControl){
-        return failure(`for文の本体内に${nestedControl.label}があります。現在のVisualizerでは、この制御構造をfor文内で実行できないため、for文全体を実行しません。`, 'for文内の制御構造は未対応');
+        return failure(`for文の本体内に${nestedControl.label}があります。現在のVisualizerでは、この制御構造をfor文内で実行できないため、for文全体を実行しません。`, 'for文内の制御構造は未対応', index);
       }
       if(/^do\b|^else\b/.test(structuralBodyCode) || bracesOutsideString(executableLines[index]).length > 0){
-        return failure('for文の本体内に、現在のVisualizerでは実行できないブロック構造があります。for文全体を実行しません。', 'for文内のブロックは未対応');
+        return failure('for文の本体内に、現在のVisualizerでは実行できないブロック構造があります。for文全体を実行しません。', 'for文内のブロックは未対応', index);
       }
       if(/^int\b/.test(structuralBodyCode)){
-        return failure('for文の本体内で変数を宣言する形は現在未対応です。for文全体を実行しません。', 'for文内の変数宣言は未対応');
+        return failure('for文の本体内で変数を宣言する形は現在未対応です。for文全体を実行しません。', 'for文内の変数宣言は未対応', index);
       }
       const arrayStatement = validateDirectArrayStatement(trimmed, structuralBodyCode);
       if(!arrayStatement.ok){
-        return failure(arrayStatement.message, arrayStatement.title);
+        return failure(arrayStatement.message, arrayStatement.title, index);
       }
 
       const variableUpdate = parseVariableUpdate(structuralBodyCode, true, true);
       if(/\+\+|--/.test(structuralBodyCode) && variableUpdate === null){
-        return failure('for文の本体に、式中で副作用を利用する++ / --があります。現在のVisualizerでは単独更新文だけに対応しているため、for文全体を実行しません。', '式中の++・--は未対応');
+        return failure('for文の本体に、式中で副作用を利用する++ / --があります。現在のVisualizerでは単独更新文だけに対応しているため、for文全体を実行しません。', '式中の++・--は未対応', index);
       }
 
       const looksLikePrintf = /^printf\b/.test(structuralBodyCode);
       const printfMatch = looksLikePrintf ? matchSimplePrintfStatement(trimmed) : null;
       if(looksLikePrintf && (!printfMatch || printfMatch[1].includes('%%'))){
-        return failure('for文の本体に、既存の単純printfとして安全に実行できない文があります。for文全体を実行しません。', 'for文本体のprintfは未対応');
+        return failure('for文の本体に、既存の単純printfとして安全に実行できない文があります。for文全体を実行しません。', 'for文本体のprintfは未対応', index);
       }
 
       const supportedSimpleStatement =
-        /^return\s+0\s*;?$/.test(structuralBodyCode) ||
+        /^return\s+0\s*;$/.test(structuralBodyCode) ||
         variableUpdate !== null ||
         /^[A-Za-z_]\w*\s*=\s*.+;$/.test(structuralBodyCode) ||
         printfMatch !== null ||
         arrayStatement.matched;
       if(!supportedSimpleStatement){
-        return failure('for文の本体に、現在のVisualizerでは実行できない文があります。本体を部分実行せず、この地点で停止します。', 'for文本体の文は未対応');
+        return failure('for文の本体に、現在のVisualizerでは実行できない文があります。本体を部分実行せず、この地点で停止します。', 'for文本体の文は未対応', index);
       }
       bodyItems.push({ type:'simple', index });
     }
@@ -4306,11 +4353,11 @@ function visualizeCode(){
   }
 
   function warnUnsupportedFor(startIndex, inspection){
-    const lineNo = startIndex + 1;
+    const lineNo = (inspection.causeIndex ?? startIndex) + 1;
     addAnalysis(analysis, lineNo, `${inspection.message} for文の初期化・条件・本体・更新は実行していません。`);
     addHint(hints, lineNo, inspection.title, inspection.message);
     warningLines.add(lineNo);
-    addStep(lineNo, 'このfor文は現在のVisualizerでは実行できないため、プログラムの実行を停止します。', false);
+    addStep(startIndex + 1, 'このfor文は現在のVisualizerでは実行できないため、プログラムの実行を停止します。', false);
 
     for(let index = startIndex + 1; index <= inspection.endIndex && index < executionEndIndex; index++){
       const trimmed = executableLines[index].trim();
@@ -4924,7 +4971,7 @@ function visualizeCode(){
 
     const block = inspectSupportedIf(index);
     if(!block.ok){
-      warnUnsupportedIf(index, block.endIndex, block.title, block.message);
+      warnUnsupportedIf(index, block.endIndex, block.title, block.message, block.causeIndex);
       index = block.endIndex;
       continue;
     }
@@ -4965,11 +5012,18 @@ function visualizeCode(){
   }
 
   if(mainRange && !mainRange.closed){
-    addHint(hints, mainRange.startIndex + 1, 'main関数の終わりを確認', 'main関数を閉じる波かっこが見つからないため、コードの実行を停止しました。');
+    addHint(hints, mainRange.openIndex + 1, 'main関数の終わりを確認', 'main関数を閉じる波かっこが見つからないため、コードの実行を停止しました。');
+    warningLines.add(mainRange.openIndex + 1);
   }
 
-  if(braceBalance !== 0){
-    addHint(hints, null, '波かっこの数を確認', '<code>{</code> と <code>}</code> の数が対応していない可能性があります。処理のまとまりの始まりと終わりを追ってみましょう。');
+  for(const index of extraClosingBraceIndices){
+    addHint(hints, index + 1, '波かっこの数を確認', 'この閉じ波かっこ <code>}</code> に対応する開き波かっこがありません。');
+    warningLines.add(index + 1);
+  }
+  for(const index of new Set(unclosedBraceIndices)){
+    if(index === mainRange?.openIndex && !mainRange.closed) continue;
+    addHint(hints, index + 1, '波かっこの数を確認', 'この行の開き波かっこ <code>{</code> に対応する閉じ波かっこを確認できません。');
+    warningLines.add(index + 1);
   }
 
   const previewHtml = lines.map((line, index) => {
@@ -5118,6 +5172,11 @@ function visualizeCode(){
     hasWarnings,
     inputRequired,
     inputRequest:inputRequired ? inputRequest : null,
+    diagnostics:(hints.diagnostics || []).map(item => {
+      const detail = document.createElement('div');
+      detail.innerHTML = item.message;
+      return { ...item, message:detail.textContent };
+    }),
     warningText:[...document.querySelectorAll('#hintResult .warning-line')]
       .map(item => {
         const title = item.querySelector('strong')?.textContent.trim() || '';
