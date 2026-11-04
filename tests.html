@@ -8344,6 +8344,7 @@
         const decrease=doc.getElementById('editor-font-decrease');
         const reset=doc.getElementById('editor-font-reset');
         const light=doc.getElementById('editor-light-toggle');
+        const paint=()=>new Promise(r=>ui.setTimeout(r,30));
         const size=()=>Math.round(Number.parseFloat(ui.getComputedStyle(wrapper).fontSize));
         const failures=[];
         const initial=size();
@@ -8355,7 +8356,7 @@
         if(!(increase.getBoundingClientRect().right <= light.getBoundingClientRect().left))failures.push('拡大操作がLightの左にありません');
         record('初期値・Light左配置',failures);
 
-        increase.click();
+        increase.click();await paint();
         const plusFailures=[];
         if(size()!==initial+2)plusFailures.push(`A+で2px拡大されない: ${size()}`);
         if(reset.textContent!==`${initial+2}px`)plusFailures.push('サイズ表示が追従しません');
@@ -8364,26 +8365,26 @@
         if(ui.getComputedStyle(doc.getElementById('summary-output')).fontSize!==resultSize)plusFailures.push('RESULT文字サイズが変更されました');
         record('CODE限定拡大・他領域保持',plusFailures);
 
-        decrease.click();
+        decrease.click();await paint();
         record('A−で元のサイズへ',size()===initial?[]:[`戻り値 ${size()}px`]);
 
-        for(let i=0;i<16;i++)increase.click();
+        for(let i=0;i<16;i++){increase.click();await paint();}
         const maxFailures=[];
         if(size()!==26)maxFailures.push(`最大は26px: ${size()}`);
         if(!increase.disabled)maxFailures.push('最大値でA+が無効になりません');
         record('26px上限',maxFailures);
 
-        for(let i=0;i<16;i++)decrease.click();
+        for(let i=0;i<16;i++){decrease.click();await paint();}
         const minFailures=[];
         if(size()!==12)minFailures.push(`最小は12px: ${size()}`);
         if(!decrease.disabled)minFailures.push('最小値でA−が無効になりません');
         record('12px下限',minFailures);
 
-        reset.click();
+        reset.click();await paint();
         const resetFailures=[];
         if(size()!==initial)resetFailures.push(`初期値に戻らない: ${size()}px`);
         if(wrapper.style.fontSize)resetFailures.push('インラインCSSが除去されていません');
-        light.click();increase.click();
+        light.click();increase.click();await paint();
         if(size()!==initial+2)resetFailures.push('Lightでの拡大ができません');
         if(!doc.querySelector('.editor-frame').classList.contains('is-light'))resetFailures.push('Light状態が保持されません');
         record('標準復帰・Light併用',resetFailures);
@@ -8396,7 +8397,7 @@
           cm.refresh();
           if(!doc.querySelector('.CodeMirror-linenumber'))errorFailures.push('行番号が表示されません');
           if(cm.getValue()!==codeBefore)errorFailures.push('コードが保持されません');
-          reset.click();
+          reset.click();await paint();
           frame.style.width='390px';
           await new Promise(resolve=>ui.setTimeout(resolve,100));
           if(size()!==12 || reset.textContent!=='12px' || !decrease.disabled)errorFailures.push('小画面の標準サイズ・操作表示が追従しません');
@@ -8668,7 +8669,7 @@
         record('横Homeは縦設定を保持',Math.abs(rect('.code-panel').width-initialWidth)<1 && rect('.CodeMirror').height===400);
         keydown(h,'Home');await pause();
         record('縦Homeと保存解除',rect('.CodeMirror').height===390 && localStorage.getItem(key)===null);
-        for(let i=0;i<180;i++){keydown(w,'ArrowLeft');keydown(h,'ArrowUp');}
+        for(let i=0;i<180;i++){keydown(w,'ArrowLeft');keydown(h,'ArrowUp');await pause();}
         await pause();
         record('最小幅と高さ',Math.abs(rect('.code-panel').width-380)<1 && rect('.CodeMirror').height===200);
         cm.setSelection({line:0,ch:0},{line:0,ch:4});
@@ -9094,6 +9095,13 @@
       }catch(e){record('例外 '+e,false)}finally{frame.remove()}return results;
     }
 
+    async function checkMaskUiCases(){
+      const frame=document.createElement('iframe');frame.src='tests-mask.html';frame.style.cssText='width:1250px;height:900px';document.body.append(frame);
+      try{await new Promise(r=>frame.onload=r);const end=Date.now()+30000;
+        while(!frame.contentWindow.maskTestResults){if(Date.now()>end)throw Error('MASK timeout');await new Promise(r=>setTimeout(r,50));}
+        return frame.contentWindow.maskTestResults.rows.map(r=>({testCase:{name:'L-MASK1 '+r.name},result:{passed:r.pass,failures:r.pass?[]:[r.name],actual:{output:'製品マスク',warningCount:0}}}));
+      }catch(e){return [{testCase:{name:'L-MASK1 suite'},result:{passed:false,failures:[String(e)],actual:{output:'',warningCount:0}}}]}finally{frame.remove()}
+    }
     async function runAllTests(){
       const results = testCases.map(testCase => ({ testCase, result:checkCase(testCase) }));
       results.push(...await checkDecisionUiCases());
@@ -9117,6 +9125,7 @@
       results.push(...await checkArrayConditionalUiCases());
       results.push(...checkArray4Cases());
       results.push(...await checkArray4UiCases());
+      results.push(...await checkMaskUiCases());
       const passed = results.filter(item => item.result.passed).length;
       const failed = results.length - passed;
 
