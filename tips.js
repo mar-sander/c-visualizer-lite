@@ -19,7 +19,9 @@
     { id: 'while-video', label: 'whileループの動きを動画で見る', kind: 'video',
       src: 'assets/while_loop_value_trace_4x3_v1.mp4' },
     { id: 'array-max-video', label: '配列の最大値探索を動画で見る', kind: 'video',
-      src: 'assets/array_max_value_trace_4x3_v1.mp4' }
+      src: 'assets/array_max_value_trace_4x3_v1.mp4' },
+    { id: 'array-sort-hint-video', label: '配列ソートのヒント動画を見る', kind: 'video',
+      src: 'assets/array_sort_hint_video_v2.mp4' }
   ];
 
   const closeMenu = (restoreFocus = false) => {
