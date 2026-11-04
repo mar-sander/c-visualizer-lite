@@ -1,4 +1,4 @@
-<!doctype html><html lang="ja"><meta charset="utf-8"><title>L-TIPS1 tests</title>
+<!doctype html><html lang="ja"><meta charset="utf-8"><title>L-TIPS1 / L-TIPS2 tests</title>
 <h1>Learning support regression</h1><p id="counts">Running</p><ol id="results"></ol>
 <iframe id="app" src="index.html" style="width:100%;height:900px"></iframe>
 <script>
@@ -6,11 +6,15 @@
  const rows=[],record=(name,pass)=>{rows.push({name,pass:!!pass});if(!pass)throw Error(name)},wait=ms=>new Promise(r=>setTimeout(r,ms));
  const until=async fn=>{for(let n=0;n<200;n++){if(fn())return;await wait(25)}throw Error('timeout')};
  const frame=document.getElementById('app');await new Promise(r=>frame.onload=r);const ui=frame.contentWindow,d=ui.document,$=id=>d.getElementById(id);
- const snapshot=()=>JSON.stringify({code:d.querySelector('.CodeMirror').CodeMirror.getValue(),input:$('scanfInput').value,sample:$('sample-select').value,result:ui.cVisualizerLiteResult,step:ui.eval('activeStep'),history:ui.eval('historyEntries'),storage:{...ui.localStorage},flow:$('flow-content').textContent,summary:d.querySelector('.final-summary').textContent,output:$('output-value').textContent,slider:$('step-slider').value});
+ const snapshot=()=>JSON.stringify({code:d.querySelector('.CodeMirror').CodeMirror.getValue(),input:$('scanfInput').value,sample:$('sample-select').value,result:ui.cVisualizerLiteResult,step:ui.eval('activeStep'),history:ui.eval('historyEntries'),storage:{...ui.localStorage},flow:$('flow-content').textContent,summary:d.querySelector('.final-summary').textContent,output:$('output-value').textContent,slider:$('step-slider').value,undo:d.querySelector('.CodeMirror').CodeMirror.getHistory(),selection:d.querySelector('.CodeMirror').CodeMirror.listSelections(),editorScroll:d.querySelector('.CodeMirror').CodeMirror.getScrollInfo()});
  const open=()=>{$('tips-open').click();d.querySelector('.tips-menu-item').click()};
+ const topics=[
+ {id:'for-video',label:'forループの動きを動画で見る',src:'assets/for_loop_value_trace_4x3_v2.mp4'},
+ {id:'nested-for-video',label:'for二重ループを動画で見る',src:'assets/for_nested_loop_3x3_visual_trace_v3_fixed.mp4'}];
  try{
  record('SAMPLE直後にボタン',d.querySelector('.sample-picker').nextElementSibling.id==='tips-control');
  record('初期状態は非表示',!$('tips-dialog').open&&$('tips-menu').hidden);
+ record('L-TIPS2 2件だけを既存→二重forの順に登録',JSON.stringify([...d.querySelectorAll('.tips-menu-item')].map(x=>({id:x.dataset.topic,label:x.textContent})))===JSON.stringify(topics.map(({id,label})=>({id,label}))));
  record('最初の教材名',d.querySelector('.tips-menu-item').textContent==='forループの動きを動画で見る');
  for(const state of ['未実行','RESULT','FLOW','コード編集中']){
  if(state==='RESULT'){d.querySelector('.CodeMirror').CodeMirror.setValue('#include <stdio.h>\nint main(void){\nint i;\nfor(i=0;i<3;i++){\nprintf("%d",i);\n}\nreturn 0;\n}');$('scanfInput').value='42\n7';$('visualize').click()}
@@ -28,6 +32,25 @@
  await until(()=>!$('tips-dialog').open&&$('tips-video').paused&&$('tips-video').currentTime===0&&d.activeElement===$('tips-open'));record(state+' '+way+' 閉じて停止',true);
  const after=snapshot();if(after!==before){const a=JSON.parse(before),b=JSON.parse(after);throw Error('changed fields: '+Object.keys(a).filter(k=>JSON.stringify(a[k])!==JSON.stringify(b[k])).join(','))}
  record(state+' '+way+' コード・INPUT・結果・STEP・履歴・storage維持',true);
+ }
+ // Keep all L-TIPS1 cases; exercise both sources and all close paths in each application state.
+ for(const topicIndex of [1,0]){
+ const topic=topics[topicIndex];
+ for(const way of ['button','backdrop','escape']){
+ const prefix='L-TIPS2 '+state+' '+topic.id+' '+way+' ';
+ $('tips-open').click();d.querySelectorAll('.tips-menu-item')[topicIndex].click();
+ const v=$('tips-video');await until(()=>v.readyState>=1&&!v.error);
+ record(prefix+'同一dialog・タイトル・src切替', $('tips-dialog').open&&$('tips-dialog-title').textContent===topic.label&&v.querySelector('source').getAttribute('src')===topic.src&&v.currentSrc.endsWith(topic.src));
+ record(prefix+'メニュー閉・focus・自動再生なし',$('tips-menu').hidden&&$('tips-open').getAttribute('aria-expanded')==='false'&&d.activeElement===$('tips-dialog-close')&&v.paused&&!v.autoplay&&v.currentTime===0);
+ v.currentTime=Math.min(5,v.duration/2);await until(()=>!v.seeking&&v.currentTime>0);
+ record(prefix+'読み込み・4:3・シーク',v.videoWidth===1600&&v.videoHeight===1200&&v.currentTime>0);
+ if(way==='button')$('tips-dialog-close').click();
+ if(way==='backdrop')$('tips-dialog').dispatchEvent(new ui.MouseEvent('click',{bubbles:true,clientX:0,clientY:0}));
+ if(way==='escape')$('tips-dialog').dispatchEvent(new ui.Event('cancel',{cancelable:true}));
+ await until(()=>!$('tips-dialog').open&&v.paused&&v.currentTime===0&&d.activeElement===$('tips-open'));
+ record(prefix+'停止・先頭・focus復帰',true);
+ record(prefix+'全状態・undo・選択・editorスクロール維持',snapshot()===before);
+ }
  }
  }
  $('tips-open').click();d.dispatchEvent(new ui.KeyboardEvent('keydown',{key:'Escape',bubbles:true}));record('メニューEsc', $('tips-menu').hidden);
