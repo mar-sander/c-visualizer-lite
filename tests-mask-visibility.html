@@ -1,5 +1,5 @@
-<!doctype html><meta charset="utf-8"><title>L-MASK1 FA1 RC2 visibility tests</title>
-<h1>L-MASK1 Final Adjustment 1 — RC2</h1><pre id="counts">実行中</pre><ol id="results"></ol>
+<!doctype html><meta charset="utf-8"><title>L-MASK2 RC1 visibility tests</title>
+<h1>L-MASK2 RC1 — Unified Revealed Mask Outline</h1><pre id="counts">実行中</pre><ol id="results"></ol>
 <script>
 (async()=>{
   const rows=[],record=(name,pass)=>rows.push({name,pass:!!pass});
@@ -31,6 +31,24 @@
       record(label+' シンタックス文字色不変',JSON.stringify(colors())===JSON.stringify(before));
       record(label+' 本文・コードUndo不変',cm.getValue()===code&&cm.historySize().undo===0);
       await wait(400);
+      for(const text of ['a[1]', '= 50;', 'main(void)', 'data[i] + 10', 'printf("%d\\n", a[1]);', 'x']){
+        cm.setValue(text);await wait(30);
+        cm.setSelection({line:0,ch:0},{line:0,ch:text.length});
+        cm.getWrapperElement().dispatchEvent(new ui.KeyboardEvent('keyup',{key:'Shift',bubbles:true}));await wait(180);
+        el=d.querySelector('[data-code-mask]');
+        for(const type of ['pointerdown','pointerup'])el.dispatchEvent(new ui.PointerEvent(type,{pointerId:5,clientX:10,clientY:10,bubbles:true}));
+        const spans=[...d.querySelectorAll('.cm-code-mask-open')];
+        record(label+' '+text+' 範囲両端だけ縦線',
+          spans.filter(s=>s.classList.contains('cm-code-mask-start')).length===1&&
+          spans.filter(s=>s.classList.contains('cm-code-mask-end')).length===1&&
+          spans.every((s,i)=>{
+            const edges=(ui.getComputedStyle(s).boxShadow.match(/inset/g)||[]).length;
+            return edges===(spans.length===1?1:(i===0||i===spans.length-1?3:2));
+          }));
+        const rects=spans.map(s=>s.getBoundingClientRect());
+        record(label+' '+text+' 上下線連続・字間不変',rects.length>0&&rects.every((r,i)=>!i||(Math.abs(rects[i-1].right-r.left)<.1&&Math.abs(rects[i-1].top-r.top)<.1&&Math.abs(rects[i-1].bottom-r.bottom)<.1)));
+        await wait(400);
+      }
     }
   }catch(e){record('例外 '+e.stack,false)}finally{frame.remove();saved===null?localStorage.removeItem(key):localStorage.setItem(key,saved)}
   window.maskVisibilityResults={total:rows.length,pass:rows.filter(r=>r.pass).length,fail:rows.filter(r=>!r.pass).length,rows};

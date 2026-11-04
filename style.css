@@ -3400,7 +3400,21 @@ body {
   -webkit-text-fill-color: transparent !important;
 }
 .editor-frame .CodeMirror .cm-code-mask-open {
-  /* L-MASK1 FA1: keep the revealed range visible without overpowering syntax. */
-  box-shadow: inset 0 0 0 1px rgba(214, 188, 0, .48);
+  /* L-MASK2: token fragments share horizontal edges; only range ends close them. */
+  --mask-edge: rgba(214, 188, 0, .48);
+  box-shadow: inset 0 1px var(--mask-edge), inset 0 -1px var(--mask-edge);
+  border-radius: 0;
   background: rgba(255, 230, 0, .06);
+}
+.editor-frame .CodeMirror .cm-code-mask-open.cm-code-mask-start {
+  box-shadow: inset 0 1px var(--mask-edge), inset 0 -1px var(--mask-edge), inset 1px 0 var(--mask-edge);
+  border-radius: 2px 0 0 2px;
+}
+.editor-frame .CodeMirror .cm-code-mask-open.cm-code-mask-end {
+  box-shadow: inset 0 1px var(--mask-edge), inset 0 -1px var(--mask-edge), inset -1px 0 var(--mask-edge);
+  border-radius: 0 2px 2px 0;
+}
+.editor-frame .CodeMirror .cm-code-mask-open.cm-code-mask-start.cm-code-mask-end {
+  box-shadow: inset 0 0 0 1px var(--mask-edge);
+  border-radius: 2px;
 }
