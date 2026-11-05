@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>L-FUNC3 関数コア・開発専用検証</title>
+<style>
+body{font:16px/1.65 system-ui,sans-serif;margin:0;background:#f5f6f8;color:#18222f}main{max-width:1100px;margin:auto;padding:24px}h1{font-size:1.7rem;line-height:1.35}.notice{background:#fff4cc;padding:16px;border-left:5px solid #d59e00}section{background:white;border:1px solid #d9dee5;border-radius:10px;margin-top:20px;padding:20px}textarea{box-sizing:border-box;width:100%;min-height:400px;font:14px/1.6 monospace;padding:12px;border:1px solid #9ca9b9;border-radius:6px}button,select{font:inherit;padding:9px 12px;margin:4px 8px 10px 0;max-width:100%}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f0f3f6;padding:14px}.pass{color:#12663a}.fail{color:#a32121}.table{overflow:auto}table{border-collapse:collapse;min-width:720px;width:100%;font-size:14px}th,td{text-align:left;border-bottom:1px solid #d9dee5;padding:8px;vertical-align:top}td pre{font-size:12px;margin:0;padding:6px}summary{cursor:pointer;font-weight:650}@media(max-width:520px){main{padding:14px}section{padding:14px}h1{font-size:1.4rem}}
+</style>
+<main>
+<h1>L-FUNC3：06(1) 関数コアの検証</h1>
+<p class="notice"><strong>開発・テスト専用です。</strong>製品RUN／INPUT／FUNCTION ASSISTには未接続です。教材06(1)は空欄を補った想定コードです。06(2)の分岐は未対応として停止します。</p>
+<section><h2>自動テスト</h2><p id="test-summary">実行中</p><details><summary>全検査を表示</summary><ol id="test-results"></ol></details></section>
+<section><h2>実ソースを関数コアで実行</h2><label for="example">確認例</label><br><select id="example"><option value="textbook">06(1) 想定補完：7を返す</option><option value="twice">同じ関数を2回呼ぶ</option><option value="error">0除算：mainへの代入を抑止</option><option value="difference">06(2)：未対応として停止</option></select><button id="execute" type="button">テスト専用入口で実行</button><label for="source" style="display:block">Cソース</label><textarea id="source" spellcheck="false"></textarea><h3>コアの結果</h3><pre id="core-result" aria-live="polite"></pre></section>
+<section><h2>呼出・局所状態・復帰の時系列</h2><p>各STEPは元ソースの行番号と、main／活動中の関数の独立snapshotです。</p><div class="table"><table><thead><tr><th>STEP / 元行</th><th>イベント</th><th>関数・呼出・scope</th><th>時点の変数</th><th>時点の出力</th></tr></thead><tbody id="timeline"></tbody></table></div></section>
+</main>
+<div hidden><textarea id="codeInput"></textarea><textarea id="scanfInput"></textarea><pre id="codeHighlight"></pre><pre id="codeLineNumbers"></pre><div id="outputResult"></div><div id="variableState"></div><div id="stepResult"></div><div id="codePreview"></div><div id="hintResult"></div></div>
+<script src="script.js"></script><script src="function-preflight.js"></script><script src="function-execution-core.js"></script><script src="tests-function-execution-core.js"></script>
+<script>
+'use strict';
+const productSentinel=JSON.stringify(window.cVisualizerLiteResult),domSentinel=document.getElementById('hintResult').innerHTML;
+const coreReport=FunctionExecutionCoreTests.run(FunctionExecutionCore);
+coreReport.rows.push({name:'Browser: product result and DOM unchanged',pass:JSON.stringify(window.cVisualizerLiteResult)===productSentinel&&document.getElementById('hintResult').innerHTML===domSentinel});
+coreReport.total=coreReport.rows.length;coreReport.passed=coreReport.rows.filter(x=>x.pass).length;coreReport.failed=coreReport.total-coreReport.passed;
+window.functionCoreTestResults=coreReport;
+document.getElementById('test-summary').textContent=coreReport.passed+' / '+coreReport.total+' PASS · '+coreReport.failed+' FAIL';
+document.getElementById('test-summary').className=coreReport.failed?'fail':'pass';
+for(const row of coreReport.rows){const li=document.createElement('li');li.textContent=(row.pass?'PASS ':'FAIL ')+row.name+(row.error?' — '+row.error:'');li.className=row.pass?'pass':'fail';document.getElementById('test-results').append(li);}
+function showExample(){document.getElementById('source').value=FunctionExecutionCoreTests.examples[document.getElementById('example').value];runCore();}
+function runCore(){
+ const result=FunctionExecutionCore.execute(document.getElementById('source').value);window.functionCorePreviewResult=result;
+ document.getElementById('core-result').textContent=JSON.stringify({status:result.status,output:result.output,main:result.variables,diagnostics:result.diagnostics,metrics:result.metrics},null,2);
+ const body=document.getElementById('timeline');body.replaceChildren();
+ for(const step of result.steps){const tr=document.createElement('tr');for(const text of [step.step+' / '+step.lineNo+'行',step.functionEvent,step.functionName+' / call '+step.callId+' / '+step.scopeId,step.scopesAtStep.map(scope=>scope.scopeId+': '+scope.variables.map(v=>v.name+'='+v.display).join(', ')).join('\n'),JSON.stringify(step.outputAtStep)]){const td=document.createElement('td');td.textContent=text;tr.append(td);}body.append(tr);}
+}
+document.getElementById('example').addEventListener('change',showExample);document.getElementById('execute').addEventListener('click',runCore);showExample();
+</script></html>

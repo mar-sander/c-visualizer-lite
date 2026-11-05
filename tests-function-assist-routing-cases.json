@@ -1,0 +1,1767 @@
+[
+  {
+    "name": "mainより前の文を実行しない",
+    "code": "#include <stdio.h>\n\nint outside = 99;\nprintf(\"OUTSIDE-BEFORE\\n\");\n\nint main(void){\n    int inside = 1;\n    printf(\"MAIN\\n\");\n    return 0;\n}",
+    "input": "",
+    "expect": {
+      "output": "MAIN",
+      "outputExcludes": [
+        "OUTSIDE-BEFORE"
+      ],
+      "variables": [
+        "inside = 1"
+      ],
+      "variablesExclude": [
+        "outside ="
+      ],
+      "warningMax": 0,
+      "executedExcludes": [
+        "int outside = 99;",
+        "printf(\"OUTSIDE-BEFORE"
+      ]
+    },
+    "baselineCasePassed": true,
+    "classification": "UNSUPPORTED",
+    "hasSubfunction": false,
+    "diagnostics": [
+      {
+        "code": "GLOBAL_DECLARATION",
+        "message": "main外の変数等の宣言は初期FUNCTION範囲外です。",
+        "category": "UNSUPPORTED",
+        "severity": "error",
+        "line": 3,
+        "range": {
+          "start": {
+            "offset": 20,
+            "line": 3,
+            "column": 1
+          },
+          "end": {
+            "offset": 37,
+            "line": 3,
+            "column": 18
+          }
+        }
+      },
+      {
+        "code": "COMPLEX_DECLARATION",
+        "message": "関数ポインタ等の複雑な宣言は対応外です。",
+        "category": "UNSUPPORTED",
+        "severity": "error",
+        "line": 4,
+        "range": {
+          "start": {
+            "offset": 38,
+            "line": 4,
+            "column": 1
+          },
+          "end": {
+            "offset": 65,
+            "line": 4,
+            "column": 28
+          }
+        }
+      }
+    ],
+    "normal": {
+      "steps": [
+        {
+          "step": 1,
+          "lineNo": 7,
+          "text": "inside という整数型の箱を作り、1 を代入しました。",
+          "outputAtStep": "",
+          "variablesAtStep": [
+            [
+              "inside",
+              "1"
+            ]
+          ]
+        },
+        {
+          "step": 2,
+          "lineNo": 8,
+          "text": "画面に「MAIN」を表示しました。",
+          "outputAtStep": "MAIN\n",
+          "variablesAtStep": [
+            [
+              "inside",
+              "1"
+            ]
+          ]
+        },
+        {
+          "step": 3,
+          "lineNo": 9,
+          "text": "プログラムを終了します。",
+          "outputAtStep": "MAIN\n",
+          "variablesAtStep": [
+            [
+              "inside",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "output": "MAIN\n",
+      "arrays": [],
+      "variables": [
+        [
+          "inside",
+          "1"
+        ]
+      ],
+      "variableTypes": {
+        "inside": "int"
+      },
+      "learningHints": {
+        "missingReturnZero": false
+      },
+      "hasMain": true,
+      "hasWarnings": false,
+      "inputRequired": false,
+      "inputRequest": null,
+      "diagnostics": [],
+      "warningText": []
+    }
+  },
+  {
+    "name": "mainより後の文を実行しない",
+    "code": "#include <stdio.h>\n\nint main(void){\n    int inside = 1;\n    printf(\"MAIN\\n\");\n    return 0;\n}\n\nint outside = 99;\nprintf(\"OUTSIDE-AFTER\\n\");",
+    "input": "",
+    "expect": {
+      "output": "MAIN",
+      "outputExcludes": [
+        "OUTSIDE-AFTER"
+      ],
+      "variables": [
+        "inside = 1"
+      ],
+      "variablesExclude": [
+        "outside ="
+      ],
+      "warningMax": 0,
+      "executedExcludes": [
+        "int outside = 99;",
+        "printf(\"OUTSIDE-AFTER"
+      ]
+    },
+    "baselineCasePassed": true,
+    "classification": "UNSUPPORTED",
+    "hasSubfunction": false,
+    "diagnostics": [
+      {
+        "code": "GLOBAL_DECLARATION",
+        "message": "main外の変数等の宣言は初期FUNCTION範囲外です。",
+        "category": "UNSUPPORTED",
+        "severity": "error",
+        "line": 9,
+        "range": {
+          "start": {
+            "offset": 95,
+            "line": 9,
+            "column": 1
+          },
+          "end": {
+            "offset": 112,
+            "line": 9,
+            "column": 18
+          }
+        }
+      },
+      {
+        "code": "COMPLEX_DECLARATION",
+        "message": "関数ポインタ等の複雑な宣言は対応外です。",
+        "category": "UNSUPPORTED",
+        "severity": "error",
+        "line": 10,
+        "range": {
+          "start": {
+            "offset": 113,
+            "line": 10,
+            "column": 1
+          },
+          "end": {
+            "offset": 139,
+            "line": 10,
+            "column": 27
+          }
+        }
+      }
+    ],
+    "normal": {
+      "steps": [
+        {
+          "step": 1,
+          "lineNo": 4,
+          "text": "inside という整数型の箱を作り、1 を代入しました。",
+          "outputAtStep": "",
+          "variablesAtStep": [
+            [
+              "inside",
+              "1"
+            ]
+          ]
+        },
+        {
+          "step": 2,
+          "lineNo": 5,
+          "text": "画面に「MAIN」を表示しました。",
+          "outputAtStep": "MAIN\n",
+          "variablesAtStep": [
+            [
+              "inside",
+              "1"
+            ]
+          ]
+        },
+        {
+          "step": 3,
+          "lineNo": 6,
+          "text": "プログラムを終了します。",
+          "outputAtStep": "MAIN\n",
+          "variablesAtStep": [
+            [
+              "inside",
+              "1"
+            ]
+          ]
+        }
+      ],
+      "output": "MAIN\n",
+      "arrays": [],
+      "variables": [
+        [
+          "inside",
+          "1"
+        ]
+      ],
+      "variableTypes": {
+        "inside": "int"
+      },
+      "learningHints": {
+        "missingReturnZero": false
+      },
+      "hasMain": true,
+      "hasWarnings": false,
+      "inputRequired": false,
+      "inputRequest": null,
+      "diagnostics": [],
+      "warningText": []
+    }
+  },
+  {
+    "name": "mainより前のユーザー定義関数を実行しない",
+    "code": "#include <stdio.h>\n\nint helper(void){\n    int helperValue = 7;\n    printf(\"HELPER-BEFORE\\n\");\n    return 0;\n}\n\nint main(void){\n    printf(\"MAIN\\n\");\n    return 0;\n}",
+    "input": "",
+    "expect": {
+      "output": "MAIN",
+      "outputExcludes": [
+        "HELPER-BEFORE"
+      ],
+      "variablesExclude": [
+        "helperValue ="
+      ],
+      "warningMax": 0,
+      "executedExcludes": [
+        "printf(\"HELPER-BEFORE"
+      ]
+    },
+    "baselineCasePassed": true,
+    "classification": "UNSUPPORTED",
+    "hasSubfunction": true,
+    "diagnostics": [
+      {
+        "code": "FUNCTION_SIGNATURE_UNSUPPORTED",
+        "message": "初期範囲は戻り型int・名前付きint仮引数2個の定義です。その他の署名はLiteの対応外です。",
+        "category": "UNSUPPORTED",
+        "severity": "error",
+        "line": 3,
+        "range": {
+          "start": {
+            "offset": 20,
+            "line": 3,
+            "column": 1
+          },
+          "end": {
+            "offset": 36,
+            "line": 3,
+            "column": 17
+          }
+        }
+      }
+    ],
+    "normal": {
+      "steps": [
+        {
+          "step": 1,
+          "lineNo": 10,
+          "text": "画面に「MAIN」を表示しました。",
+          "outputAtStep": "MAIN\n",
+          "variablesAtStep": []
+        },
+        {
+          "step": 2,
+          "lineNo": 11,
+          "text": "プログラムを終了します。",
+          "outputAtStep": "MAIN\n",
+          "variablesAtStep": []
+        }
+      ],
+      "output": "MAIN\n",
+      "arrays": [],
+      "variables": [],
+      "variableTypes": {},
+      "learningHints": {
+        "missingReturnZero": false
+      },
+      "hasMain": true,
+      "hasWarnings": false,
+      "inputRequired": false,
+      "inputRequest": null,
+      "diagnostics": [],
+      "warningText": []
+    }
+  },
+  {
+    "name": "mainより後のユーザー定義関数を実行しない",
+    "code": "#include <stdio.h>\n\nint main(void){\n    printf(\"MAIN\\n\");\n    return 0;\n}\n\nint helper(void){\n    int helperValue = 7;\n    printf(\"HELPER-AFTER\\n\");\n    return 0;\n}",
+    "input": "",
+    "expect": {
+      "output": "MAIN",
+      "outputExcludes": [
+        "HELPER-AFTER"
+      ],
+      "variablesExclude": [
+        "helperValue ="
+      ],
+      "warningMax": 0,
+      "executedExcludes": [
+        "printf(\"HELPER-AFTER"
+      ]
+    },
+    "baselineCasePassed": true,
+    "classification": "UNSUPPORTED",
+    "hasSubfunction": true,
+    "diagnostics": [
+      {
+        "code": "FUNCTION_SIGNATURE_UNSUPPORTED",
+        "message": "初期範囲は戻り型int・名前付きint仮引数2個の定義です。その他の署名はLiteの対応外です。",
+        "category": "UNSUPPORTED",
+        "severity": "error",
+        "line": 8,
+        "range": {
+          "start": {
+            "offset": 75,
+            "line": 8,
+            "column": 1
+          },
+          "end": {
+            "offset": 91,
+            "line": 8,
+            "column": 17
+          }
+        }
+      }
+    ],
+    "normal": {
+      "steps": [
+        {
+          "step": 1,
+          "lineNo": 4,
+          "text": "画面に「MAIN」を表示しました。",
+          "outputAtStep": "MAIN\n",
+          "variablesAtStep": []
+        },
+        {
+          "step": 2,
+          "lineNo": 5,
+          "text": "プログラムを終了します。",
+          "outputAtStep": "MAIN\n",
+          "variablesAtStep": []
+        }
+      ],
+      "output": "MAIN\n",
+      "arrays": [],
+      "variables": [],
+      "variableTypes": {},
+      "learningHints": {
+        "missingReturnZero": false
+      },
+      "hasMain": true,
+      "hasWarnings": false,
+      "inputRequired": false,
+      "inputRequest": null,
+      "diagnostics": [],
+      "warningText": []
+    }
+  },
+  {
+    "name": "閉じられていないmainを実行しない",
+    "code": "#include <stdio.h>\n\nint main(void){\n    int value = 1;\n    printf(\"WRONG\\n\");\n    return 0;",
+    "input": "",
+    "expect": {
+      "output": "出力はまだありません。",
+      "outputExcludes": [
+        "WRONG"
+      ],
+      "variablesExclude": [
+        "value ="
+      ],
+      "warningMin": 1,
+      "hintsInclude": [
+        "main関数の終わりを確認"
+      ],
+      "executedExcludes": [
+        "int value = 1;",
+        "printf(\"WRONG",
+        "return 0;"
+      ]
+    },
+    "baselineCasePassed": true,
+    "classification": "AMBIGUOUS",
+    "hasSubfunction": false,
+    "diagnostics": [
+      {
+        "code": "UNCLOSED_DELIMITER",
+        "message": "閉じ括弧が不足し、範囲を確定できません。",
+        "category": "AMBIGUOUS",
+        "severity": "error",
+        "line": 3,
+        "range": {
+          "start": {
+            "offset": 34,
+            "line": 3,
+            "column": 15
+          },
+          "end": {
+            "offset": 35,
+            "line": 3,
+            "column": 16
+          }
+        }
+      }
+    ],
+    "normal": {
+      "steps": [],
+      "output": "",
+      "arrays": [],
+      "variables": [],
+      "variableTypes": {},
+      "learningHints": {
+        "missingReturnZero": false
+      },
+      "hasMain": true,
+      "hasWarnings": true,
+      "inputRequired": false,
+      "inputRequest": null,
+      "diagnostics": [
+        {
+          "lineNo": 3,
+          "title": "main関数の終わりを確認",
+          "message": "main関数を閉じる波かっこが見つからないため、コードの実行を停止しました。"
+        }
+      ],
+      "warningText": [
+        "3行目：main関数の終わりを確認：main関数を閉じる波かっこが見つからないため、コードの実行を停止しました。"
+      ]
+    }
+  },
+  {
+    "name": "閉じられていないブロックコメントでは実行しない",
+    "code": "#include <stdio.h>\n\nint main(void){\n    int value = 1;\n    /* コメントが閉じていない\n    }\n    printf(\"WRONG-UNCLOSED-COMMENT\\n\");\n    return 0;",
+    "input": "",
+    "expect": {
+      "output": "出力はまだありません。",
+      "outputExcludes": [
+        "WRONG-UNCLOSED-COMMENT"
+      ],
+      "variablesExclude": [
+        "value ="
+      ],
+      "warningMin": 1,
+      "hintsInclude": [
+        "main関数の終わりを確認"
+      ],
+      "executedExcludes": [
+        "int value = 1;",
+        "printf(\"WRONG-UNCLOSED-COMMENT",
+        "return 0;"
+      ]
+    },
+    "baselineCasePassed": true,
+    "classification": "AMBIGUOUS",
+    "hasSubfunction": false,
+    "diagnostics": [
+      {
+        "code": "UNCLOSED_COMMENT",
+        "message": "ブロックコメントの終わりを確認できません。",
+        "category": "AMBIGUOUS",
+        "severity": "error",
+        "line": 5,
+        "range": {
+          "start": {
+            "offset": 59,
+            "line": 5,
+            "column": 5
+          },
+          "end": {
+            "offset": 133,
+            "line": 8,
+            "column": 14
+          }
+        }
+      },
+      {
+        "code": "UNCLOSED_DELIMITER",
+        "message": "閉じ括弧が不足し、範囲を確定できません。",
+        "category": "AMBIGUOUS",
+        "severity": "error",
+        "line": 3,
+        "range": {
+          "start": {
+            "offset": 34,
+            "line": 3,
+            "column": 15
+          },
+          "end": {
+            "offset": 35,
+            "line": 3,
+            "column": 16
+          }
+        }
+      }
+    ],
+    "normal": {
+      "steps": [],
+      "output": "",
+      "arrays": [],
+      "variables": [],
+      "variableTypes": {},
+      "learningHints": {
+        "missingReturnZero": true
+      },
+      "hasMain": true,
+      "hasWarnings": true,
+      "inputRequired": false,
+      "inputRequest": null,
+      "diagnostics": [
+        {
+          "lineNo": null,
+          "title": "return 0; が見当たりません",
+          "message": "学習用の基本形として、最後に return 0; を書く形も確認しておきましょう。"
+        },
+        {
+          "lineNo": 3,
+          "title": "main関数の終わりを確認",
+          "message": "main関数を閉じる波かっこが見つからないため、コードの実行を停止しました。"
+        }
+      ],
+      "warningText": [
+        "return 0; が見当たりません：学習用の基本形として、最後に return 0; を書く形も確認しておきましょう。",
+        "3行目：main関数の終わりを確認：main関数を閉じる波かっこが見つからないため、コードの実行を停止しました。"
+      ]
+    }
+  },
+  {
+    "name": "Stage1 壊れた子forの波かっこで親外へ解析を拡張しない",
+    "code": "#include <stdio.h>\n\nint main(void){\n    int i = 9;\n    int j = 8;\n    for(i = 0; i < 1; i++){\n        for(j = 0; j < 1; j++){\n            printf(\"WRONG-BROKEN-CHILD\");\n    }\n    printf(\"WRONG-AFTER-BROKEN\");\n    return 0;\n}",
+    "input": "",
+    "expect": {
+      "output": "出力はまだありません。",
+      "outputExcludes": [
+        "WRONG"
+      ],
+      "variablesExclude": [
+        "i =",
+        "j ="
+      ],
+      "warningMin": 1,
+      "hintsInclude": [
+        "main関数の終わりを確認"
+      ],
+      "stepCounts": {
+        "for文の初期化": 0
+      }
+    },
+    "baselineCasePassed": true,
+    "classification": "AMBIGUOUS",
+    "hasSubfunction": false,
+    "diagnostics": [
+      {
+        "code": "UNCLOSED_DELIMITER",
+        "message": "閉じ括弧が不足し、範囲を確定できません。",
+        "category": "AMBIGUOUS",
+        "severity": "error",
+        "line": 3,
+        "range": {
+          "start": {
+            "offset": 34,
+            "line": 3,
+            "column": 15
+          },
+          "end": {
+            "offset": 35,
+            "line": 3,
+            "column": 16
+          }
+        }
+      }
+    ],
+    "normal": {
+      "steps": [],
+      "output": "",
+      "arrays": [],
+      "variables": [],
+      "variableTypes": {},
+      "learningHints": {
+        "missingReturnZero": false
+      },
+      "hasMain": true,
+      "hasWarnings": true,
+      "inputRequired": false,
+      "inputRequest": null,
+      "diagnostics": [
+        {
+          "lineNo": 3,
+          "title": "main関数の終わりを確認",
+          "message": "main関数を閉じる波かっこが見つからないため、コードの実行を停止しました。"
+        }
+      ],
+      "warningText": [
+        "3行目：main関数の終わりを確認：main関数を閉じる波かっこが見つからないため、コードの実行を停止しました。"
+      ]
+    }
+  },
+  {
+    "name": "Stage3 不完全な内側braceでは後続mainを実行しない",
+    "code": "#include <stdio.h>\n\nint main(void){\n    int i = 9;\n    for(i = 0; i < 1; i++){\n        if(1){\n            printf(\"WRONG-INNER\");\n    }\n    printf(\"WRONG-AFTER-FOR\");\n    return 0;\n}",
+    "input": "",
+    "expect": {
+      "output": "出力はまだありません。",
+      "outputExcludes": [
+        "WRONG"
+      ],
+      "variablesExclude": [
+        "i ="
+      ],
+      "warningMin": 1,
+      "hintsInclude": [
+        "main関数の終わりを確認"
+      ],
+      "stepCounts": {
+        "for文の初期化": 0
+      },
+      "executedExcludes": [
+        "printf(\"WRONG-INNER",
+        "printf(\"WRONG-AFTER-FOR"
+      ]
+    },
+    "baselineCasePassed": true,
+    "classification": "AMBIGUOUS",
+    "hasSubfunction": false,
+    "diagnostics": [
+      {
+        "code": "UNCLOSED_DELIMITER",
+        "message": "閉じ括弧が不足し、範囲を確定できません。",
+        "category": "AMBIGUOUS",
+        "severity": "error",
+        "line": 3,
+        "range": {
+          "start": {
+            "offset": 34,
+            "line": 3,
+            "column": 15
+          },
+          "end": {
+            "offset": 35,
+            "line": 3,
+            "column": 16
+          }
+        }
+      }
+    ],
+    "normal": {
+      "steps": [],
+      "output": "",
+      "arrays": [],
+      "variables": [],
+      "variableTypes": {},
+      "learningHints": {
+        "missingReturnZero": false
+      },
+      "hasMain": true,
+      "hasWarnings": true,
+      "inputRequired": false,
+      "inputRequest": null,
+      "diagnostics": [
+        {
+          "lineNo": 3,
+          "title": "main関数の終わりを確認",
+          "message": "main関数を閉じる波かっこが見つからないため、コードの実行を停止しました。"
+        }
+      ],
+      "warningText": [
+        "3行目：main関数の終わりを確認：main関数を閉じる波かっこが見つからないため、コードの実行を停止しました。"
+      ]
+    }
+  },
+  {
+    "name": "Stage1A 閉じbrace不足のwhileを実行しない",
+    "code": "#include <stdio.h>\n\nint main(void){\n    int i = 0;\n    while(i < 1){\n        i++;\n    return 0;\n}",
+    "input": "",
+    "expect": {
+      "output": "出力はまだありません。",
+      "variablesExclude": [
+        "i ="
+      ],
+      "warningMin": 1,
+      "hintsInclude": [
+        "main関数の終わりを確認"
+      ],
+      "executedExcludes": [
+        "i++;",
+        "return 0;"
+      ]
+    },
+    "baselineCasePassed": true,
+    "classification": "AMBIGUOUS",
+    "hasSubfunction": false,
+    "diagnostics": [
+      {
+        "code": "UNCLOSED_DELIMITER",
+        "message": "閉じ括弧が不足し、範囲を確定できません。",
+        "category": "AMBIGUOUS",
+        "severity": "error",
+        "line": 3,
+        "range": {
+          "start": {
+            "offset": 34,
+            "line": 3,
+            "column": 15
+          },
+          "end": {
+            "offset": 35,
+            "line": 3,
+            "column": 16
+          }
+        }
+      }
+    ],
+    "normal": {
+      "steps": [],
+      "output": "",
+      "arrays": [],
+      "variables": [],
+      "variableTypes": {},
+      "learningHints": {
+        "missingReturnZero": false
+      },
+      "hasMain": true,
+      "hasWarnings": true,
+      "inputRequired": false,
+      "inputRequest": null,
+      "diagnostics": [
+        {
+          "lineNo": 3,
+          "title": "main関数の終わりを確認",
+          "message": "main関数を閉じる波かっこが見つからないため、コードの実行を停止しました。"
+        }
+      ],
+      "warningText": [
+        "3行目：main関数の終わりを確認：main関数を閉じる波かっこが見つからないため、コードの実行を停止しました。"
+      ]
+    }
+  },
+  {
+    "name": "Stage1A 閉じ角かっこ不足を拒否",
+    "code": "#include <stdio.h>\n\nint main(void){\n    int a[5;\n    return 0;\n}",
+    "input": "",
+    "expect": {
+      "arrayCount": 0,
+      "warningMin": 1,
+      "hintsInclude": [
+        "配列宣言の書き方を確認"
+      ]
+    },
+    "baselineCasePassed": true,
+    "classification": "AMBIGUOUS",
+    "hasSubfunction": false,
+    "diagnostics": [
+      {
+        "code": "MISMATCHED_DELIMITER",
+        "message": "括弧の対応を確認できません。",
+        "category": "AMBIGUOUS",
+        "severity": "error",
+        "line": 6,
+        "range": {
+          "start": {
+            "offset": 63,
+            "line": 6,
+            "column": 1
+          },
+          "end": {
+            "offset": 64,
+            "line": 6,
+            "column": 2
+          }
+        }
+      }
+    ],
+    "normal": {
+      "steps": [
+        {
+          "step": 1,
+          "lineNo": 4,
+          "text": "配列に関するこの処理は実行できないため、プログラムの実行を停止します。",
+          "outputAtStep": "",
+          "variablesAtStep": []
+        }
+      ],
+      "output": "",
+      "arrays": [],
+      "variables": [],
+      "variableTypes": {},
+      "learningHints": {
+        "missingReturnZero": false
+      },
+      "hasMain": true,
+      "hasWarnings": true,
+      "inputRequired": false,
+      "inputRequest": null,
+      "diagnostics": [
+        {
+          "lineNo": 4,
+          "title": "配列宣言の書き方を確認",
+          "message": "main直下で基本的なint変数と1次元int配列を宣言してください。"
+        }
+      ],
+      "warningText": [
+        "4行目：配列宣言の書き方を確認：main直下で基本的なint変数と1次元int配列を宣言してください。"
+      ]
+    }
+  },
+  {
+    "name": "L-BUG3 開始波かっこなし",
+    "code": "int main(void)\nint n = 99;\nprintf(\"WRONG\");\n}",
+    "input": "",
+    "expect": {
+      "output": "出力はまだありません。",
+      "variablesExclude": [
+        "n ="
+      ],
+      "bridgeFlags": {
+        "hasWarnings": true
+      },
+      "stepLineNos": [],
+      "noStepsFor": [
+        "printf(\"WRONG\")"
+      ]
+    },
+    "baselineCasePassed": true,
+    "classification": "AMBIGUOUS",
+    "hasSubfunction": false,
+    "diagnostics": [
+      {
+        "code": "MISMATCHED_DELIMITER",
+        "message": "括弧の対応を確認できません。",
+        "category": "AMBIGUOUS",
+        "severity": "error",
+        "line": 4,
+        "range": {
+          "start": {
+            "offset": 44,
+            "line": 4,
+            "column": 1
+          },
+          "end": {
+            "offset": 45,
+            "line": 4,
+            "column": 2
+          }
+        }
+      }
+    ],
+    "normal": {
+      "steps": [],
+      "output": "",
+      "arrays": [],
+      "variables": [],
+      "variableTypes": {},
+      "learningHints": {
+        "missingReturnZero": true
+      },
+      "hasMain": false,
+      "hasWarnings": true,
+      "inputRequired": false,
+      "inputRequest": null,
+      "diagnostics": [
+        {
+          "lineNo": null,
+          "title": "main関数が見当たりません",
+          "message": "学習用の基本的なCプログラムでは、int main(void) などの開始地点を書くことが多いです。"
+        },
+        {
+          "lineNo": null,
+          "title": "return 0; が見当たりません",
+          "message": "学習用の基本形として、最後に return 0; を書く形も確認しておきましょう。"
+        },
+        {
+          "lineNo": 4,
+          "title": "波かっこの数を確認",
+          "message": "この閉じ波かっこ } に対応する開き波かっこがありません。"
+        }
+      ],
+      "warningText": [
+        "main関数が見当たりません：学習用の基本的なCプログラムでは、int main(void) などの開始地点を書くことが多いです。",
+        "return 0; が見当たりません：学習用の基本形として、最後に return 0; を書く形も確認しておきましょう。",
+        "4行目：波かっこの数を確認：この閉じ波かっこ } に対応する開き波かっこがありません。"
+      ]
+    }
+  },
+  {
+    "name": "L-BUG3 別の文の後の波かっこ",
+    "code": "int main(void)\nint n = 99;\n{\nprintf(\"WRONG\");\n}",
+    "input": "",
+    "expect": {
+      "output": "出力はまだありません。",
+      "variablesExclude": [
+        "n ="
+      ],
+      "bridgeFlags": {
+        "hasWarnings": true
+      },
+      "stepLineNos": [],
+      "noStepsFor": [
+        "printf(\"WRONG\")"
+      ]
+    },
+    "baselineCasePassed": true,
+    "classification": "AMBIGUOUS",
+    "hasSubfunction": false,
+    "diagnostics": [
+      {
+        "code": "COMPLEX_DECLARATION",
+        "message": "関数ポインタ等の複雑な宣言は対応外です。",
+        "category": "UNSUPPORTED",
+        "severity": "error",
+        "line": 1,
+        "range": {
+          "start": {
+            "offset": 0,
+            "line": 1,
+            "column": 1
+          },
+          "end": {
+            "offset": 26,
+            "line": 2,
+            "column": 12
+          }
+        }
+      },
+      {
+        "code": "UNRECOGNIZED_TOP_LEVEL_BLOCK",
+        "message": "関数定義らしいブロックのヘッダを確定できません。",
+        "category": "AMBIGUOUS",
+        "severity": "error",
+        "line": 3,
+        "range": {
+          "start": {
+            "offset": 27,
+            "line": 3,
+            "column": 1
+          },
+          "end": {
+            "offset": 28,
+            "line": 3,
+            "column": 2
+          }
+        }
+      },
+      {
+        "code": "MAIN_NOT_UNIQUE",
+        "message": "トップレベルに一意なmain定義を確認できません。",
+        "category": "AMBIGUOUS",
+        "severity": "error",
+        "line": 1,
+        "range": {
+          "start": {
+            "offset": 0,
+            "line": 1,
+            "column": 1
+          },
+          "end": {
+            "offset": 3,
+            "line": 1,
+            "column": 4
+          }
+        }
+      }
+    ],
+    "normal": {
+      "steps": [],
+      "output": "",
+      "arrays": [],
+      "variables": [],
+      "variableTypes": {},
+      "learningHints": {
+        "missingReturnZero": true
+      },
+      "hasMain": false,
+      "hasWarnings": true,
+      "inputRequired": false,
+      "inputRequest": null,
+      "diagnostics": [
+        {
+          "lineNo": null,
+          "title": "main関数が見当たりません",
+          "message": "学習用の基本的なCプログラムでは、int main(void) などの開始地点を書くことが多いです。"
+        },
+        {
+          "lineNo": null,
+          "title": "return 0; が見当たりません",
+          "message": "学習用の基本形として、最後に return 0; を書く形も確認しておきましょう。"
+        }
+      ],
+      "warningText": [
+        "main関数が見当たりません：学習用の基本的なCプログラムでは、int main(void) などの開始地点を書くことが多いです。",
+        "return 0; が見当たりません：学習用の基本形として、最後に return 0; を書く形も確認しておきましょう。"
+      ]
+    }
+  },
+  {
+    "name": "L-BUG3 プロトタイプと別関数",
+    "code": "int main(void);\nint helper(void){\nprintf(\"WRONG\");\nreturn 0;\n}",
+    "input": "",
+    "expect": {
+      "output": "出力はまだありません。",
+      "variablesExclude": [
+        "n ="
+      ],
+      "bridgeFlags": {
+        "hasWarnings": true
+      },
+      "stepLineNos": [],
+      "noStepsFor": [
+        "printf(\"WRONG\")"
+      ]
+    },
+    "baselineCasePassed": true,
+    "classification": "AMBIGUOUS",
+    "hasSubfunction": true,
+    "diagnostics": [
+      {
+        "code": "FUNCTION_SIGNATURE_UNSUPPORTED",
+        "message": "初期範囲は戻り型int・名前付きint仮引数2個の定義です。その他の署名はLiteの対応外です。",
+        "category": "UNSUPPORTED",
+        "severity": "error",
+        "line": 2,
+        "range": {
+          "start": {
+            "offset": 16,
+            "line": 2,
+            "column": 1
+          },
+          "end": {
+            "offset": 32,
+            "line": 2,
+            "column": 17
+          }
+        }
+      },
+      {
+        "code": "MAIN_NOT_UNIQUE",
+        "message": "トップレベルに一意なmain定義を確認できません。",
+        "category": "AMBIGUOUS",
+        "severity": "error",
+        "line": 1,
+        "range": {
+          "start": {
+            "offset": 0,
+            "line": 1,
+            "column": 1
+          },
+          "end": {
+            "offset": 3,
+            "line": 1,
+            "column": 4
+          }
+        }
+      }
+    ],
+    "normal": {
+      "steps": [],
+      "output": "",
+      "arrays": [],
+      "variables": [],
+      "variableTypes": {},
+      "learningHints": {
+        "missingReturnZero": true
+      },
+      "hasMain": false,
+      "hasWarnings": true,
+      "inputRequired": false,
+      "inputRequest": null,
+      "diagnostics": [
+        {
+          "lineNo": null,
+          "title": "main関数が見当たりません",
+          "message": "学習用の基本的なCプログラムでは、int main(void) などの開始地点を書くことが多いです。"
+        },
+        {
+          "lineNo": null,
+          "title": "return 0; が見当たりません",
+          "message": "学習用の基本形として、最後に return 0; を書く形も確認しておきましょう。"
+        }
+      ],
+      "warningText": [
+        "main関数が見当たりません：学習用の基本的なCプログラムでは、int main(void) などの開始地点を書くことが多いです。",
+        "return 0; が見当たりません：学習用の基本形として、最後に return 0; を書く形も確認しておきましょう。"
+      ]
+    }
+  },
+  {
+    "name": "L-BUG3 コメントの開始波かっこだけ",
+    "code": "int main(void)\n/* { */\n// {\nprintf(\"WRONG\");\n}",
+    "input": "",
+    "expect": {
+      "output": "出力はまだありません。",
+      "variablesExclude": [
+        "n ="
+      ],
+      "bridgeFlags": {
+        "hasWarnings": true
+      },
+      "stepLineNos": [],
+      "noStepsFor": [
+        "printf(\"WRONG\")"
+      ]
+    },
+    "baselineCasePassed": true,
+    "classification": "AMBIGUOUS",
+    "hasSubfunction": false,
+    "diagnostics": [
+      {
+        "code": "MISMATCHED_DELIMITER",
+        "message": "括弧の対応を確認できません。",
+        "category": "AMBIGUOUS",
+        "severity": "error",
+        "line": 5,
+        "range": {
+          "start": {
+            "offset": 45,
+            "line": 5,
+            "column": 1
+          },
+          "end": {
+            "offset": 46,
+            "line": 5,
+            "column": 2
+          }
+        }
+      }
+    ],
+    "normal": {
+      "steps": [],
+      "output": "",
+      "arrays": [],
+      "variables": [],
+      "variableTypes": {},
+      "learningHints": {
+        "missingReturnZero": true
+      },
+      "hasMain": false,
+      "hasWarnings": true,
+      "inputRequired": false,
+      "inputRequest": null,
+      "diagnostics": [
+        {
+          "lineNo": null,
+          "title": "main関数が見当たりません",
+          "message": "学習用の基本的なCプログラムでは、int main(void) などの開始地点を書くことが多いです。"
+        },
+        {
+          "lineNo": null,
+          "title": "return 0; が見当たりません",
+          "message": "学習用の基本形として、最後に return 0; を書く形も確認しておきましょう。"
+        },
+        {
+          "lineNo": 5,
+          "title": "波かっこの数を確認",
+          "message": "この閉じ波かっこ } に対応する開き波かっこがありません。"
+        }
+      ],
+      "warningText": [
+        "main関数が見当たりません：学習用の基本的なCプログラムでは、int main(void) などの開始地点を書くことが多いです。",
+        "return 0; が見当たりません：学習用の基本形として、最後に return 0; を書く形も確認しておきましょう。",
+        "5行目：波かっこの数を確認：この閉じ波かっこ } に対応する開き波かっこがありません。"
+      ]
+    }
+  },
+  {
+    "name": "L-BUG3 文字列の開始波かっこだけ",
+    "code": "int main(void)\n\"{\"\nprintf(\"WRONG\");\n}",
+    "input": "",
+    "expect": {
+      "output": "出力はまだありません。",
+      "variablesExclude": [
+        "n ="
+      ],
+      "bridgeFlags": {
+        "hasWarnings": true
+      },
+      "stepLineNos": [],
+      "noStepsFor": [
+        "printf(\"WRONG\")"
+      ]
+    },
+    "baselineCasePassed": true,
+    "classification": "AMBIGUOUS",
+    "hasSubfunction": false,
+    "diagnostics": [
+      {
+        "code": "MISMATCHED_DELIMITER",
+        "message": "括弧の対応を確認できません。",
+        "category": "AMBIGUOUS",
+        "severity": "error",
+        "line": 4,
+        "range": {
+          "start": {
+            "offset": 36,
+            "line": 4,
+            "column": 1
+          },
+          "end": {
+            "offset": 37,
+            "line": 4,
+            "column": 2
+          }
+        }
+      }
+    ],
+    "normal": {
+      "steps": [],
+      "output": "",
+      "arrays": [],
+      "variables": [],
+      "variableTypes": {},
+      "learningHints": {
+        "missingReturnZero": true
+      },
+      "hasMain": false,
+      "hasWarnings": true,
+      "inputRequired": false,
+      "inputRequest": null,
+      "diagnostics": [
+        {
+          "lineNo": null,
+          "title": "main関数が見当たりません",
+          "message": "学習用の基本的なCプログラムでは、int main(void) などの開始地点を書くことが多いです。"
+        },
+        {
+          "lineNo": null,
+          "title": "return 0; が見当たりません",
+          "message": "学習用の基本形として、最後に return 0; を書く形も確認しておきましょう。"
+        },
+        {
+          "lineNo": 4,
+          "title": "波かっこの数を確認",
+          "message": "この閉じ波かっこ } に対応する開き波かっこがありません。"
+        }
+      ],
+      "warningText": [
+        "main関数が見当たりません：学習用の基本的なCプログラムでは、int main(void) などの開始地点を書くことが多いです。",
+        "return 0; が見当たりません：学習用の基本形として、最後に return 0; を書く形も確認しておきましょう。",
+        "4行目：波かっこの数を確認：この閉じ波かっこ } に対応する開き波かっこがありません。"
+      ]
+    }
+  },
+  {
+    "name": "L-BUG3 閉じ波かっこなし",
+    "code": "int main(void)\n{\nint n = 99;\nprintf(\"WRONG\");",
+    "input": "",
+    "expect": {
+      "output": "出力はまだありません。",
+      "variablesExclude": [
+        "n ="
+      ],
+      "bridgeFlags": {
+        "hasWarnings": true
+      },
+      "stepLineNos": [],
+      "noStepsFor": [
+        "printf(\"WRONG\")"
+      ]
+    },
+    "baselineCasePassed": true,
+    "classification": "AMBIGUOUS",
+    "hasSubfunction": false,
+    "diagnostics": [
+      {
+        "code": "UNCLOSED_DELIMITER",
+        "message": "閉じ括弧が不足し、範囲を確定できません。",
+        "category": "AMBIGUOUS",
+        "severity": "error",
+        "line": 2,
+        "range": {
+          "start": {
+            "offset": 15,
+            "line": 2,
+            "column": 1
+          },
+          "end": {
+            "offset": 16,
+            "line": 2,
+            "column": 2
+          }
+        }
+      }
+    ],
+    "normal": {
+      "steps": [],
+      "output": "",
+      "arrays": [],
+      "variables": [],
+      "variableTypes": {},
+      "learningHints": {
+        "missingReturnZero": true
+      },
+      "hasMain": true,
+      "hasWarnings": true,
+      "inputRequired": false,
+      "inputRequest": null,
+      "diagnostics": [
+        {
+          "lineNo": null,
+          "title": "return 0; が見当たりません",
+          "message": "学習用の基本形として、最後に return 0; を書く形も確認しておきましょう。"
+        },
+        {
+          "lineNo": 2,
+          "title": "main関数の終わりを確認",
+          "message": "main関数を閉じる波かっこが見つからないため、コードの実行を停止しました。"
+        }
+      ],
+      "warningText": [
+        "return 0; が見当たりません：学習用の基本形として、最後に return 0; を書く形も確認しておきましょう。",
+        "2行目：main関数の終わりを確認：main関数を閉じる波かっこが見つからないため、コードの実行を停止しました。"
+      ]
+    }
+  },
+  {
+    "name": "L-BUG3 コメント内のmainだけ",
+    "code": "/* int main(void){ */\nint n = 99;\nprintf(\"WRONG\");\n/* } */",
+    "input": "",
+    "expect": {
+      "output": "出力はまだありません。",
+      "variablesExclude": [
+        "n ="
+      ],
+      "bridgeFlags": {
+        "hasWarnings": true
+      },
+      "stepLineNos": [],
+      "noStepsFor": [
+        "printf(\"WRONG\")"
+      ]
+    },
+    "baselineCasePassed": true,
+    "classification": "AMBIGUOUS",
+    "hasSubfunction": false,
+    "diagnostics": [
+      {
+        "code": "GLOBAL_DECLARATION",
+        "message": "main外の変数等の宣言は初期FUNCTION範囲外です。",
+        "category": "UNSUPPORTED",
+        "severity": "error",
+        "line": 2,
+        "range": {
+          "start": {
+            "offset": 22,
+            "line": 2,
+            "column": 1
+          },
+          "end": {
+            "offset": 33,
+            "line": 2,
+            "column": 12
+          }
+        }
+      },
+      {
+        "code": "COMPLEX_DECLARATION",
+        "message": "関数ポインタ等の複雑な宣言は対応外です。",
+        "category": "UNSUPPORTED",
+        "severity": "error",
+        "line": 3,
+        "range": {
+          "start": {
+            "offset": 34,
+            "line": 3,
+            "column": 1
+          },
+          "end": {
+            "offset": 50,
+            "line": 3,
+            "column": 17
+          }
+        }
+      },
+      {
+        "code": "MAIN_NOT_UNIQUE",
+        "message": "トップレベルに一意なmain定義を確認できません。",
+        "category": "AMBIGUOUS",
+        "severity": "error",
+        "line": 2,
+        "range": {
+          "start": {
+            "offset": 22,
+            "line": 2,
+            "column": 1
+          },
+          "end": {
+            "offset": 25,
+            "line": 2,
+            "column": 4
+          }
+        }
+      }
+    ],
+    "normal": {
+      "steps": [],
+      "output": "",
+      "arrays": [],
+      "variables": [],
+      "variableTypes": {},
+      "learningHints": {
+        "missingReturnZero": true
+      },
+      "hasMain": false,
+      "hasWarnings": true,
+      "inputRequired": false,
+      "inputRequest": null,
+      "diagnostics": [
+        {
+          "lineNo": null,
+          "title": "main関数が見当たりません",
+          "message": "学習用の基本的なCプログラムでは、int main(void) などの開始地点を書くことが多いです。"
+        },
+        {
+          "lineNo": null,
+          "title": "return 0; が見当たりません",
+          "message": "学習用の基本形として、最後に return 0; を書く形も確認しておきましょう。"
+        }
+      ],
+      "warningText": [
+        "main関数が見当たりません：学習用の基本的なCプログラムでは、int main(void) などの開始地点を書くことが多いです。",
+        "return 0; が見当たりません：学習用の基本形として、最後に return 0; を書く形も確認しておきましょう。"
+      ]
+    }
+  },
+  {
+    "name": "L-BUG3 前後の別関数を実行しない",
+    "code": "int before(void){\nprintf(\"BEFORE\");\nreturn 0;\n}\nint main(void)\n\n{\nint n = 5;\nprintf(\"%d\", n);\n}\nint after(void){\nprintf(\"AFTER\");\nreturn 0;\n}",
+    "input": "",
+    "expect": {
+      "output": "5",
+      "variables": [
+        "n = 5"
+      ],
+      "hintsInclude": [
+        "return 0; が見当たりません"
+      ],
+      "bridgeFlags": {
+        "hasWarnings": false
+      },
+      "stepLineNos": [
+        8,
+        9
+      ],
+      "noStepsFor": [
+        "printf(\"BEFORE\")",
+        "printf(\"AFTER\")"
+      ]
+    },
+    "baselineCasePassed": true,
+    "classification": "UNSUPPORTED",
+    "hasSubfunction": true,
+    "diagnostics": [
+      {
+        "code": "FUNCTION_SIGNATURE_UNSUPPORTED",
+        "message": "初期範囲は戻り型int・名前付きint仮引数2個の定義です。その他の署名はLiteの対応外です。",
+        "category": "UNSUPPORTED",
+        "severity": "error",
+        "line": 1,
+        "range": {
+          "start": {
+            "offset": 0,
+            "line": 1,
+            "column": 1
+          },
+          "end": {
+            "offset": 16,
+            "line": 1,
+            "column": 17
+          }
+        }
+      },
+      {
+        "code": "FUNCTION_SIGNATURE_UNSUPPORTED",
+        "message": "初期範囲は戻り型int・名前付きint仮引数2個の定義です。その他の署名はLiteの対応外です。",
+        "category": "UNSUPPORTED",
+        "severity": "error",
+        "line": 11,
+        "range": {
+          "start": {
+            "offset": 96,
+            "line": 11,
+            "column": 1
+          },
+          "end": {
+            "offset": 111,
+            "line": 11,
+            "column": 16
+          }
+        }
+      }
+    ],
+    "normal": {
+      "steps": [
+        {
+          "step": 1,
+          "lineNo": 8,
+          "text": "n という整数型の箱を作り、5 を代入しました。",
+          "outputAtStep": "",
+          "variablesAtStep": [
+            [
+              "n",
+              "5"
+            ]
+          ]
+        },
+        {
+          "step": 2,
+          "lineNo": 9,
+          "text": "画面に「5」を表示しました。",
+          "outputAtStep": "5",
+          "variablesAtStep": [
+            [
+              "n",
+              "5"
+            ]
+          ]
+        }
+      ],
+      "output": "5",
+      "arrays": [],
+      "variables": [
+        [
+          "n",
+          "5"
+        ]
+      ],
+      "variableTypes": {
+        "n": "int"
+      },
+      "learningHints": {
+        "missingReturnZero": true
+      },
+      "hasMain": true,
+      "hasWarnings": false,
+      "inputRequired": false,
+      "inputRequest": null,
+      "diagnostics": [
+        {
+          "lineNo": null,
+          "title": "return 0; が見当たりません",
+          "message": "学習用の基本形として、最後に return 0; を書く形も確認しておきましょう。"
+        }
+      ],
+      "warningText": [
+        "return 0; が見当たりません：学習用の基本形として、最後に return 0; を書く形も確認しておきましょう。"
+      ]
+    }
+  },
+  {
+    "name": "L-BUG3 文字列とコメントの波かっこを無視",
+    "code": "int main(void)\n/* { } */\n{\nprintf(\"} \\\" { \\\" }\");\n/* }\n { } */\nint n = 4;\nprintf(\"%d\", n);\nreturn 0;\n}\nprintf(\"WRONG\");",
+    "input": "",
+    "expect": {
+      "output": "} \" { \" }4",
+      "variables": [
+        "n = 4"
+      ],
+      "warningMax": 0,
+      "bridgeFlags": {
+        "hasWarnings": false
+      },
+      "stepLineNos": [
+        4,
+        7,
+        8,
+        9
+      ],
+      "noStepsFor": [
+        "printf(\"WRONG\")"
+      ]
+    },
+    "baselineCasePassed": true,
+    "classification": "UNSUPPORTED",
+    "hasSubfunction": false,
+    "diagnostics": [
+      {
+        "code": "COMPLEX_DECLARATION",
+        "message": "関数ポインタ等の複雑な宣言は対応外です。",
+        "category": "UNSUPPORTED",
+        "severity": "error",
+        "line": 11,
+        "range": {
+          "start": {
+            "offset": 103,
+            "line": 11,
+            "column": 1
+          },
+          "end": {
+            "offset": 119,
+            "line": 11,
+            "column": 17
+          }
+        }
+      }
+    ],
+    "normal": {
+      "steps": [
+        {
+          "step": 1,
+          "lineNo": 4,
+          "text": "画面に「} &quot; { &quot; }」を表示しました。",
+          "outputAtStep": "} \" { \" }",
+          "variablesAtStep": []
+        },
+        {
+          "step": 2,
+          "lineNo": 7,
+          "text": "n という整数型の箱を作り、4 を代入しました。",
+          "outputAtStep": "} \" { \" }",
+          "variablesAtStep": [
+            [
+              "n",
+              "4"
+            ]
+          ]
+        },
+        {
+          "step": 3,
+          "lineNo": 8,
+          "text": "画面に「4」を表示しました。",
+          "outputAtStep": "} \" { \" }4",
+          "variablesAtStep": [
+            [
+              "n",
+              "4"
+            ]
+          ]
+        },
+        {
+          "step": 4,
+          "lineNo": 9,
+          "text": "プログラムを終了します。",
+          "outputAtStep": "} \" { \" }4",
+          "variablesAtStep": [
+            [
+              "n",
+              "4"
+            ]
+          ]
+        }
+      ],
+      "output": "} \" { \" }4",
+      "arrays": [],
+      "variables": [
+        [
+          "n",
+          "4"
+        ]
+      ],
+      "variableTypes": {
+        "n": "int"
+      },
+      "learningHints": {
+        "missingReturnZero": false
+      },
+      "hasMain": true,
+      "hasWarnings": false,
+      "inputRequired": false,
+      "inputRequest": null,
+      "diagnostics": [],
+      "warningText": []
+    }
+  },
+  {
+    "name": "L-BUG3 RESULT hint metadata main外のreturnは数えない",
+    "code": "int main(void)\n{\nprintf(\"OK\");\n}\nint helper(void){\nreturn 0;\n}",
+    "input": "",
+    "expect": {
+      "missingReturnZero": true,
+      "output": "OK",
+      "bridgeFlags": {
+        "hasWarnings": false
+      }
+    },
+    "baselineCasePassed": true,
+    "classification": "UNSUPPORTED",
+    "hasSubfunction": true,
+    "diagnostics": [
+      {
+        "code": "FUNCTION_SIGNATURE_UNSUPPORTED",
+        "message": "初期範囲は戻り型int・名前付きint仮引数2個の定義です。その他の署名はLiteの対応外です。",
+        "category": "UNSUPPORTED",
+        "severity": "error",
+        "line": 5,
+        "range": {
+          "start": {
+            "offset": 33,
+            "line": 5,
+            "column": 1
+          },
+          "end": {
+            "offset": 49,
+            "line": 5,
+            "column": 17
+          }
+        }
+      }
+    ],
+    "normal": {
+      "steps": [
+        {
+          "step": 1,
+          "lineNo": 3,
+          "text": "画面に「OK」を表示しました。",
+          "outputAtStep": "OK",
+          "variablesAtStep": []
+        }
+      ],
+      "output": "OK",
+      "arrays": [],
+      "variables": [],
+      "variableTypes": {},
+      "learningHints": {
+        "missingReturnZero": true
+      },
+      "hasMain": true,
+      "hasWarnings": false,
+      "inputRequired": false,
+      "inputRequest": null,
+      "diagnostics": [
+        {
+          "lineNo": null,
+          "title": "return 0; が見当たりません",
+          "message": "学習用の基本形として、最後に return 0; を書く形も確認しておきましょう。"
+        }
+      ],
+      "warningText": [
+        "return 0; が見当たりません：学習用の基本形として、最後に return 0; を書く形も確認しておきましょう。"
+      ]
+    }
+  }
+]

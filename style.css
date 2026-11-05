@@ -3418,3 +3418,19 @@ body {
   box-shadow: inset 0 0 0 1px var(--mask-edge);
   border-radius: 2px;
 }
+
+/* L-FUNC4: additions are scoped to FUNCTION ASSIST. */
+.function-assist-confirm, .function-assist-diagnostic { padding:24px; overflow-wrap:anywhere; }
+.function-assist-confirm small { color:var(--accent, #f5d547); font-size:11px; letter-spacing:.12em; }
+.function-assist-confirm h3, .function-assist-diagnostic h3 { margin:12px 0; font-size:18px; }
+.function-assist-confirm p, .function-assist-diagnostic p { line-height:1.8; font-size:14px; }
+.function-assist-actions { display:flex; justify-content:flex-end; gap:12px; flex-wrap:wrap; margin-top:24px; }
+.function-assist-actions button { min-height:44px; padding:10px 16px; border:1px solid #666; border-radius:8px; background:transparent; color:inherit; cursor:pointer; font:inherit; }
+.function-assist-actions .function-assist-accept { background:#f5d547; border-color:#f5d547; color:#171717; }
+.function-assist-actions button:focus-visible { outline:2px solid #f5d547; outline-offset:3px; }
+.function-assist-actions button:disabled { opacity:.5; cursor:default; }
+.function-assist-scopes { display:grid; gap:12px; min-width:0; }
+.function-assist-scope { border:1px solid #555; border-radius:8px; padding:12px; min-width:0; overflow-wrap:anywhere; }
+.function-assist-scope.is-active { border-color:#f5d547; }
+.function-assist-scope h4 { margin:0 0 10px; font-size:12px; }
+.function-assist-scope .scalar-boxes { flex-wrap:wrap; }

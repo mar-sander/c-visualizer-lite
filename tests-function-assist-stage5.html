@@ -1,0 +1,9 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>L-FUNC5 FUNCTION ASSIST 独立UI検証</title>
+<style>body{margin:20px;background:#181818;color:#eee;font:14px system-ui}iframe{width:100%;height:850px;border:1px solid #666}pre{white-space:pre-wrap}.fail{color:#ff9292}</style></head>
+<body><h1>FUNCTION ASSIST 独立UI検証</h1><p>検証専用ページです。製品側には読み込みません。各ケースで画面と履歴を初期化します。</p><div id="report">検証中…</div><iframe title="製品検証画面" id="product"></iframe>
+<script src="tests-function-input-stage5.js"></script><script src="tests-function-assist-stage5.js"></script><script>
+(async()=>{let sequence=0;const frame=document.getElementById('product');
+window.functionAssistTestResults=await FunctionAssistTests.run(()=>new Promise(resolve=>{frame.onload=()=>resolve(frame.contentWindow);frame.src='index.html?assist-test='+(++sequence);}));
+const r=window.functionAssistTestResults;document.getElementById('report').textContent=`${r.passed}/${r.total} PASS、${r.failed} FAIL`;
+for(const row of r.rows){const p=document.createElement('pre');p.textContent=(row.pass?'PASS ':'FAIL ')+row.name+(row.error?'\n'+row.error:'');if(!row.pass)p.className='fail';document.body.append(p);}
+})();</script></body></html>
