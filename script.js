@@ -1630,6 +1630,92 @@ function matchSimplePrintfStatement(text){
   return match;
 }
 
+// 単一mainが所有する可変状態です。RUNごとに新しい表と順序を生成します。
+// 出力・INPUT・STEP・制御状態は、従来どおりvisualizeCode内で保持します。
+function createMainExecutionState(){
+  return {
+    variables:Object.create(null),
+    variableTypes:Object.create(null),
+    variableOrder:[],
+    arrays:Object.create(null),
+    arrayOrder:[]
+  };
+}
+
+// NORMALと開発専用コアで共有する、DOMを参照しないスカラー操作です。
+function declareExecutionScalar(state, name, value, type){
+  if(!hasOwnSymbol(state.variables, name)) state.variableOrder.push(name);
+  state.variables[name] = value;
+  state.variableTypes[name] = type;
+}
+
+function setExecutionScalarValue(state, name, value){
+  state.variables[name] = value;
+}
+
+function executionScalarType(state, name){
+  return hasOwnSymbol(state.variableTypes, name) ? state.variableTypes[name] : undefined;
+}
+
+function matchScalarDeclaration(text){
+  return text.match(/^(int|float|double|char)\s+([A-Za-z_]\w*)\s*(?:=\s*(.+))?;$/);
+}
+
+// 書式解析と書式化は既存の関数を使い、引数検査だけをそのまま抽出します。
+function evaluatePrintfArguments(parsedFormat, args, state, resolveArrayRead = null){
+  const values = [];
+  const results = [];
+  let ok = true;
+  let error = '';
+  let failedResult = null;
+
+  if(args.length !== parsedFormat.specifiers.length){
+    ok = false;
+    error = 'printfの書式指定子と引数の数が一致しません。';
+  }
+
+  for(const [index, arg] of args.entries()){
+    if(!ok) break;
+    const result = evaluateExpression(
+      arg,
+      state.variables,
+      resolveArrayRead,
+      state.variableTypes
+    );
+    if(result.ok){
+      const specifier = parsedFormat.specifiers[index];
+      const integerArgument = result.type === 'int' || result.type === 'char';
+      const typeMatches = specifier.type === 'd' || specifier.type === 'c'
+        ? integerArgument
+        : result.type === 'float' || result.type === 'double';
+      if(!typeMatches){
+        ok = false;
+        error = specifier.type === 'd'
+          ? '%dにはint型またはchar型の値だけを渡してください。'
+          : specifier.type === 'c'
+            ? '%cにはint型またはchar型の値だけを渡してください。'
+            : '%f／%lfにはfloat型またはdouble型の値を渡してください。';
+        failedResult = result;
+        break;
+      }
+      if(specifier.type === 'c' && (!Number.isSafeInteger(result.value) || result.value < 0 || result.value > 127)){
+        ok = false;
+        error = '%cで表示できる文字コードは、Visualizerの安全な対応範囲0～127です。これはC言語自体の制限ではありません。';
+        failedResult = result;
+        break;
+      }
+      values.push(result.value);
+      results.push(result);
+    }else{
+      ok = false;
+      error = result.error;
+      failedResult = result;
+      break;
+    }
+  }
+  return { ok, error, failedResult, values, results };
+}
+
 function visualizeCode(){
   updateCodeEditor();
   const code = document.getElementById('codeInput').value.replace(/\r\n/g, '\n');
@@ -1644,12 +1730,9 @@ function visualizeCode(){
   const hints = [];
   const executedLines = new Set();
   const warningLines = new Set();
-  const variables = Object.create(null);
-  // 値のtableと型のtableを分け、Liteの既存表示データ形式を維持します。
-  const variableTypes = Object.create(null);
-  const variableOrder = [];
-  const arrays = Object.create(null);
-  const arrayOrder = [];
+  const mainState = createMainExecutionState();
+  // 既存の式評価・snapshotは、mainStateが所有する同じ表を参照します。
+  const { variables, variableTypes, variableOrder, arrays, arrayOrder } = mainState;
   const steps = [];
   // 同じソース上のfor文が親ループから複数回呼ばれても、本体進入回数を累積します。
   const forEnteredIterationTotals = new Map();
@@ -1679,17 +1762,15 @@ function visualizeCode(){
   }
 
   function declareScalar(name, value, type){
-    if(!hasOwnSymbol(variables, name)) variableOrder.push(name);
-    variables[name] = value;
-    variableTypes[name] = type;
+    declareExecutionScalar(mainState, name, value, type);
   }
 
   function setScalarValue(name, value){
-    variables[name] = value;
+    setExecutionScalarValue(mainState, name, value);
   }
 
   function getScalarType(name){
-    return hasOwnSymbol(variableTypes, name) ? variableTypes[name] : undefined;
+    return executionScalarType(mainState, name);
   }
 
   function scalarDisplay(name){
@@ -1699,14 +1780,14 @@ function visualizeCode(){
   }
 
   function getSymbolKind(name){
-    if(hasOwnSymbol(variables, name)) return 'scalar';
-    if(hasOwnSymbol(arrays, name)) return 'array';
+    if(hasOwnSymbol(mainState.variables, name)) return 'scalar';
+    if(hasOwnSymbol(mainState.arrays, name)) return 'array';
     return null;
   }
 
   function rememberArray(name, arrayState){
-    if(!hasOwnSymbol(arrays, name)) arrayOrder.push(name);
-    arrays[name] = arrayState;
+    if(!hasOwnSymbol(mainState.arrays, name)) mainState.arrayOrder.push(name);
+    mainState.arrays[name] = arrayState;
   }
 
   function makeArrayView(access, isDeclaration = false){
@@ -2429,7 +2510,7 @@ function visualizeCode(){
       return;
     }
 
-    const declMatch = trimmed.match(/^(int|float|double|char)\s+([A-Za-z_]\w*)\s*(?:=\s*(.+))?;$/);
+    const declMatch = matchScalarDeclaration(trimmed);
     if(declMatch){
       if(insideIf || insideLoop){
         const scopeLabel = insideLoop ? `${loopLabel}の本体` : 'if側・else側';
@@ -2539,57 +2620,9 @@ function visualizeCode(){
 
       const argText = printfMatch[2] || '';
       const args = argText ? splitArgs(argText) : [];
-      const values = [];
-      const results = [];
-      let ok = true;
-      let error = '';
-      let failedResult = null;
-
-      if(args.length !== parsedFormat.specifiers.length){
-        ok = false;
-        error = 'printfの書式指定子と引数の数が一致しません。';
-      }
-
-      for(const [index, arg] of args.entries()){
-        if(!ok) break;
-        const result = evaluateExpression(
-          arg,
-          variables,
-          hasSupportedArrayRead ? resolveArrayRead : null,
-          variableTypes
-        );
-        if(result.ok){
-          const specifier = parsedFormat.specifiers[index];
-          const integerArgument = result.type === 'int' || result.type === 'char';
-          const typeMatches = specifier.type === 'd' || specifier.type === 'c'
-            ? integerArgument
-            : result.type === 'float' || result.type === 'double';
-          if(!typeMatches){
-            ok = false;
-            error = specifier.type === 'd'
-              ? '%dにはint型またはchar型の値だけを渡してください。'
-              : specifier.type === 'c'
-                ? '%cにはint型またはchar型の値だけを渡してください。'
-                : '%f／%lfにはfloat型またはdouble型の値を渡してください。';
-            failedResult = result;
-            break;
-          }
-          if(specifier.type === 'c' && (!Number.isSafeInteger(result.value) || result.value < 0 || result.value > 127)){
-            ok = false;
-            error = '%cで表示できる文字コードは、Visualizerの安全な対応範囲0～127です。これはC言語自体の制限ではありません。';
-            failedResult = result;
-            break;
-          }
-          values.push(result.value);
-          results.push(result);
-        }else{
-          ok = false;
-          error = result.error;
-          failedResult = result;
-          break;
-        }
-      }
-
+      const { ok, error, failedResult, values, results } = evaluatePrintfArguments(
+        parsedFormat, args, mainState, hasSupportedArrayRead ? resolveArrayRead : null
+      );
       if(ok){
         const formatted = formatPrintfString(parsedFormat, values);
         output += formatted.text;

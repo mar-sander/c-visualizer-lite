@@ -837,6 +837,10 @@ historyImportFile.addEventListener('change', async () => {
   const file = historyImportFile.files?.[0];
   historyImportFile.value = '';
   if(!file) return;
+  if(functionAssistAttempt?.functionPath || functionAssistResult){
+    discardFunctionAssist();
+    invalidateResult('履歴を読み込みます。RUNであらためて確認してください。');
+  }
   if(file.size > HISTORY_MAX_FILE_BYTES){
     historyTransferMessage('ファイルが大きすぎます（上限8MB）。読み込みを中止しました。',true);
     return;
@@ -1208,6 +1212,7 @@ function hasCurrentResult(){
 }
 
 function invalidateResult(message = 'コードが変更されました。RUNで新しい結果を確認してください。'){
+  discardFunctionAssist();
   cancelResultReveal();
   clearRunSuccessFeedback();
   clearInputInjection();
@@ -1372,6 +1377,10 @@ function renderStep(){
   if(!hasCurrentResult() || activeStep < 0) return;
   cancelResultReveal();
   const step = currentSteps[activeStep];
+  if(functionAssistResult && step.functionEvent){
+    renderFunctionAssistStep(step);
+    return;
+  }
   const isOmission = step.stepKind === 'loop-omission';
   showExecutionLine(step.lineNo);
   const top = element('div', 'step-top');
@@ -1532,6 +1541,7 @@ function showResultPage(allowPrevious = false){
   });
   result.append(viewFlow);
   flow.replaceChildren(result);
+  if(functionAssistAttempt?.approved && functionAssistAttempt.reusable) functionAssistAttempt.viewSurface = result;
   $('step-controls').hidden = true;
   outputCard.hidden = true;
   $('feedback').textContent = '';
@@ -1591,8 +1601,412 @@ function submitInput(){
   executeCode('input');
 }
 
-// 解析と結果の確定は共通です。起点の操作に応じて表示専用の演出だけを選びます。
+// Stage L-FUNC4: approval belongs to one RUN and one edit generation.
+let functionAssistRunId = 0;
+let functionAssistEditGeneration = 0;
+let functionAssistInputGeneration = 0;
+let functionAssistAttempt = null;
+let functionAssistResult = null;
+
+const discardFunctionAssist = function(){
+  const hadFunctionState = !!functionAssistResult || !!functionAssistAttempt?.functionPath;
+  if(functionAssistAttempt) functionAssistAttempt.cancelled = true;
+  functionAssistAttempt = null;
+  functionAssistResult = null;
+  return hadFunctionState;
+};
+
+const isFunctionAssistAttemptCurrent = function(attempt){
+  return functionAssistAttempt === attempt && !attempt.cancelled &&
+    attempt.editGeneration === functionAssistEditGeneration &&
+    attempt.inputGeneration === functionAssistInputGeneration &&
+    attempt.code === editor.getValue() && attempt.input === scanfInput.value;
+};
+
+const clearFunctionAssistDisplay = function(){
+  cancelResultReveal();
+  clearRunSuccessFeedback();
+  clearRunErrorFeedback();
+  clearInputInjection();
+  resultRevealPending = false;
+  clearJumpableLines();
+  clearErrorLines();
+  currentSteps = [];
+  finalState = null;
+  resultCode = null;
+  resultScanfInput = null;
+  resultInputDirty = false;
+  waitingCode = null;
+  activeStep = -1;
+  showExecutionLine(null);
+  showFinalSummary(null);
+  setOutput('');
+  $('step-controls').hidden = true;
+  $('step-slider').disabled = true;
+  outputCard.hidden = true;
+  $('feedback').textContent = '';
+};
+
+const showFunctionAssistDiagnostic = function(route){
+  const card = element('div', 'function-assist-diagnostic');
+  card.setAttribute('role', 'status');
+  card.append(element('h3', '', 'コードを確認してください'), element('p', '', route.message));
+  const diagnostics = route.catalog?.diagnostics || [];
+  for(const diagnostic of diagnostics){
+    card.append(element('p', '', `${diagnostic.lineNo || diagnostic.line || 1}行目：${diagnostic.message || diagnostic.code}`));
+  }
+  // Routing diagnostics are unexecuted; never create a success/check history entry.
+  const firstCall = route.evidence?.lexicalUserCalls?.[0];
+  const position = firstCall?.offset;
+  const lineNo = Number.isInteger(position) ? editor.getValue().slice(0, position).split('\n').length : 1;
+  markErrorLines([], diagnostics.length ? diagnostics.map(d => ({...d, lineNo:d.lineNo || d.line || 1})) : [{lineNo}]);
+  flow.replaceChildren(card);
+};
+
+const adaptFunctionAssistResult = function(result){
+  return {
+    output:result.output,
+    variables:result.variables.map(variable => [variable.name, variable.display]),
+    arrays:[],
+    learningHints:{},
+    diagnostics:result.diagnostics,
+    warningText:result.diagnostics.map(diagnostic =>
+      `${diagnostic.lineNo || 1}行目：${diagnostic.message}` +
+      (diagnostic.callLineNo ? `（呼出元：${diagnostic.callLineNo}行目）` : ''))
+  };
+};
+
+// FA1: stable session hosts are distinct from replaceable result/STEP cards.
+const hasFunctionInputHosts = function(attempt){
+  const hosts = attempt?.hosts;
+  return !!hosts && hosts.flow === flow && hosts.input === scanfInput &&
+    hosts.editor === editor.getWrapperElement() && hosts.frame === editorFrame &&
+    [hosts.flow, hosts.input, hosts.editor, hosts.frame].every(node => node.isConnected) &&
+    $('flow-content') === flow && $('scanfInput') === scanfInput;
+};
+
+const canContinueFunctionInput = function(attempt){
+  if(functionAssistAttempt !== attempt || !attempt?.approved || attempt.cancelled ||
+    !attempt.functionPath || attempt.route !== 'P2' || !attempt.consumed ||
+    attempt.editGeneration !== functionAssistEditGeneration || attempt.code !== editor.getValue() ||
+    !hasFunctionInputHosts(attempt)) return false;
+  if(['WAITING_FUNCTION','INPUT_PENDING'].includes(attempt.status)){
+    return !!attempt.surface?.isConnected && flow.contains(attempt.surface);
+  }
+  return attempt.reusable && ['RESULT_REUSABLE','INPUT_DIRTY'].includes(attempt.status) &&
+    !!attempt.viewSurface?.isConnected && flow.contains(attempt.viewSurface);
+};
+
+const isReusableFunctionResult = function(attempt, result){
+  return attempt.route === 'P2' && attempt.consumed && attempt.approved &&
+    result.ok === true && result.status === 'completed' && !result.diagnostics.length &&
+    result.steps.some(step => step.functionName === 'main' && step.functionEvent === 'scanf' && step.scanfInput?.targetType === 'int') &&
+    result.steps.some(step => step.functionName === 'main' && step.functionEvent === 'call' &&
+      step.calleeName && step.calleeName !== 'main' && result.steps.some(returned =>
+        returned.functionEvent === 'return-assign' && returned.functionName === 'main' &&
+        returned.callId === step.callId && returned.calleeName === step.calleeName));
+};
+
+const showFunctionInputDirty = function(attempt){
+  cancelResultReveal();clearRunSuccessFeedback();clearInputInjection();
+  resultRevealPending = false;clearJumpableLines();showExecutionLine(null);
+  functionAssistResult = attempt.completedResult;
+  const adapted = adaptFunctionAssistResult(attempt.completedResult);
+  finalState = {...adapted, displayOutput:adapted.output};
+  resultCode = attempt.code;resultScanfInput = attempt.completedInput;resultInputDirty = true;
+  currentSteps = [];activeStep = -1;
+  attempt.status = 'INPUT_DIRTY';attempt.surface = null;
+  showResultPage(true);
+  attempt.viewSurface = flow.firstElementChild;
+  $('step-slider').disabled = true;$('step-controls').hidden = true;outputCard.hidden = true;
+  $('feedback').textContent = '前回の結果です。INPUTで再計算してください。';
+};
+
+const restoreFunctionInputResult = function(attempt){
+  functionAssistResult = attempt.completedResult;currentSteps = functionAssistResult.steps;
+  const adapted = adaptFunctionAssistResult(functionAssistResult);
+  finalState = {...adapted, displayOutput:adapted.output};
+  resultCode = attempt.code;resultScanfInput = attempt.completedInput;resultInputDirty = false;
+  attempt.status = 'RESULT_REUSABLE';attempt.surface = null;
+  showFinalSummary(finalState);markJumpableLines();showResultPage();
+};
+
+const showFunctionInputWaiting = function(result, attempt){
+  const adapted = adaptFunctionAssistResult(result), request = result.inputRequest;
+  const card = createResultState(adapted, result.output);
+  card.classList.add('function-input-waiting');
+  const box = element('div', 'waiting-state');
+  box.setAttribute('role', 'status');
+  box.append(element('h3', '', 'WAITING FOR INPUT'),
+    element('p', '', `${request.ordinal}個目の整数を待っています。入力欄を改行で区切り、INPUTを押してください。`),
+    element('small', '', `${request.lineNo}行目 · ${request.specifier} · ${request.target}`));
+  const cancel = element('button', 'function-assist-cancel function-input-cancel', 'キャンセル');
+  cancel.type = 'button';
+  cancel.addEventListener('click', () => {
+    if(!canContinueFunctionInput(attempt) || attempt.status !== 'WAITING_FUNCTION' || attempt.surface !== card || !card.isConnected) return;
+    discardFunctionAssist();clearFunctionAssistDisplay();
+    showIdle('実行をキャンセルしました', 'RUNであらためて確認できます。');
+    $('visualize').focus();
+  });
+  const actions = element('div', 'function-assist-actions');actions.append(cancel);
+  box.append(actions);card.append(box);flow.replaceChildren(card);
+  attempt.surface = card;attempt.lastWaiting = result;attempt.status = 'WAITING_FUNCTION';
+  $('step-controls').hidden = true;outputCard.hidden = true;
+  setScanfAccordionOpen(true, true);scanfInput.focus();
+};
+
+let executeConfirmedFunctionAssist = function(attempt, action = 'run'){
+  if(!attempt.approved || !isFunctionAssistAttemptCurrent(attempt)) return;
+  if(action === 'input' && attempt.status === 'INPUT_PENDING') return;
+  const operationToken = ++attempt.operationToken;
+  const inputSnapshot = scanfInput.value;
+  attempt.input = inputSnapshot;attempt.inputGeneration = functionAssistInputGeneration;
+  attempt.pendingFrom = attempt.status;
+  attempt.status = action === 'input' ? 'INPUT_PENDING' : 'FUNCTION';
+  attempt.viewSurface = null;
+  let result;
+  try{
+    result = FunctionExecutionCore.execute(attempt.code, {input:inputSnapshot});
+  }catch(_error){
+    result = {ok:false, output:'', variables:[], steps:[], diagnostics:[{
+      lineNo:1, code:'FUNCTION_EXECUTION_UNAVAILABLE',
+      message:'処理を表示できませんでした。コードを確認して、再RUNしてください。'
+    }]};
+  }
+  if(!isFunctionAssistAttemptCurrent(attempt)) return;
+  clearFunctionAssistDisplay();
+  const adapted = adaptFunctionAssistResult(result);
+  if(result.status === 'waiting-input'){
+    const waiting = () => {
+      if(!isFunctionAssistAttemptCurrent(attempt) || !hasFunctionInputHosts(attempt) || attempt.operationToken !== operationToken || !attempt.approved ||
+        (attempt.surface && (!attempt.surface.isConnected || !flow.contains(attempt.surface)))) return;
+      showFunctionInputWaiting(result, attempt);
+    };
+    if(action === 'input' && result.steps.some(step => step.scanfInput)){
+      showAnalysisPending();attempt.surface = flow.firstElementChild;
+      playInputInjection(waiting);
+    }else waiting();
+    return;
+  }
+  if(!result.ok){
+    attempt.status = 'ERROR';attempt.approved = false;attempt.reusable = false;attempt.surface = null;
+    attempt.viewSurface = null;attempt.completedResult = null;
+    const warnings = showFailure(adapted);
+    saveHistory(attempt.code, 'check', adapted, warnings);
+    return;
+  }
+  functionAssistResult = result;
+  showAnalysisPending();attempt.surface = flow.firstElementChild;
+  const complete = () => {
+    if(!isFunctionAssistAttemptCurrent(attempt) || !hasFunctionInputHosts(attempt) || attempt.operationToken !== operationToken || !attempt.approved ||
+      !attempt.surface?.isConnected || !flow.contains(attempt.surface)) return;
+    const reusable = isReusableFunctionResult(attempt, result);
+    const sameCompletedInput = attempt.reusable && attempt.completedInput === inputSnapshot;
+    attempt.status = reusable ? 'RESULT_REUSABLE' : 'RESULT';
+    attempt.approved = reusable;attempt.reusable = reusable;attempt.surface = null;
+    attempt.completedResult = reusable ? result : null;
+    attempt.completedInput = reusable ? inputSnapshot : null;
+    currentSteps = result.steps;
+    finalState = {...adapted, displayOutput:result.output};
+    resultCode = attempt.code;resultScanfInput = inputSnapshot;
+    showFinalSummary(finalState);markJumpableLines();resultRevealPending = true;
+    showResultPage();
+    if(!sameCompletedInput) saveHistory(attempt.code, 'result', adapted);
+  };
+  if(action === 'input')playInputInjection(complete);
+  else playRunSuccessFeedback(complete);
+};
+
+
+// A removed waiting surface cannot revive an approval if it is reinserted.
+const functionAssistSurfaceObserver = new MutationObserver(records => {
+  const attempt = functionAssistAttempt;
+  if(!attempt?.approved) return;
+  const surface = ['RESULT_REUSABLE','INPUT_DIRTY'].includes(attempt.status) ? attempt.viewSurface : attempt.surface;
+  if(!hasFunctionInputHosts(attempt) || records.some(record => [...record.removedNodes].some(node =>
+    (surface && (node === surface || node.contains?.(surface))) ||
+    (attempt.hosts && Object.values(attempt.hosts).some(host => node === host || node.contains?.(host)))))){
+    invalidateResult('表示が変更されました。RUNであらためて確認してください。');
+  }
+});
+functionAssistSurfaceObserver.observe(document.body, {childList:true, subtree:true});
+
+const showFunctionAssistConfirmation = function(attempt, route){
+  const card = element('section', 'function-assist-confirm');
+  card.setAttribute('aria-label', 'FUNCTION ASSISTの確認');
+  const title = route.catalog.classification === 'DECLARATION_ONLY'
+    ? 'サブ関数の宣言を検出しました' : 'サブ関数を検出しました';
+  card.append(element('small', '', 'FUNCTION ASSIST'), element('h3', '', title),
+    element('p', '', 'このプログラムには、main以外の関数が含まれているようです。サブ関数の呼び出しや戻り値も含めて、処理の流れを可視化しますか？'));
+  const actions = element('div', 'function-assist-actions');
+  const cancel = element('button', 'function-assist-cancel', 'キャンセル');
+  const yes = element('button', 'function-assist-accept', '可視化する →');
+  cancel.type = yes.type = 'button';
+  actions.append(cancel, yes);
+  card.append(actions);
+  const valid = () => isFunctionAssistAttemptCurrent(attempt) &&
+    attempt.status === 'CONFIRM' && !attempt.consumed && card.isConnected && flow.contains(card);
+  cancel.addEventListener('click', () => {
+    if(!valid()) return;
+    attempt.consumed = true;
+    cancel.disabled = yes.disabled = true;
+    discardFunctionAssist();
+    clearFunctionAssistDisplay();
+    showIdle('実行をキャンセルしました', 'RUNであらためて確認できます。');
+    $('visualize').focus();
+  });
+  yes.addEventListener('click', () => {
+    if(!valid()) return;
+    attempt.consumed = true;
+    cancel.disabled = yes.disabled = true;
+    attempt.status = 'FUNCTION';
+    attempt.approved = true;
+    attempt.hosts = {flow, input:scanfInput, editor:editor.getWrapperElement(), frame:editorFrame};
+    executeConfirmedFunctionAssist(attempt);
+  });
+  flow.replaceChildren(card);
+  cancel.focus({preventScroll:true});
+};
+
 function executeCode(action){
+  if(action === 'input' && canContinueFunctionInput(functionAssistAttempt)){
+    const attempt = functionAssistAttempt;
+    if(attempt.reusable && attempt.completedInput === scanfInput.value &&
+      ['RESULT_REUSABLE','INPUT_DIRTY'].includes(attempt.status)){
+      if(attempt.status === 'INPUT_DIRTY') restoreFunctionInputResult(attempt);
+      return;
+    }
+    if(attempt.status === 'INPUT_PENDING'){
+      if(attempt.input === scanfInput.value && attempt.inputGeneration === functionAssistInputGeneration) return;
+      ++attempt.operationToken;clearInputInjection();attempt.status = attempt.reusable ? 'INPUT_DIRTY' : 'WAITING_FUNCTION';
+    }
+    attempt.input = scanfInput.value;attempt.inputGeneration = functionAssistInputGeneration;
+    executeConfirmedFunctionAssist(attempt, 'input');
+    return;
+  }
+  discardFunctionAssist();
+  const attempt = {
+    runId:++functionAssistRunId,
+    editGeneration:functionAssistEditGeneration,
+    inputGeneration:functionAssistInputGeneration,
+    code:editor.getValue(), input:scanfInput.value,
+    status:'PREFLIGHT', consumed:false, cancelled:false, functionPath:false,
+    approved:false, operationToken:0, route:null, surface:null, lastWaiting:null,
+    reusable:false, hosts:null, viewSurface:null, completedResult:null, completedInput:null, pendingFrom:null
+  };
+  functionAssistAttempt = attempt;
+  const route = typeof FunctionAssistRouting === 'undefined'
+    ? {route:'DIAGNOSTIC', priority:'P0', message:'関数の事前検査を利用できません。実行していません。'}
+    : FunctionAssistRouting.classify(attempt.code);
+  if(route.route === 'NORMAL'){
+    attempt.status = 'NORMAL';
+    executeNormalCode(action, attempt);
+    return;
+  }
+  attempt.functionPath = true;attempt.route = route.priority;
+  clearFunctionAssistDisplay();
+  if(route.route === 'CONFIRM' && action === 'run'){
+    attempt.status = 'CONFIRM';
+    showFunctionAssistConfirmation(attempt, route);
+  }else{
+    attempt.status = 'DIAGNOSTIC';
+    showFunctionAssistDiagnostic(route.route === 'CONFIRM'
+      ? {message:'サブ関数を含むコードはRUNから確認してください。このコードはRUNからあらためて確認してください。'}
+      : route);
+  }
+}
+
+const renderFunctionAssistStep = function(step){
+  showExecutionLine(step.lineNo);
+  const top = element('div', 'step-top');
+  const context = step.functionName === 'main' ? 'main' : `${step.functionName}・${step.callId}回目`;
+  top.append(element('span', '', `STEP ${String(activeStep + 1).padStart(2, '0')} / ${currentSteps.length}`),
+    element('span', '', `${step.lineNo} 行目`));
+  const track = element('div', 'step-track');
+  const fill = element('span');
+  fill.style.width = `${(activeStep + 1) / currentSteps.length * 100}%`;
+  track.append(fill);
+  const code = element('div', 'step-code');
+  code.append(element('code', '', editor.getLine(step.lineNo - 1)));
+  const detail = element('div', 'flow-detail function-assist-step');
+  detail.dataset.event = step.functionEvent;
+  const descriptions = {
+    declare:'変数を用意します。', call:`${step.calleeName || 'サブ関数'} を呼び出します。`,
+    arguments:'引数の値を、呼び出された関数の変数に渡します。', assign:'値を計算して変数に保存します。',
+    return:`${step.returnValue ?? ''} を呼出元に返します。`,
+    'return-assign':`mainに復帰し、戻り値を ${step.target || '変数'} に保存します。`,
+    printf:'標準出力に表示します。', 'program-end':'mainの処理を終了します。',
+    scanf:`入力された整数 ${step.scanfInput?.inputDisplay || ''} を ${step.scanfInput?.target || ''} に保存します。`,
+    'input-wait':'次の整数の入力を待っています。',
+    'branch-decision':step.branchDecision
+      ? `${step.branchDecision.condition} は${step.branchDecision.conditionMet ? '真' : '偽'}です。${step.branchDecision.selectedBranch === 'if' ? 'if側' : 'else側'}のreturnへ進みます。` : ''
+  };
+  detail.append(element('small', '', context), element('p', '', descriptions[step.functionEvent] || '処理を確認します。'));
+  if(step.branchDecision?.comparison){
+    const comparison = step.branchDecision.comparison;
+    detail.append(element('p', '', `比較する値：${comparison.leftDisplay} ${comparison.operator} ${comparison.rightDisplay}`));
+  }
+  const previous = new Map((activeStep > 0 ? currentSteps[activeStep - 1].scopesAtStep : [])
+    .flatMap(scope => scope.variables.map(variable => [`${scope.scopeId}:${variable.name}`, variable.display])));
+  const scopes = element('div', 'function-assist-scopes');
+  for(const scope of step.scopesAtStep){
+    const section = element('section', 'function-assist-scope');
+    section.dataset.scopeId = scope.scopeId;
+    section.classList.toggle('is-active', scope.scopeId === step.activeScopeId);
+    section.append(element('h4', '', scope.functionName === 'main' ? 'main' : `${scope.functionName}・${scope.callId}回目`));
+    const boxes = element('div', 'scalar-boxes');
+    for(const variable of scope.variables){
+      const box = element('div', 'scalar-variable');
+      const key = `${scope.scopeId}:${variable.name}`;
+      box.dataset.variableKey = key;
+      const value = variable.display === '未初期化' ? '—' : variable.display;
+      box.append(element('span', 'scalar-variable-name', variable.name), element('span', 'scalar-variable-value', value));
+      if(previous.has(key) && previous.get(key) !== variable.display){
+        box.append(element('span', 'scalar-variable-history', `${previous.get(key) === '未初期化' ? '—' : previous.get(key)} → ${value}`));
+      }
+      boxes.append(box);
+    }
+    section.append(boxes);
+    scopes.append(section);
+  }
+  const nextStep = currentSteps[activeStep + 1];
+  const next = element('div', 'next-line');
+  next.append(element('span', '', '次： '), element('strong', '', nextStep ? `${nextStep.lineNo}行目` : 'RESULT'));
+  flow.replaceChildren(top, track, code, detail, scopes, next);
+  if(functionAssistAttempt?.approved && functionAssistAttempt.reusable) functionAssistAttempt.viewSurface = top;
+  $('step-controls').hidden = false;
+  $('step-prev').disabled = $('step-next').disabled = false;
+  $('step-count').textContent = `${activeStep + 1} / ${currentSteps.length}`;
+  $('step-slider').disabled = false;
+  $('step-slider').max = String(currentSteps.length);
+  $('step-slider').value = String(activeStep + 1);
+  $('step-slider').setAttribute('aria-valuetext', `STEP ${activeStep + 1} / ${currentSteps.length}`);
+  outputCard.hidden = false;
+  setOutput(step.outputAtStep);
+  $('feedback').textContent = '';
+};
+
+// The legacy reset API is retained; pending product approvals must also expire.
+const resetCodeWithoutFunctionAssist = resetCode;
+resetCode = function(){
+  if(discardFunctionAssist()){
+    ++functionAssistEditGeneration;
+    invalidateResult('コードをリセットしました。');
+    editor.setValue('');
+  }
+  return resetCodeWithoutFunctionAssist();
+};
+window.addEventListener('pagehide', () => {
+  if(discardFunctionAssist()){
+    cancelResultReveal();
+    clearRunSuccessFeedback();
+    clearInputInjection();
+  }
+});
+
+
+// 解析と結果の確定は共通です。起点の操作に応じて表示専用の演出だけを選びます。
+const executeNormalCode = function(action, attempt){
   cancelResultReveal();
   clearRunSuccessFeedback();
   clearRunErrorFeedback();
@@ -1615,7 +2029,7 @@ function executeCode(action){
     visualizeCode();
     const result = window.cVisualizerLiteResult;
     const input = scanfInput.value;
-    const isSameInput = () => editor.getValue() === code && scanfInput.value === input;
+    const isSameInput = () => isFunctionAssistAttemptCurrent(attempt) && editor.getValue() === code && scanfInput.value === input;
     const consumedInput = result?.steps.some(step => step.scanfInput);
     if(result?.inputRequired && !result.hasWarnings){
       currentSteps = [];
@@ -1670,15 +2084,34 @@ function executeCode(action){
     saveHistory(code, 'check', failed, warnings);
     console.error('Visualizer Lite RUN failed', error);
   }
-}
+};
 
 editor.on('cursorActivity', updateCursor);
 editor.on('change', () => {
-  if(resultCode !== null || errorLines.size || waitingCode !== null || pendingRunSuccess || pendingInputInjection) invalidateResult();
+  ++functionAssistEditGeneration;
+  const hadFunctionState = discardFunctionAssist();
+  if(hadFunctionState || resultCode !== null || errorLines.size || waitingCode !== null || pendingRunSuccess || pendingInputInjection) invalidateResult();
   // 手入力に戻ったことだけを選択欄に反映します。
   if($('sample-select').value) $('sample-select').value = '';
 });
 scanfInput.addEventListener('input', () => {
+  ++functionAssistInputGeneration;
+  if(canContinueFunctionInput(functionAssistAttempt)){
+    const attempt = functionAssistAttempt;
+    ++attempt.operationToken;
+    clearInputInjection();clearRunSuccessFeedback();cancelResultReveal();
+    attempt.input = scanfInput.value;attempt.inputGeneration = functionAssistInputGeneration;
+    if(attempt.reusable && (['RESULT_REUSABLE','INPUT_DIRTY'].includes(attempt.status) ||
+      (attempt.status === 'INPUT_PENDING' && attempt.pendingFrom !== 'WAITING_FUNCTION'))){
+      showFunctionInputDirty(attempt);
+    }else{
+      functionAssistResult = null;
+      if(attempt.status === 'INPUT_PENDING') showFunctionInputWaiting(attempt.lastWaiting, attempt);
+      $('feedback').textContent = '入力が変更されました。INPUTで、このRUNを最初から確認します。';
+    }
+    return;
+  }
+  const hadFunctionState = discardFunctionAssist();
   const message = '入力値が変更されました。INPUTまたはRUNで結果を更新してください。';
   const hasPreviousDisplay = flow.querySelector('.result-state') !== null || finalState !== null;
   if(hasPreviousDisplay){
@@ -1699,7 +2132,7 @@ scanfInput.addEventListener('input', () => {
     $('step-controls').hidden = true;
     outputCard.hidden = true;
     $('feedback').textContent = message;
-  }else if(resultCode !== null || errorLines.size || waitingCode !== null || pendingRunSuccess || pendingInputInjection){
+  }else if(hadFunctionState || resultCode !== null || errorLines.size || waitingCode !== null || pendingRunSuccess || pendingInputInjection){
     // まだ表示されていないSweepの結果やERRORには、従来の無効化を適用します。
     invalidateResult(message);
     $('feedback').textContent = message;
@@ -1713,6 +2146,7 @@ editor.on('gutterClick', (_editor, line, gutter) => {
   renderStep();
 });
 $('sample-select').addEventListener('change', event => {
+  if(discardFunctionAssist()) invalidateResult();
   const body = sampleBody[event.target.value];
   if(!body) return;
   const code = ['#include <stdio.h>', '', 'int main(void){', ...body.map(line => line ? `    ${line}` : ''), '    return 0;', '}'].join('\n');

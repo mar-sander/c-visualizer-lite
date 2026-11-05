@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ja">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>L-FUNC1 独立構造検査</title>
+<style>
+  :root { color-scheme:dark; font:15px/1.7 system-ui,sans-serif; background:#111214; color:#eee; }
+  body { max-width:1100px; margin:32px auto; padding:0 20px 60px; }
+  h1 { font-size:clamp(24px,4vw,36px); margin-bottom:8px; }
+  p { color:#bcc0c7; }
+  button,select { font:inherit; padding:10px 16px; border:1px solid #666; border-radius:6px; background:#25272b; color:#fff; }
+  button { cursor:pointer; background:#ead15a; color:#111; border-color:#ead15a; }
+  textarea { box-sizing:border-box; width:100%; min-height:260px; margin:16px 0 8px; padding:16px; background:#1a1b1e; color:#eee; border:1px solid #555; border-radius:6px; font:14px/1.6 ui-monospace,monospace; tab-size:4; }
+  pre { max-height:480px; overflow:auto; padding:16px; background:#1a1b1e; white-space:pre-wrap; overflow-wrap:anywhere; }
+  table { border-collapse:collapse; width:100%; font-size:13px; }
+  td,th { text-align:left; padding:9px; border-bottom:1px solid #444; overflow-wrap:anywhere; }
+  .pass { color:#8ee3b1; } .fail { color:#ff9b9b; }
+  .controls { display:flex; gap:12px; flex-wrap:wrap; }
+</style>
+<h1>L-FUNC1 独立構造検査</h1>
+<p>開発専用ページです。Cコードの関数構造を分類します。サブ関数の実行、製品RUN・INPUT・履歴への接続はありません。</p>
+<p id="summary" role="status">独立テストを準備しています。</p>
+<section aria-label="構造検査の入力">
+  <div class="controls">
+    <label>想定例 <select id="example"><option value="sum">教材06(1)・空欄補完例</option><option value="difference">教材06(2)・空欄補完例</option><option value="normal">通常main</option><option value="broken">未完成ヘッダ</option></select></label>
+    <button id="inspect" type="button">構造を検査する</button>
+  </div>
+  <label for="source">Cソース</label><textarea id="source" spellcheck="false"></textarea>
+  <pre id="catalog" aria-label="構造検査結果"></pre>
+</section>
+<h2>独立テスト結果</h2>
+<p>ここに表示するのはこのページ上で実行した検出器テストです。既存製品の全回帰や端末実機確認を意味しません。</p>
+<table><thead><tr><th>結果</th><th>検査</th><th>分類</th></tr></thead><tbody id="rows"></tbody></table>
+<script src="function-preflight.js"></script>
+<script src="tests-function-preflight.js"></script>
+<script>
+  'use strict';
+  const devReport = FunctionPreflightTests.run(FunctionPreflight.inspectFunctionStructure);
+  document.getElementById('summary').textContent = `${devReport.passed} / ${devReport.total} PASS・${devReport.failed} FAIL`;
+  const rows = document.getElementById('rows');
+  for(const item of devReport.rows){
+    const row=document.createElement('tr');
+    for(const text of [item.pass?'PASS':'FAIL', item.name, item.actual || item.error || '状態・位置検証']){
+      const cell=document.createElement('td');cell.textContent=text;row.append(cell);
+    }
+    row.className=item.pass?'pass':'fail';rows.append(row);
+  }
+  const devExamples={...FunctionPreflightTests.examples,normal:'int main(void){\nint x=1;\nprintf("%d",x);\nreturn 0;\n}',broken:'int main(void){return 0;}\nint kasan(int a,'};
+  const devInput=document.getElementById('source');
+  const inspect=()=>{document.getElementById('catalog').textContent=JSON.stringify(FunctionPreflight.inspectFunctionStructure(devInput.value),null,2);};
+  document.getElementById('example').addEventListener('change',event=>{devInput.value=devExamples[event.target.value];inspect();});
+  document.getElementById('inspect').addEventListener('click',inspect);
+  devInput.value=devExamples.sum;inspect();
+</script>
+</html>
