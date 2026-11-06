@@ -289,7 +289,7 @@ const sampleBody = {
 };
 
 // 常時表示の選択肢はHTML側に置き、解除対象だけをID単位で追加します。
-const UNLOCK_CODES = new Map([['getsample', 'samples'], ['getmask', 'mask']]);
+const UNLOCK_CODES = new Map([['getsample', 'samples'], ['getmask', 'mask'], ['getmovie', 'movie']]);
 const UNLOCK_KEY = 'c-visualizer-lite-unlocks-v1';
 const UNLOCKED_OPTIONS = {
   samples:[
@@ -302,7 +302,8 @@ const UNLOCKED_OPTIONS = {
 };
 const UNLOCK_LABELS = {
   samples:'SAMPLE UNLOCKED',
-  mask:'MASK UNLOCKED'
+  mask:'MASK UNLOCKED',
+  movie:'MOVIE UNLOCKED'
 };
 const unlockedIds = loadUnlocks();
 const secretCodeDialog = $('secret-code-dialog');
@@ -382,6 +383,9 @@ $('secret-code-form').addEventListener('submit', event => {
   persistUnlocks();
   renderUnlockedSamples();
 renderUnlockedMask();
+  if(unlockId === 'movie'){
+    document.dispatchEvent(new CustomEvent('cvlite:unlock', {detail:{id:unlockId}}));
+  }
   secretCodeInput.value = '';
   // 正しいSECRET CODEなら、解放済みでも成功演出を毎回再生する。
   showUnlockFeedback(unlockId);
