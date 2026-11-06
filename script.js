@@ -1127,6 +1127,17 @@ function convertScalarValue(value, type){
   return { ok:false, error:'変数の型情報を確認できません。' };
 }
 
+// 演算結果を丸める前に、Cの通常算術変換で左右を同じ型へそろえます。
+// 宣言・代入先の変換とは分け、算術・比較・複合代入で共有します。
+function convertArithmeticOperands(left, right){
+  const type = promoteNumericType(left.type, right.type);
+  const convertedLeft = convertScalarValue(left.value, type);
+  if(!convertedLeft.ok) return convertedLeft;
+  const convertedRight = convertScalarValue(right.value, type);
+  if(!convertedRight.ok) return convertedRight;
+  return { ok:true, type, leftValue:convertedLeft.value, rightValue:convertedRight.value };
+}
+
 function displayScalarValue(value, type){
   if(type === 'char' && typeof value === 'number'){
     const escapes = { 0:'\\0', 9:'\\t', 10:'\\n', 13:'\\r', 34:'\\"', 39:"\\'", 92:'\\\\' };
@@ -1180,8 +1191,10 @@ function evaluateArithmeticExpression(expr, variables, resolveArrayAccess = null
       const right = parseTerm();
       if(!right.ok) return right;
       const before = `${left.readable} ${op} ${right.readable}`;
-      const type = promoteNumericType(left.type, right.type);
-      const converted = convertScalarValue(op === '+' ? left.value + right.value : left.value - right.value, type);
+      const operands = convertArithmeticOperands(left, right);
+      if(!operands.ok) return operands;
+      const { type, leftValue, rightValue } = operands;
+      const converted = convertScalarValue(op === '+' ? leftValue + rightValue : leftValue - rightValue, type);
       if(!converted.ok) return converted;
       left = {
         ok:true,
@@ -1203,17 +1216,19 @@ function evaluateArithmeticExpression(expr, variables, resolveArrayAccess = null
       if(op === '%' && (!['int', 'char'].includes(left.type) || !['int', 'char'].includes(right.type))){
         return { ok:false, error:'% はint同士の整数演算でのみ使用できます。charは演算前にintへ昇格します。' };
       }
-      if((op === '/' || op === '%') && right.value === 0){
+      const operands = convertArithmeticOperands(left, right);
+      if(!operands.ok) return operands;
+      const { type, leftValue, rightValue } = operands;
+      if((op === '/' || op === '%') && rightValue === 0){
         return { ok:false, error:'0で割ろうとしています。' };
       }
-      const type = promoteNumericType(left.type, right.type);
       let value;
-      if(op === '*') value = left.value * right.value;
+      if(op === '*') value = leftValue * rightValue;
       // Cのint除算と同じく、正負どちらも小数部分を0方向へ切り捨てます。
       if(op === '/') value = type === 'int'
-        ? Math.trunc(left.value / right.value)
-        : left.value / right.value;
-      if(op === '%') value = left.value % right.value;
+        ? Math.trunc(leftValue / rightValue)
+        : leftValue / rightValue;
+      if(op === '%') value = leftValue % rightValue;
       const converted = convertScalarValue(value, type);
       if(!converted.ok) return converted;
       left = {
@@ -1461,13 +1476,24 @@ function evaluateExpression(expr, variables, resolveArrayAccess = null, variable
       arrayAccesses:[...(left.arrayAccesses || []), ...(right.arrayAccesses || [])] };
   }
 
+  const operands = convertArithmeticOperands(left, right);
+  if(!operands.ok) return { ...operands,
+    arrayAccess:left.arrayAccess || right.arrayAccess || null,
+    arrayAccesses:[...(left.arrayAccesses || []), ...(right.arrayAccesses || [])] };
+  const { leftValue, rightValue } = operands;
+  // ASCII charの注記は維持し、それ以外は実際に比較する共通型の値を表示します。
+  const leftDisplay = displayScalarValue(leftValue, left.type === 'char' ? 'char' : operands.type);
+  const rightDisplay = displayScalarValue(rightValue, right.type === 'char' ? 'char' : operands.type);
+  const conversionNote = leftDisplay !== displayScalarValue(left.value, left.type) ||
+    rightDisplay !== displayScalarValue(right.value, right.type)
+    ? `比較前に両辺を${operands.type}型へ変換して、${displayScalarValue(leftValue, operands.type)} と ${displayScalarValue(rightValue, operands.type)} を比較します。` : '';
   const conditions = {
-    '<': left.value < right.value,
-    '<=': left.value <= right.value,
-    '>': left.value > right.value,
-    '>=': left.value >= right.value,
-    '==': left.value === right.value,
-    '!=': left.value !== right.value
+    '<': leftValue < rightValue,
+    '<=': leftValue <= rightValue,
+    '>': leftValue > rightValue,
+    '>=': leftValue >= rightValue,
+    '==': leftValue === rightValue,
+    '!=': leftValue !== rightValue
   };
   const conditionMet = conditions[operator];
 
@@ -1481,12 +1507,13 @@ function evaluateExpression(expr, variables, resolveArrayAccess = null, variable
     arrayAccesses:[...(left.arrayAccesses || []).map(a => ({...a, role:'比較左辺'})), ...(right.arrayAccesses || []).map(a => ({...a, role:'比較右辺'}))],
     comparison:{
       operator,
-      leftValue:left.value,
-      rightValue:right.value,
+      leftValue,
+      rightValue,
       leftSource:leftExpr,
       rightSource:rightExpr,
-      leftDisplay:displayScalarValue(left.value, left.type),
-      rightDisplay:displayScalarValue(right.value, right.type),
+      leftDisplay,
+      rightDisplay,
+      ...(conversionNote ? {conversionNote} : {}),
       conditionMet
     }
   };
@@ -1523,7 +1550,7 @@ function describeComparison(result){
     }
   };
   const conclusion = conclusions[comparison.operator][comparison.conditionMet];
-  return `${escapeHtml(result.readable)} を計算し、左右の値を比較しました。${conclusion}`;
+  return `${escapeHtml(result.readable)} を計算し、左右の値を比較しました。${comparison.conversionNote || ''}${conclusion}`;
 }
 
 
@@ -1909,7 +1936,8 @@ function visualizeCode(){
   }
 
   function addStep(lineNo, text, markAsExecuted = true, arrayViews = [], branchDecision = null, scanfInputData = null, loopDecision = null){
-    const step = { step:stepNo++, lineNo, text };
+    const conversionNote = branchDecision?.conversionNote || loopDecision?.conversionNote;
+    const step = { step:stepNo++, lineNo, text:conversionNote ? `${text}<br>${escapeHtml(conversionNote)}` : text };
     if(arrayViews.length) step.arrayViews = arrayViews;
     if(branchDecision) step.branchDecision = branchDecision;
     if(scanfInputData) step.scanfInput = scanfInputData;
@@ -2020,8 +2048,10 @@ function visualizeCode(){
       warningLines.add(lineNo);
       return { ok:false };
     }
-    const resultType = promoteNumericType(type, operand.type);
-    const computed = convertScalarValue(before + (update.operator === '-=' || update.operator === '--' ? -operand.value : operand.value), resultType);
+    const operands = convertArithmeticOperands({value:before, type}, operand);
+    const computed = operands.ok
+      ? convertScalarValue(operands.leftValue + (update.operator === '-=' || update.operator === '--' ? -operands.rightValue : operands.rightValue), operands.type)
+      : operands;
     const converted = computed.ok ? convertScalarValue(computed.value, type) : computed;
     if(!converted.ok){
       addHint(hints, lineNo, '更新する値を確認', escapeHtml(converted.error));
@@ -2032,14 +2062,16 @@ function visualizeCode(){
     setScalarValue(name, after);
     const beforeDisplay = displayScalarValue(before, type);
     const afterDisplay = displayScalarValue(after, type);
-    const delta = update.operator === '-=' || update.operator === '--' ? -operand.value : operand.value;
+    const delta = update.operator === '-=' || update.operator === '--' ? -operands.rightValue : operands.rightValue;
     const direction = delta >= 0 ? '増やし' : '減らし';
+    const conversionText = !Object.is(operands.leftValue, before) || !Object.is(operands.rightValue, operand.value)
+      ? `演算前に両辺を${operands.type}型へ変換し、${displayScalarValue(operands.leftValue, operands.type)} と ${displayScalarValue(operands.rightValue, operands.type)} で計算しました。` : '';
     addAnalysis(
       analysis,
       lineNo,
-      `${analysisPrefix}<code>${escapeHtml(update.source)}</code> により、変数 <code>${name}</code> を <code>${Math.abs(delta)}</code> ${direction}、<code>${escapeHtml(beforeDisplay)}</code> から <code>${escapeHtml(afterDisplay)}</code> に更新しました。`
+      `${analysisPrefix}<code>${escapeHtml(update.source)}</code> により、変数 <code>${name}</code> を <code>${Math.abs(delta)}</code> ${direction}、<code>${escapeHtml(beforeDisplay)}</code> から <code>${escapeHtml(afterDisplay)}</code> に更新しました。${conversionText}`
     );
-    addStep(lineNo, `${stepPrefix}${name} の中身を ${escapeHtml(beforeDisplay)} から ${escapeHtml(afterDisplay)} に変えました。更新：${escapeHtml(update.source)}`);
+    addStep(lineNo, `${stepPrefix}${name} の中身を ${escapeHtml(beforeDisplay)} から ${escapeHtml(afterDisplay)} に変えました。更新：${escapeHtml(update.source)}${conversionText ? `<br>${escapeHtml(conversionText)}` : ''}`);
     return { ok:true, value:after };
   }
 
@@ -3256,6 +3288,7 @@ function visualizeCode(){
         const comparison = evaluated.comparison;
         const decision = {
           kind:'if', depth:node.depth, condition:branch.condition,
+          ...(comparison?.conversionNote ? {conversionNote:comparison.conversionNote} : {}),
           comparison:comparison ? {
             left:{ source:comparison.leftSource, value:comparison.leftValue, display:comparison.leftDisplay },
             operator:comparison.operator,
@@ -3351,6 +3384,7 @@ function visualizeCode(){
         kind:'if',
         depth:node.depth,
         condition:node.condition,
+        ...(comparison?.conversionNote ? {conversionNote:comparison.conversionNote} : {}),
         comparison:comparison ? {
           left:{ source:comparison.leftSource, value:comparison.leftValue, display:comparison.leftDisplay },
           operator:comparison.operator,
@@ -4066,6 +4100,7 @@ function visualizeCode(){
         condition:node.condition,
         iteration:enteredBodyCount + 1,
         enteredCount:enteredBodyCount,
+        ...(conditionResult.comparison?.conversionNote ? {conversionNote:conditionResult.comparison.conversionNote} : {}),
         comparison:conditionResult.comparison ? {
           left:{source:conditionResult.comparison.leftSource, display:conditionResult.comparison.leftDisplay, value:conditionResult.comparison.leftValue},
           operator:conditionResult.comparison.operator,
@@ -4679,6 +4714,7 @@ function visualizeCode(){
         iteration:nextLocalIteration,
         depth:node.forDepth,
         label:node.explanationLabel || 'FOR',
+        ...(conditionResult.comparison?.conversionNote ? {conversionNote:conditionResult.comparison.conversionNote} : {}),
         comparison:conditionResult.comparison ? {
           left:{source:conditionResult.comparison.leftSource, display:conditionResult.comparison.leftDisplay},
           operator:conditionResult.comparison.operator,
