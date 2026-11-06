@@ -1402,7 +1402,7 @@ function renderStep(){
   explanation.append(
     element('small', '', isOmission ? '反復説明の省略' : 'コードは何をしてる？'),
     element('p', '', step.branchDecision
-      ? describeDecisionPurpose(step.branchDecision)
+      ? describeDecisionPurpose(step.branchDecision) + (step.branchDecision.conversionNote ? ` ${step.branchDecision.conversionNote}` : '')
       : step.scanfInput
         ? describeScanfPurpose(step.scanfInput)
       : decodeEngineExplanation(step.text))
@@ -1948,7 +1948,7 @@ const renderFunctionAssistStep = function(step){
   detail.append(element('small', '', context), element('p', '', descriptions[step.functionEvent] || '処理を確認します。'));
   if(step.branchDecision?.comparison){
     const comparison = step.branchDecision.comparison;
-    detail.append(element('p', '', `比較する値：${comparison.leftDisplay} ${comparison.operator} ${comparison.rightDisplay}`));
+    detail.append(element('p', '', `比較する値：${comparison.leftDisplay} ${comparison.operator} ${comparison.rightDisplay}${comparison.conversionNote ? `。${comparison.conversionNote}` : ''}`));
   }
   const previous = new Map((activeStep > 0 ? currentSteps[activeStep - 1].scopesAtStep : [])
     .flatMap(scope => scope.variables.map(variable => [`${scope.scopeId}:${variable.name}`, variable.display])));
