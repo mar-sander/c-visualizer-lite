@@ -1635,15 +1635,19 @@ function parsePrintfFormat(format){
 function formatPrintfString(parsed, values){
   let index = 0;
   const text = parsed.parts.map(part => {
-    if(part.literal !== undefined) return part.literal
-      .replace(/\\n/g, '\n')
-      .replace(/\\t/g, '\t')
-      .replace(/\\"/g, '"')
-      .replace(/\\\\/g, '\\');
+    // 一回の走査で既存の対応escapeだけを復号し、生成した文字を再解釈しません。
+    if(part.literal !== undefined) return part.literal.replace(/\\([nt"\\])/g,
+      (_, escaped) => ({n:'\n', t:'\t', '"':'"', '\\':'\\'})[escaped]);
     const value = values[index++];
     if(part.specifier.type === 'd') return String(value);
     if(part.specifier.type === 'c') return String.fromCharCode(value);
-    return value.toFixed(part.specifier.precision);
+    const precision = part.specifier.precision;
+    // binary64のこの範囲は整数。指数文字列の桁移動ではなく保存値を正確に展開します。
+    // finite値・精度0..20は既存の評価器／書式解析器で検査済みです。
+    if(Math.abs(value) >= 1e21){
+      return BigInt(value).toString() + (precision ? '.' + '0'.repeat(precision) : '');
+    }
+    return (Object.is(value, -0) ? '-' : '') + value.toFixed(precision);
   }).join('');
   return { text, usedCount:index };
 }
