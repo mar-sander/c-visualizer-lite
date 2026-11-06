@@ -9170,6 +9170,51 @@
       {"name":"L-FIX1 N0025 boundary-+","code":"#include <stdio.h>\nint main(void){\nint a = 16777217;\nfloat b = 16777216.0f;\nfloat x = a + b;\nprintf(\"%.6f\",x);\nreturn 0;\n}\n","expect":{"output":"33554432.000000","warningMax":0}}
     ]);
 
+    // L-FIX2: fixed independent Clang oracle; no engine-generated expected values.
+    testCases.push(...[
+      {"name":"L-FIX2 AUD003-0","code":"#include <stdio.h>\nint main(void){\nprintf(\"\\\\n\");\nreturn 0;\n}\n","expect":{"output":"\\n","warningMax":0}},
+      {"name":"L-FIX2 AUD003-1","code":"#include <stdio.h>\nint main(void){\nprintf(\"\\\\t\");\nreturn 0;\n}\n","expect":{"output":"\\t","warningMax":0}},
+      {"name":"L-FIX2 AUD004-0","code":"#include <stdio.h>\nint main(void){\nprintf(\"%f\", -0.0);\nreturn 0;\n}\n","expect":{"output":"-0.000000","warningMax":0}},
+      {"name":"L-FIX2 AUD004-1","code":"#include <stdio.h>\nint main(void){\nprintf(\"%.2f\", -0.0);\nreturn 0;\n}\n","expect":{"output":"-0.00","warningMax":0}},
+      {"name":"L-FIX2 AUD004-2","code":"#include <stdio.h>\nint main(void){\ndouble x = -0.0;\nprintf(\"%f\",x);\nreturn 0;\n}\n","expect":{"output":"-0.000000","warningMax":0}},
+      {"name":"L-FIX2 AUD004-3","code":"#include <stdio.h>\nint main(void){\nfloat x = -0.0f;\nprintf(\"%f\",x);\nreturn 0;\n}\n","expect":{"output":"-0.000000","warningMax":0}},
+      {"name":"L-FIX2 AUD005-0","code":"#include <stdio.h>\nint main(void){\nprintf(\"%.2f\", 1000000000000000000000.0);\nreturn 0;\n}\n","expect":{"output":"1000000000000000000000.00","warningMax":0}},
+      {"name":"L-FIX2 AUD005-1","code":"#include <stdio.h>\nint main(void){\nprintf(\"%.2f\", -1000000000000000000000.0);\nreturn 0;\n}\n","expect":{"output":"-1000000000000000000000.00","warningMax":0}},
+      {"name":"L-FIX2 AUD005-2","code":"#include <stdio.h>\nint main(void){\nfloat x = 1000000000000000000000.0f;\nprintf(\"%f\",x);\nreturn 0;\n}\n","expect":{"output":"1000000020040877342720.000000","warningMax":0}},
+      {"name":"L-FIX2 AUD005-3","code":"#include <stdio.h>\nint main(void){\nprintf(\"%.0lf\", 10000000000000000000000.0);\nreturn 0;\n}\n","expect":{"output":"10000000000000000000000","warningMax":0}},
+      {"name":"L-FIX2 B1","code":"#include <stdio.h>\nint main(void){\nprintf(\"A\\nB\\tC\");\nreturn 0;\n}","expect":{"output":"A\nB\tC","warningMax":0}},
+      {"name":"L-FIX2 B2","code":"#include <stdio.h>\nint main(void){\nprintf(\"\\\\n\\\\t\");\nreturn 0;\n}","expect":{"output":"\\n\\t","warningMax":0}},
+      {"name":"L-FIX2 B3","code":"#include <stdio.h>\nint main(void){\nprintf(\"\\\\\\\\n\");\nreturn 0;\n}","expect":{"output":"\\\\n","warningMax":0}},
+      {"name":"L-FIX2 B4","code":"#include <stdio.h>\nint main(void){\nprintf(\"\\\"ok\\\"\");\nreturn 0;\n}","expect":{"output":"\"ok\"","warningMax":0}},
+      {"name":"L-FIX2 B5","code":"#include <stdio.h>\nint main(void){\nprintf(\"%.0f\", 0.0);\nreturn 0;\n}","expect":{"output":"0","warningMax":0}},
+      {"name":"L-FIX2 B6","code":"#include <stdio.h>\nint main(void){\nprintf(\"%.2f\", 0.0);\nreturn 0;\n}","expect":{"output":"0.00","warningMax":0}},
+      {"name":"L-FIX2 B7","code":"#include <stdio.h>\nint main(void){\nprintf(\"%.20f\", 0.0);\nreturn 0;\n}","expect":{"output":"0.00000000000000000000","warningMax":0}},
+      {"name":"L-FIX2 B8","code":"#include <stdio.h>\nint main(void){\nprintf(\"%.0f\", -0.0);\nreturn 0;\n}","expect":{"output":"-0","warningMax":0}},
+      {"name":"L-FIX2 B9","code":"#include <stdio.h>\nint main(void){\nprintf(\"%.2f\", -0.0);\nreturn 0;\n}","expect":{"output":"-0.00","warningMax":0}},
+      {"name":"L-FIX2 B10","code":"#include <stdio.h>\nint main(void){\nprintf(\"%.20f\", -0.0);\nreturn 0;\n}","expect":{"output":"-0.00000000000000000000","warningMax":0}},
+      {"name":"L-FIX2 B11","code":"#include <stdio.h>\nint main(void){\nprintf(\"%.0f\", -0.0001);\nreturn 0;\n}","expect":{"output":"-0","warningMax":0}},
+      {"name":"L-FIX2 B12","code":"#include <stdio.h>\nint main(void){\nprintf(\"%.2f\", -0.0001);\nreturn 0;\n}","expect":{"output":"-0.00","warningMax":0}},
+      {"name":"L-FIX2 B13","code":"#include <stdio.h>\nint main(void){\nprintf(\"%.20f\", -0.0001);\nreturn 0;\n}","expect":{"output":"-0.00010000000000000000","warningMax":0}},
+      {"name":"L-FIX2 B14","code":"#include <stdio.h>\nint main(void){\nprintf(\"%.0f\", 1.25);\nreturn 0;\n}","expect":{"output":"1","warningMax":0}},
+      {"name":"L-FIX2 B15","code":"#include <stdio.h>\nint main(void){\nprintf(\"%.2f\", 1.25);\nreturn 0;\n}","expect":{"output":"1.25","warningMax":0}},
+      {"name":"L-FIX2 B16","code":"#include <stdio.h>\nint main(void){\nprintf(\"%.20f\", 1.25);\nreturn 0;\n}","expect":{"output":"1.25000000000000000000","warningMax":0}},
+      {"name":"L-FIX2 B17","code":"#include <stdio.h>\nint main(void){\nprintf(\"%.0f\", -1.25);\nreturn 0;\n}","expect":{"output":"-1","warningMax":0}},
+      {"name":"L-FIX2 B18","code":"#include <stdio.h>\nint main(void){\nprintf(\"%.2f\", -1.25);\nreturn 0;\n}","expect":{"output":"-1.25","warningMax":0}},
+      {"name":"L-FIX2 B19","code":"#include <stdio.h>\nint main(void){\nprintf(\"%.20f\", -1.25);\nreturn 0;\n}","expect":{"output":"-1.25000000000000000000","warningMax":0}},
+      {"name":"L-FIX2 B20","code":"#include <stdio.h>\nint main(void){\nprintf(\"%.0f\", 1000000000000000000000.0);\nreturn 0;\n}","expect":{"output":"1000000000000000000000","warningMax":0}},
+      {"name":"L-FIX2 B21","code":"#include <stdio.h>\nint main(void){\nprintf(\"%.2f\", 1000000000000000000000.0);\nreturn 0;\n}","expect":{"output":"1000000000000000000000.00","warningMax":0}},
+      {"name":"L-FIX2 B22","code":"#include <stdio.h>\nint main(void){\nprintf(\"%.20f\", 1000000000000000000000.0);\nreturn 0;\n}","expect":{"output":"1000000000000000000000.00000000000000000000","warningMax":0}},
+      {"name":"L-FIX2 B23","code":"#include <stdio.h>\nint main(void){\nprintf(\"%.0f\", 10000000000000000000000.0);\nreturn 0;\n}","expect":{"output":"10000000000000000000000","warningMax":0}},
+      {"name":"L-FIX2 B24","code":"#include <stdio.h>\nint main(void){\nprintf(\"%.2f\", 10000000000000000000000.0);\nreturn 0;\n}","expect":{"output":"10000000000000000000000.00","warningMax":0}},
+      {"name":"L-FIX2 B25","code":"#include <stdio.h>\nint main(void){\nprintf(\"%.20f\", 10000000000000000000000.0);\nreturn 0;\n}","expect":{"output":"10000000000000000000000.00000000000000000000","warningMax":0}},
+      {"name":"L-FIX2 B26","code":"#include <stdio.h>\nint main(void){\nprintf(\"%.0f\", -1000000000000000000000.0);\nreturn 0;\n}","expect":{"output":"-1000000000000000000000","warningMax":0}},
+      {"name":"L-FIX2 B27","code":"#include <stdio.h>\nint main(void){\nprintf(\"%.2f\", -1000000000000000000000.0);\nreturn 0;\n}","expect":{"output":"-1000000000000000000000.00","warningMax":0}},
+      {"name":"L-FIX2 B28","code":"#include <stdio.h>\nint main(void){\nprintf(\"%.20f\", -1000000000000000000000.0);\nreturn 0;\n}","expect":{"output":"-1000000000000000000000.00000000000000000000","warningMax":0}},
+      {"name":"L-FIX2 B29","code":"#include <stdio.h>\nint main(void){\nprintf(\"%.0f\", 179769313486231570000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000.0);\nreturn 0;\n}","expect":{"output":"179769313486231570814527423731704356798070567525844996598917476803157260780028538760589558632766878171540458953514382464234321326889464182768467546703537516986049910576551282076245490090389328944075868508455133942304583236903222948165808559332123348274797826204144723168738177180919299881250404026184124858368","warningMax":0}},
+      {"name":"L-FIX2 B30","code":"#include <stdio.h>\nint main(void){\nprintf(\"%.2f\", 179769313486231570000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000.0);\nreturn 0;\n}","expect":{"output":"179769313486231570814527423731704356798070567525844996598917476803157260780028538760589558632766878171540458953514382464234321326889464182768467546703537516986049910576551282076245490090389328944075868508455133942304583236903222948165808559332123348274797826204144723168738177180919299881250404026184124858368.00","warningMax":0}},
+      {"name":"L-FIX2 B31","code":"#include <stdio.h>\nint main(void){\nprintf(\"%.20f\", 179769313486231570000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000.0);\nreturn 0;\n}","expect":{"output":"179769313486231570814527423731704356798070567525844996598917476803157260780028538760589558632766878171540458953514382464234321326889464182768467546703537516986049910576551282076245490090389328944075868508455133942304583236903222948165808559332123348274797826204144723168738177180919299881250404026184124858368.00000000000000000000","warningMax":0}}
+    ]);
+
     async function runAllTests(){
       const results = testCases.map(testCase => ({ testCase, result:checkCase(testCase) }));
       results.push(...await checkDecisionUiCases());
