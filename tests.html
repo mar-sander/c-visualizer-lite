@@ -9215,6 +9215,35 @@
       {"name":"L-FIX2 B31","code":"#include <stdio.h>\nint main(void){\nprintf(\"%.20f\", 179769313486231570000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000.0);\nreturn 0;\n}","expect":{"output":"179769313486231570814527423731704356798070567525844996598917476803157260780028538760589558632766878171540458953514382464234321326889464182768467546703537516986049910576551282076245490090389328944075868508455133942304583236903222948165808559332123348274797826204144723168738177180919299881250404026184124858368.00000000000000000000","warningMax":0}}
     ]);
 
+    // L-FIX3: independent Clang outputs; unsupported literals must warn.
+    testCases.push(...[
+      {"name":"L-FIX3 AUD006-0","code":"#include <stdio.h>\nint main(void){\nint i;\nfor(i = 43; i < ','; i++){\nprintf(\"%d\",i);\n}\nreturn 0;\n}\n","expect":{"output":"43","warningMax":0}},
+      {"name":"L-FIX3 AUD006-1","code":"#include <stdio.h>\nint main(void){\nint i;\nfor(i = ','; i < 45; i++){\nprintf(\"%d\",i);\n}\nreturn 0;\n}\n","expect":{"output":"44","warningMax":0}},
+      {"name":"L-FIX3 AUD006-2","code":"#include <stdio.h>\nint main(void){\nint i;\nfor(i = 0; i < 1; i = i + ','){\nprintf(\"%d\",i);\n}\nreturn 0;\n}\n","expect":{"output":"0","warningMax":0}},
+      {"name":"L-FIX3 AUD006-3","code":"#include <stdio.h>\nint main(void){\nint i;\nfor(i = 43; i < (','); ++i){\nprintf(\"%d\",i);\n}\nreturn 0;\n}\n","expect":{"output":"43","warningMax":0}},
+      {"name":"L-FIX3 AUD008-0","code":"#include <stdio.h>\nint main(void){\nprintf(\"%d\", 010);\nreturn 0;\n}\n","expect":{"warningMin":1}},
+      {"name":"L-FIX3 AUD008-1","code":"#include <stdio.h>\nint main(void){\nint x = 010;\nprintf(\"%d\",x);\nreturn 0;\n}\n","expect":{"warningMin":1}},
+      {"name":"L-FIX3 AUD008-2","code":"#include <stdio.h>\nint main(void){\nint a[1] = {010};\nprintf(\"%d\",a[0]);\nreturn 0;\n}\n","expect":{"warningMin":1}},
+      {"name":"L-FIX3 AUD008-3","code":"#include <stdio.h>\nint main(void){\nprintf(\"%d\", 077);\nreturn 0;\n}\n","expect":{"warningMin":1}},
+      {"name":"L-FIX3 N0","code":"#include <stdio.h>\nint main(void){\nprintf(\"%d\",0);\nreturn 0;\n}","expect":{"output":"0","warningMax":0}},
+      {"name":"L-FIX3 N1","code":"#include <stdio.h>\nint main(void){\nprintf(\"%d\",10);\nreturn 0;\n}","expect":{"output":"10","warningMax":0}},
+      {"name":"L-FIX3 N2","code":"#include <stdio.h>\nint main(void){\nprintf(\"%d\",-10);\nreturn 0;\n}","expect":{"output":"-10","warningMax":0}},
+      {"name":"L-FIX3 N3","code":"#include <stdio.h>\nint main(void){\nprintf(\"%f\",0.5);\nreturn 0;\n}","expect":{"output":"0.500000","warningMax":0}},
+      {"name":"L-FIX3 N4","code":"#include <stdio.h>\nint main(void){\nint i;\nfor(i=0;i<2;i++){\nprintf(\"%d\",i);\n}\nreturn 0;\n}","expect":{"output":"01","warningMax":0}},
+      {"name":"L-FIX3 N5","code":"#include <stdio.h>\nint main(void){\nchar c=',';\nif(c == ','){\nprintf(\"T\");\n}\nreturn 0;\n}","expect":{"output":"T","warningMax":0}},
+      {"name":"L-FIX3 N6","code":"#include <stdio.h>\nint main(void){\nchar c=',';\nwhile(c == ','){\nprintf(\"T\");\nc='x';\n}\nreturn 0;\n}","expect":{"output":"T","warningMax":0}},
+      {"name":"L-FIX3 N7","code":"#include <stdio.h>\nint main(void){\nint i;\nfor(i=0;i<1;i=i+',' ){\nprintf(\"%c\",'\\'');\n}\nreturn 0;\n}","expect":{"output":"'","warningMax":0}},
+      {"name":"L-FIX3 N8","code":"#include <stdio.h>\nint main(void){\nint a[1]={0};\nprintf(\"%d\",a[0]);\nreturn 0;\n}","expect":{"output":"0","warningMax":0}},
+      {"name":"L-FIX3 R9","code":"#include <stdio.h>\nint main(void){\nprintf(\"%d\",00);\nreturn 0;\n}","expect":{"warningMin":1}},
+      {"name":"L-FIX3 R10","code":"#include <stdio.h>\nint main(void){\nprintf(\"%d\",000);\nreturn 0;\n}","expect":{"warningMin":1}},
+      {"name":"L-FIX3 R11","code":"#include <stdio.h>\nint main(void){\nprintf(\"%d\",077);\nreturn 0;\n}","expect":{"warningMin":1}},
+      {"name":"L-FIX3 R12","code":"#include <stdio.h>\nint main(void){\nint x=-010;\nreturn 0;\n}","expect":{"warningMin":1}},
+      {"name":"L-FIX3 R13","code":"#include <stdio.h>\nint main(void){\nint a[1]={-010};\nreturn 0;\n}","expect":{"warningMin":1}},
+      {"name":"L-FIX3 R14","code":"#include <stdio.h>\nint main(void){\nint a[1]={5};\nprintf(\"%d\",a[00]);\nreturn 0;\n}","expect":{"warningMin":1}},
+      {"name":"L-FIX3 R15","code":"#include <stdio.h>\nint main(void){\nint i;\nfor(i=0, i=1;i<2;i++){\nprintf(\"%d\",i);\n}\nreturn 0;\n}","expect":{"warningMin":1}},
+      {"name":"L-FIX3 R16","code":"#include <stdio.h>\nint main(void){\nint i;\nfor(i=(0,1);i<2;i++){\nprintf(\"%d\",i);\n}\nreturn 0;\n}","expect":{"warningMin":1}}
+    ]);
+
     async function runAllTests(){
       const results = testCases.map(testCase => ({ testCase, result:checkCase(testCase) }));
       results.push(...await checkDecisionUiCases());

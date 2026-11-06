@@ -60,6 +60,7 @@ function parseSupportedArrayAccess(text){
   if(!match) return null;
   const sourceIndex = match[2];
   const isFixedIndex = /^[+-]?\d+$/.test(sourceIndex);
+  if(isFixedIndex && /^[+-]?0\d+$/.test(sourceIndex)) return null;
   return {
     source:match[0],
     name:match[1],
@@ -158,6 +159,10 @@ function parseArrayDeclaration(text){
       title:'initializerの値を確認',
       message:'initializerには整数を1つ以上書き、末尾にはカンマを付けないでください。'
     };
+  }
+  if(items.some(item => /^[+-]?0\d+$/.test(item))){
+    return { matched:true, ok:false, title:'8進整数表記は未対応',
+      message:'先頭0が付く複数桁の整数は未対応です。整数は10進表記で書いてください。' };
   }
   if(items.some(item => !isSimpleIntegerLiteral(item))){
     return {
@@ -756,7 +761,18 @@ function parseForHeader(structuralCode){
   if(!initializationText || !condition || !updateText){
     return { ok:false, error:'初期化・条件・更新を省略したfor文は現在未対応です。' };
   }
-  if(clauses.some(part => part.includes(','))){
+  if(clauses.some(part => {
+    let quote = null, escaped = false;
+    for(const ch of part){
+      if(escaped){ escaped = false; continue; }
+      if(quote){
+        if(ch === '\\') escaped = true;
+        else if(ch === quote) quote = null;
+      }else if(ch === "'" || ch === '"') quote = ch;
+      else if(ch === ',') return true;
+    }
+    return false;
+  })){
     return { ok:false, error:'複数式やカンマ演算子を使うforヘッダは現在未対応です。' };
   }
 
@@ -1071,6 +1087,9 @@ function tokenizeExpression(expr){
   let match;
   let consumed = '';
   while((match = regex.exec(expr)) !== null){
+    if(/^0\d+$/.test(match[1])){
+      return { ok:false, tokens:[], error:'先頭0が付く複数桁の整数（8進整数表記）は現在未対応です。10進表記で書いてください。' };
+    }
     tokens.push(match[1]);
     consumed += match[0];
   }
