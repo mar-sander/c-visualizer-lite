@@ -1,11 +1,12 @@
-<!doctype html><html lang="ja"><meta charset="utf-8"><title>L-TIPS1 / L-TIPS2 / L-TIPS3 / L-TIPS4 / L-TIPS5 tests</title>
+<!doctype html><html lang="ja"><meta charset="utf-8"><title>L-TIPS1 / L-TIPS2 / L-TIPS3 / L-TIPS4 / L-TIPS5 / L-TIPS6 tests</title>
 <h1>Learning support regression</h1><p id="counts">Running</p><ol id="results"></ol>
-<iframe id="app" src="index.html" style="width:100%;height:900px"></iframe>
+<iframe id="app" src="about:blank" style="width:100%;height:900px"></iframe>
 <script>
 (async()=>{
  const rows=[],record=(name,pass)=>{rows.push({name,pass:!!pass});if(!pass)throw Error(name)},wait=ms=>new Promise(r=>setTimeout(r,ms));
  const until=async fn=>{for(let n=0;n<200;n++){if(fn())return;await wait(25)}throw Error('timeout')};
- const frame=document.getElementById('app');await new Promise(r=>frame.onload=r);const ui=frame.contentWindow,d=ui.document,$=id=>d.getElementById(id);
+ const unlockKey='c-visualizer-lite-unlocks-v1',savedUnlock=localStorage.getItem(unlockKey);localStorage.removeItem(unlockKey);
+ const frame=document.getElementById('app');await new Promise(r=>{frame.onload=()=>{if(frame.contentDocument.querySelector('.CodeMirror'))r()};frame.src='index.html'});const ui=frame.contentWindow,d=ui.document,$=id=>d.getElementById(id);
  const snapshot=()=>JSON.stringify({code:d.querySelector('.CodeMirror').CodeMirror.getValue(),input:$('scanfInput').value,sample:$('sample-select').value,result:ui.cVisualizerLiteResult,step:ui.eval('activeStep'),history:ui.eval('historyEntries'),storage:{...ui.localStorage},flow:$('flow-content').textContent,summary:d.querySelector('.final-summary').textContent,output:$('output-value').textContent,slider:$('step-slider').value,undo:d.querySelector('.CodeMirror').CodeMirror.getHistory(),selection:d.querySelector('.CodeMirror').CodeMirror.listSelections(),editorScroll:d.querySelector('.CodeMirror').CodeMirror.getScrollInfo()});
  const open=()=>{$('tips-open').click();d.querySelector('.tips-menu-item').click()};
  const topics=[
@@ -88,8 +89,55 @@
  $('tips-open').click();$('sample-select').focus();record('Tabでメニューを離れると閉じる', $('tips-menu').hidden);
  record('標準動画controls・inline・自動再生なし',$('tips-video').controls&&$('tips-video').playsInline&&!$('tips-video').autoplay);
  record('採用動画パス',$('tips-video').querySelector('source').getAttribute('src')==='assets/for_loop_value_trace_4x3_v2.mp4');
+ // L-TIPS6: the first five topics remain public, including the sort hint.
+ record('L-TIPS6 未解放5件・全編DOMなし・ヒント常時',d.querySelectorAll('.tips-menu-item').length===5&&!d.querySelector('[data-topic="array-sort-full-video"]')&&!!d.querySelector('[data-topic="array-sort-hint-video"]'));
+ const unlock=async(code,label)=>{
+ $('secret-code-open').click();$('secret-code-input').value=code;
+ $('secret-code-form').dispatchEvent(new ui.Event('submit',{bubbles:true,cancelable:true}));
+ record('L-TIPS6 '+code+' 成功演出',$('secret-code-success-text').textContent===label&&!$('secret-code-success').hidden);
+ await until(()=>!$('secret-code-dialog').open);
+ };
+ for(const code of ['not-a-code','GETMOVIE']){
+ $('secret-code-open').click();$('secret-code-input').value=code;$('secret-code-form').dispatchEvent(new ui.Event('submit',{bubbles:true,cancelable:true}));
+ record('L-TIPS6 '+code+' INVALIDで未解放',!$('secret-code-error').hidden&&d.querySelectorAll('.tips-menu-item').length===5);
+ await new Promise(resolve=>{$('secret-code-dialog').addEventListener('close',resolve,{once:true});$('secret-code-dialog').close()});
+ }
+ await unlock('getsample','SAMPLE UNLOCKED');record('L-TIPS6 getsampleは動画を解放しない',d.querySelectorAll('.tips-menu-item').length===5&&[...$('sample-select').options].some(x=>x.value==='add'));
+ await unlock('getmask','MASK UNLOCKED');record('L-TIPS6 getmaskは動画を解放しない',d.querySelectorAll('.tips-menu-item').length===5&&ui.eval("unlockedIds.has('mask')"));
+ const withoutUnlock=()=>{const state=JSON.parse(snapshot());delete state.storage[unlockKey];return JSON.stringify(state)};
+ const beforeUnlock=withoutUnlock();await unlock('  getmovie  ','MOVIE UNLOCKED');
+ record('L-TIPS6 trim成功・即時6件・末尾の正確な名称',d.querySelectorAll('.tips-menu-item').length===6&&d.querySelectorAll('.tips-menu-item')[5].dataset.topic==='array-sort-full-video'&&d.querySelectorAll('.tips-menu-item')[5].textContent==='配列ソートの全編を動画で見る');
+ record('L-TIPS6 解放でコード・結果・履歴・undo維持',withoutUnlock()===beforeUnlock);
+ const savedMovie=JSON.parse(ui.localStorage.getItem(unlockKey));
+ record('L-TIPS6 v1・既存IDと同居・保存キー維持',savedMovie.version===1&&['samples','mask','movie'].every(id=>savedMovie.unlocked.includes(id)));
+ await unlock('getmovie','MOVIE UNLOCKED');record('L-TIPS6 再入力で重複なし',d.querySelectorAll('.tips-menu-item').length===6&&JSON.parse(ui.localStorage.getItem(unlockKey)).unlocked.filter(id=>id==='movie').length===1);
+ for(const state of ['未実行','RESULT','FLOW','コード編集中']){
+ if(state==='未実行')d.querySelector('.CodeMirror').CodeMirror.setValue('#include <stdio.h>\nint main(void){\nint x=1;\nprintf("%d",x);\nreturn 0;\n}');
+ if(state==='RESULT'){$('visualize').click();await until(()=>d.querySelector('.result-flow-button')&&!ui.eval('resultRevealPending')&&!ui.eval('resultReveal'))}
+ if(state==='FLOW'){d.querySelector('.result-flow-button').click();$('step-next').click()}
+ if(state==='コード編集中')d.querySelector('.CodeMirror').CodeMirror.replaceRange('// movie test\n',{line:0,ch:0});
+ const before=snapshot();
+ for(const way of ['button','backdrop','escape']){
+ $('tips-open').click();d.querySelector('[data-topic="array-sort-full-video"]').click();const v=$('tips-video');await until(()=>v.readyState>=1&&!v.error);
+ record('L-TIPS6 '+state+' '+way+' 同一dialog・src・タイトル',$('tips-dialog').open&&$('tips-dialog-title').textContent==='配列ソートの全編を動画で見る'&&v.currentSrc.endsWith('assets/array_sort_full_value_trace_4x3_v1.mp4')&&d.querySelectorAll('#tips-dialog').length===1);
+ record('L-TIPS6 '+state+' '+way+' 動画metadata・手動再生',v.paused&&!v.autoplay&&v.videoWidth===1600&&v.videoHeight===1200&&Math.abs(v.duration-105.866667)<0.1);
+ v.currentTime=10;await until(()=>!v.seeking&&v.currentTime===10);
+ if(way==='button')$('tips-dialog-close').click();
+ if(way==='backdrop')$('tips-dialog').dispatchEvent(new ui.MouseEvent('click',{bubbles:true,clientX:0,clientY:0}));
+ if(way==='escape')$('tips-dialog').dispatchEvent(new ui.Event('cancel',{cancelable:true}));
+ await until(()=>!$('tips-dialog').open&&v.paused&&v.currentTime===0&&d.activeElement===$('tips-open'));
+ record('L-TIPS6 '+state+' '+way+' 停止・先頭・focus復帰',true);
+ record('L-TIPS6 '+state+' '+way+' 全状態維持',snapshot()===before);
+ }
+ }
+ await new Promise(r=>{frame.onload=()=>r();ui.location.reload()});
+ const restored=frame.contentDocument;
+ record('L-TIPS6 reload後6件・ヒント5番目・全編6番目',restored.querySelectorAll('.tips-menu-item').length===6&&restored.querySelectorAll('.tips-menu-item')[4].dataset.topic==='array-sort-hint-video'&&restored.querySelectorAll('.tips-menu-item')[5].dataset.topic==='array-sort-full-video');
+ record('L-TIPS6 reload後既存SAMPLE/MASK ID維持',frame.contentWindow.eval("unlockedIds.has('movie')&&unlockedIds.has('samples')&&unlockedIds.has('mask')"));
+
  }catch(e){rows.push({name:String(e.stack||e),pass:false})}
  ui.document.querySelectorAll('dialog[open]').forEach(x=>x.close());
+ savedUnlock===null?localStorage.removeItem(unlockKey):localStorage.setItem(unlockKey,savedUnlock);
  window.tipsTestResults={total:rows.length,pass:rows.filter(x=>x.pass).length,fail:rows.filter(x=>!x.pass).length,rows};
  document.getElementById('counts').textContent=JSON.stringify({...window.tipsTestResults,rows:undefined});
  rows.forEach(x=>{const li=document.createElement('li');li.textContent=(x.pass?'PASS ':'FAIL ')+x.name;document.getElementById('results').append(li)});

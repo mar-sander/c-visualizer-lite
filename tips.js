@@ -24,6 +24,19 @@
       src: 'assets/array_sort_hint_video_v2.mp4' }
   ];
 
+  const movieTopic = {
+    id: 'array-sort-full-video', label: '配列ソートの全編を動画で見る', kind: 'video',
+    src: 'assets/array_sort_full_value_trace_4x3_v1.mp4'
+  };
+  const isMovieUnlocked = () => {
+    try {
+      const data = JSON.parse(localStorage.getItem('c-visualizer-lite-unlocks-v1'));
+      return !!data && data.version === 1 && Array.isArray(data.unlocked) &&
+        data.unlocked.every(id => typeof id === 'string' && id.length > 0) &&
+        data.unlocked.includes('movie');
+    } catch (_error) { return false; }
+  };
+
   const closeMenu = (restoreFocus = false) => {
     menu.hidden = true;
     trigger.setAttribute('aria-expanded', 'false');
@@ -75,7 +88,8 @@
   const handlers = {
     video: openVideo
   };
-  for (const topic of topics) {
+  const addTopic = (topic) => {
+    if (menuItems.querySelector('[data-topic="' + topic.id + '"]')) return;
     const item = document.createElement('button');
     item.type = 'button';
     item.className = 'tips-menu-item';
@@ -83,7 +97,12 @@
     item.dataset.topic = topic.id;
     item.addEventListener('click', () => handlers[topic.kind]?.(topic));
     menuItems.append(item);
-  }
+  };
+  for (const topic of topics) addTopic(topic);
+  if (isMovieUnlocked()) addTopic(movieTopic);
+  document.addEventListener('cvlite:unlock', (event) => {
+    if (event.detail?.id === 'movie') addTopic(movieTopic);
+  });
 
   trigger.addEventListener('click', () => {
     if (menu.hidden) openMenu();
