@@ -165,11 +165,23 @@ const FunctionAssistTests = (() => {
       changeInput(first);eq(w.__assistCounts.confirmed,1);w.document.getElementById('input-submit').click();await waitInput();
       eq(history().length,0);eq(w.eval('functionAssistAttempt.lastWaiting.inputRequest.ordinal'),2);eq(w.__inputFeedback.success,0);eq(w.__inputFeedback.reveal,0);
       changeInput(input);w.document.getElementById('input-submit').click();await wait(()=>!!w.document.querySelector('.result-flow-button'));
-      eq(w.eval('functionAssistAttempt.runId'),id);eq(w.eval('functionAssistAttempt.approved'),false);eq(history().length,1);
+      eq(w.eval('functionAssistAttempt.runId'),id);eq(w.eval('functionAssistAttempt.approved'),true);eq(w.eval('functionAssistAttempt.status'),'RESULT_REUSABLE');
+      assert(w.eval('canContinueFunctionInput(functionAssistAttempt)'));eq(history().length,1);
       eq(history()[0].output,FunctionInputStage5Tests.prefix+'入力された整数の差 = '+expected+'\n');
       eq(history()[0].variables,[['a',input.split('\n')[0]],['b',input.split('\n')[1]],['sa',expected]]);
       eq(w.__inputFeedback,{success:0,injection:2,reveal:1});eq(w.__assistCounts.normal,0);
       eq(history()[0].output.split('入力された整数の差 = ').length-1,1);
+      // Reuse must actually recompute, and editing must invalidate the old approval.
+      changeInput('8\n3');w.document.getElementById('input-submit').click();
+      await wait(()=>!!w.document.querySelector('.result-flow-button') && !w.eval('pendingInputInjection'));
+      eq(w.eval('functionAssistAttempt.runId'),id);eq(w.eval('functionAssistAttempt.status'),'RESULT_REUSABLE');
+      eq(w.eval('finalState.variables'),[['a','8'],['b','3'],['sa','5']]);eq(history().length,2);
+      eq(history()[0].output,FunctionInputStage5Tests.prefix+'入力された整数の差 = 5\n');
+      const old=w.eval('functionAssistAttempt'),count=w.__assistCounts.confirmed;
+      w.eval('editor.setValue(editor.getValue()+" ");');assert(old.cancelled);
+      assert(w.eval('functionAssistAttempt===null'));
+      assert(!w.eval('canContinueFunctionInput(functionAssistAttempt)'));w.eval("executeCode('input');");
+      eq(w.__assistCounts.confirmed,count);eq(history().length,2);
     });
     await record('Stage5: 入力上書きは全文再解析・古いsnapshot不変',async()=>{
       await startWaiting();changeInput('2');w.eval("executeCode('input');");await waitInput();const snapshot=w.eval('functionAssistAttempt.lastWaiting'),before=JSON.stringify(snapshot);
