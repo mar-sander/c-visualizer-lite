@@ -108,18 +108,42 @@ const FunctionAssistTests = (() => {
     for(const [name,code]of [
       ['未初期化',textbook.replace('wa = a + b;','')],
       ['0除算',textbook.replace('wa = a + b;','wa = a / (b-b);')],
-      ['if/else returnは06(2)対象外',textbook.replace('return wa;','if(a>b){return a;}else{return b;}')],
-      ['FUNCTION scanfは対象外',textbook.replace('int s;','int s;\n    scanf("%d", &s);')],
       ['実行上限',textbook.replace('wa = a + b;','wa = '+'1+'.repeat(300)+'1;')]
     ])await record(`YES後は診断・NORMAL再試行なし：${name}`,async()=>{
       await start(code);run();assert(yes(),'must offer confirmation');yes().click();assert(!w.document.querySelector('.result-state'));eq(w.__assistCounts,{normal:0,confirmed:1});
       eq(history().length,1);eq(history()[0].kind,'check');assert(w.eval('errorLines.size>0'));assert(!w.eval('pendingRunSuccess'));assert(w.document.getElementById('flow-content').textContent.includes('行目'));
     });
+    // L-QA1: these former unsupported cases are now positive contracts.
+    await record('YES後は正常実行：if/else return',async()=>{
+      await start(textbook.replace('return wa;','if(a>b){return a;}else{return b;}'));run();await accept();
+      eq(w.eval('functionAssistResult.status'),'completed');eq(w.eval('finalState.output'),'s = 5\n');
+      eq(w.eval('finalState.variables'),[['s','5']]);eq(history().length,1);eq(history()[0].kind,'result');
+      assert(!w.document.querySelector('.failure-state'));eq(w.__assistCounts,{normal:0,confirmed:1});
+    });
+    await record('YES後は入力待機と完了：FUNCTION main scanf',async()=>{
+      await start(textbook.replace('int s;','int s;\n    scanf("%d", &s);'));run();yes().click();
+      await wait(()=>w.eval('functionAssistAttempt?.status === "WAITING_FUNCTION"'));
+      assert(w.document.querySelector('.waiting-state'));assert(!w.document.querySelector('.failure-state'));
+      eq(history().length,0);eq(w.eval('functionAssistAttempt.lastWaiting.inputRequest.ordinal'),1);
+      w.eval("scanfInput.value='9';scanfInput.dispatchEvent(new Event('input',{bubbles:true}));executeCode('input');");
+      await wait(()=>!!w.document.querySelector('.result-flow-button'));
+      eq(w.eval('functionAssistResult.status'),'completed');eq(w.eval('finalState.output'),'s = 7\n');
+      eq(w.eval('finalState.variables'),[['s','7']]);eq(history().length,1);eq(history()[0].kind,'result');
+      eq(w.__assistCounts.normal,0);
+    });
+    await record('サブ関数内scanfは事前拒否・実行履歴ゼロ',async()=>{
+      await start(textbook.replace('wa = a + b;','scanf("%d", &wa);'));run();
+      assert(!yes());assert(w.document.querySelector('.function-assist-diagnostic'));
+      eq(w.__assistCounts,{normal:0,confirmed:0});eq(history().length,0);
+    });
     await record('失敗の原因行と呼出元・赤強調一致',async()=>{await start(textbook.replace('wa = a + b;','wa = a / (b-b);'));run();yes().click();assert(w.document.getElementById('flow-content').textContent.includes('呼出元：6行目'));assert(w.eval('errorLines.has(12)'));});
-    await record('教材06(2)全体は入力済みでも未対応停止・段階INPUTなし',async()=>{
+    await record('教材06(2)全体は入力済みで正常完了・分岐return',async()=>{
       await start('#include <stdio.h>\nint genzan(int a,int b);\nint main(void){\nint a,b,sa;\nscanf("%d",&a);\nscanf("%d",&b);\nsa=genzan(a,b);\nprintf("%d",sa);\nreturn 0;\n}\nint genzan(int a,int b){\nif(a<b){\nreturn b-a;\n}else{\nreturn a-b;\n}\n}');
-      w.eval("scanfInput.value='2\\n5';");run();assert(yes());yes().click();assert(w.document.querySelector('.failure-state'));assert(w.eval('waitingCode===null && currentSteps.length===0'));
-      eq(w.__assistCounts,{normal:0,confirmed:1});eq(history()[0].kind,'check');eq(history()[0].output,'');
+      w.eval("scanfInput.value='2\\n5';");run();assert(yes());await accept();
+      eq(w.eval('functionAssistResult.status'),'completed');assert(!w.document.querySelector('.failure-state'));
+      eq(w.eval('finalState.variables'),[['a','2'],['b','5'],['sa','3']]);
+      assert(w.eval('currentSteps.some(s=>s.functionEvent==="branch-decision" && s.branchDecision.conditionMet)'));
+      eq(w.__assistCounts,{normal:0,confirmed:1});eq(history().length,1);eq(history()[0].kind,'result');eq(history()[0].output,'3');
     });
     await record('コード表示はtextContent・HTMLを実行しない',async()=>{await start(textbook.replace('s = %d','<img src=x onerror=alert(1)>%d'));run();await accept();assert(!w.document.getElementById('flow-content').querySelector('img'));assert(w.eval('finalState.output').includes('<img'));});
     await record('NORMAL複数scanf RUN→WAITING→INPUTを維持',async()=>{

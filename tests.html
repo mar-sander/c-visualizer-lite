@@ -8833,7 +8833,7 @@
         const unsafe='<img src=x onerror="window.arrayInjected=true">';
         const card=ui.renderLiteArray({name:unsafe,type:'int',length:1,values:[0],initialized:[true],accesses:[]});
         record('配列名をHTMLとして解釈しない',card.querySelector('.lite-array-name').textContent===unsafe&&!card.querySelector('img')&&!ui.arrayInjected);
-        record('UPDATEは公開日を先取りしない',doc.body.textContent.includes('UPDATE: 2026.11.03'));
+        record('UPDATEは公開日を先取りしない',hasValidPublishedUpdate(doc));
       }catch(error){record('実行例外',false,String(error));}
       finally{
         frame.remove();keys.forEach((key,i)=>{if(saved[i]===null)localStorage.removeItem(key);else localStorage.setItem(key,saved[i]);});
@@ -8980,7 +8980,7 @@
         }
         doc.getElementById('history-open').click();const beforeRestore=ui.cVisualizerLiteResult,count=get('historyEntries.length');doc.querySelector('.history-restore').click();
         record('履歴復元は自動RUNせず・配列コードを保持',ui.cVisualizerLiteResult===beforeRestore&&get('historyEntries.length')===count&&cm.getValue()===entry.code&&get('finalState')===null);
-        record('UPDATE表記を維持',doc.body.textContent.includes('UPDATE: 2026.11.03'));
+        record('UPDATE表記を維持',hasValidPublishedUpdate(doc));
       }catch(e){record('実行例外',false,String(e));}
       finally{frame.remove();keys.forEach((k,i)=>saved[i]===null?localStorage.removeItem(k):localStorage.setItem(k,saved[i]));}
       return results;
@@ -9243,6 +9243,18 @@
       {"name":"L-FIX3 R15","code":"#include <stdio.h>\nint main(void){\nint i;\nfor(i=0, i=1;i<2;i++){\nprintf(\"%d\",i);\n}\nreturn 0;\n}","expect":{"warningMin":1}},
       {"name":"L-FIX3 R16","code":"#include <stdio.h>\nint main(void){\nint i;\nfor(i=(0,1);i<2;i++){\nprintf(\"%d\",i);\n}\nreturn 0;\n}","expect":{"warningMin":1}}
     ]);
+
+    // L-QA1: validate the published date contract, not one historical release date.
+    function hasValidPublishedUpdate(doc, today = new Date()){
+      const labels = [...doc.querySelectorAll('.brand small')];
+      if(labels.length !== 1) return false;
+      const match = labels[0].textContent.match(/^試験運用版\s+UPDATE: (\d{4})\.(\d{2})\.(\d{2})$/);
+      if(!match) return false;
+      const [year, month, day] = match.slice(1).map(Number);
+      const date = new Date(year, month - 1, day);
+      return year >= 2000 && date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day &&
+        date <= new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    }
 
     async function runAllTests(){
       const results = testCases.map(testCase => ({ testCase, result:checkCase(testCase) }));

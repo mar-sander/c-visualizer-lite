@@ -8,9 +8,29 @@ const FunctionSessionFA1Tests = (() => {
     const textbook=FunctionInputStage5Tests.examples.textbook;
     const input=value=>w.eval(`scanfInput.value=${JSON.stringify(value)};scanfInput.dispatchEvent(new Event('input',{bubbles:true}));`);
     const hist=()=>w.eval('historyEntries');
-    const calls=()=>w.__actualCoreCalls||0;
+    const calls=()=>{
+      assert(w && Number.isSafeInteger(w.__actualCoreCalls) && w.__actualCoreCalls>=0,'Core call probe missing or invalid');
+      return w.__actualCoreCalls;
+    };
+    // Test-only facade in the iframe. The fetched production implementation is
+    // called unchanged with every argument; no file or production hook is added.
+    const [htmlResponse,coreResponse]=await Promise.all([fetch('index.html'),fetch('function-execution-core.js')]);
+    assert(htmlResponse.ok && coreResponse.ok,'probe source unavailable');
+    const html=await htmlResponse.text(),coreSource=await coreResponse.text();
+    const exportAnchor='return Object.freeze({execute,limits});';
+    assert(coreSource.split(exportAnchor).length===2,'Core export changed: update the test probe');
+    const measured=coreSource.replace(exportAnchor,'window.__actualCoreCalls=0; return Object.freeze({execute:function(...args){window.__actualCoreCalls++;return execute(...args);},limits});');
+    const blob=URL.createObjectURL(new Blob([measured],{type:'text/javascript'}));
+    const tag='<script src="function-execution-core.js"></script>';
+    assert(html.split(tag).length===2,'Core script missing or duplicated');
+    const frame=document.getElementById('product');assert(frame,'test iframe unavailable');
+    const instrumented=html.replace('<head>','<head><base href="'+new URL('index.html',location.href).href+'">').replace(tag,'<script src="'+blob+'"></script>');
+    createProduct=()=>new Promise((resolve,reject)=>{
+      const timeout=setTimeout(()=>reject(Error('instrumented product load timeout')),10000);
+      frame.onload=()=>{clearTimeout(timeout);resolve(frame.contentWindow);};frame.srcdoc=instrumented;
+    });
     const start=async(code=textbook,value='2\n5')=>{
-      w=await createProduct();
+      w=await createProduct();calls();
       w.eval(`historyEntries=[];localStorage.removeItem(HISTORY_KEY);
         window.__fa1Feedback={run:0,input:0,reveal:0,save:0,normal:0};
         const oldFa1Run=playRunSuccessFeedback,oldFa1Input=playInputInjection,oldFa1Reveal=revealResult,oldFa1Save=saveHistory,oldFa1Normal=visualizeCode;
@@ -28,6 +48,10 @@ const FunctionSessionFA1Tests = (() => {
     const submit=()=>w.eval("executeCode('input');");
     const resultValue=()=>w.eval('finalState.variables.find(([n])=>n==="sa")?.[1]');
     const settle=()=>new Promise(r=>setTimeout(r,0));
+    await record('QA1 計測器未設置は失敗として検出',async()=>{
+      await start();delete w.__actualCoreCalls;let rejected=false;try{calls();}catch(_error){rejected=true;}
+      assert(rejected,'missing probe must not read as zero');
+    });
     await record('F01 未承認INPUTはCore0・確認の省略なし',async()=>{await start();run();eq(calls(),0);submit();eq(calls(),0);eq(hist().length,0);assert(w.document.querySelector('.function-assist-diagnostic'));assert(!w.eval('functionAssistAttempt?.approved'));});
     await record('F02 完了後5/2をINPUTのみ・偽分岐と新snapshot',async()=>{
       await approved();const id=w.eval('functionAssistAttempt.runId'),old=w.eval('functionAssistResult'),copy=JSON.stringify(old);
@@ -84,6 +108,7 @@ const FunctionSessionFA1Tests = (() => {
     });
     for(const action of ['run','edit-undo','pagehide','surface'])await record('F15 再INPUTの古い完了callbackを破棄 '+action,async()=>{await approved();input('5\n2');submit();const old=w.eval('pendingInputInjection.onComplete');if(action==='run')run();if(action==='edit-undo'){w.eval('editor.setValue(editor.getValue()+"\\n");');w.eval(`editor.setValue(${JSON.stringify(textbook)});`);}if(action==='pagehide')w.dispatchEvent(new w.Event('pagehide'));if(action==='surface')w.document.getElementById('flow-content').replaceChildren();old();eq(hist().length,1);assert(!w.document.querySelector('.result-flow-button'));});
     await record('F15b 初回成功のReveal中も入力編集で新解析しない',async()=>{await approved();const count=calls(),save=w.__fa1Feedback.save;input('5\n2');eq(calls(),count);eq(w.__fa1Feedback.save,save);assert(w.eval('resultInputDirty'));submit();await complete();eq(resultValue(),'3');eq(w.__fa1Feedback.save,save+1);});
+    URL.revokeObjectURL(blob);
     return {total:rows.length,passed:rows.filter(x=>x.pass).length,failed:rows.filter(x=>!x.pass).length,rows};
   }
   return {run};

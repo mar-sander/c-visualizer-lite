@@ -1,4 +1,4 @@
-/* Node標準ライブラリだけを使う検証ランナー。製品エンジンは実行・変更しません。 */
+/* Node標準ライブラリだけを使う検証ランナー。製品エンジンは隔離VMで検証し、製品ファイルは変更しません。 */
 'use strict';
 const fs = require('node:fs');
 const path = require('node:path');
@@ -66,16 +66,31 @@ record('決定的な不完全入力1000件・例外や経路矛盾なし', () =>
 });
 // L-FUNC4 Rev.1 §2.4: replace only the Stage1 product-nonreference assertion.
 // The original verifier remains unmodified; its 151 other checks are identical.
-record('Stage4: 許可された依存順・RUN振分け・YES実行接続（動作検査は独立UI）', () => {
+record('Stage4: 正式依存順・FUNCTION実動作と入力伝達', () => {
+  // L-QA1: one copy per standalone verifier; no production test dependency.
   const html=fs.readFileSync(path.join(__dirname,'index.html'),'utf8');
-  const scripts=[...html.matchAll(/<script src="([^"]+)"/g)].map(m=>m[1]);
+  const scripts=[...html.matchAll(/<script\b[^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*>/g)].map(m=>m[1]);
   const order=['script.js','function-preflight.js','function-execution-core.js','function-assist-routing.js','app.js'];
   if(!order.every((name,i)=>scripts.filter(s=>s===name).length===1 && (!i||scripts.indexOf(name)>scripts.indexOf(order[i-1]))))return false;
+  const elements=new Map(['codeInput','outputResult','variableState','stepResult','codePreview','hintResult'].map(id=>[id,{value:'',innerHTML:'',textContent:''}]));
+  const engine=vm.createContext({document:{getElementById:id=>elements.get(id)||null,querySelectorAll:()=>[],createElement:()=>({innerHTML:'',textContent:''})},window:{addEventListener(){}}});
+  for(const file of order.slice(0,-1))vm.runInContext(fs.readFileSync(path.join(__dirname,file),'utf8'),engine,{filename:file,timeout:10000});
+  const router=vm.runInContext('FunctionAssistRouting',engine),core=vm.runInContext('FunctionExecutionCore',engine);
+  const code='int genzan(int a,int b);\nint main(void){\nint a,b,s;\nscanf("%d",&a);\nscanf("%d",&b);\ns=genzan(a,b);\nprintf("%d",s);\nreturn 0;\n}\nint genzan(int a,int b){\nif(a<b){return b-a;}else{return a-b;}\n}';
+  if(router.classify(code).route!=='CONFIRM' || router.classify('int main(void){return 0;}').route!=='NORMAL')return false;
   const app=fs.readFileSync(path.join(__dirname,'app.js'),'utf8');
-  const routing=fs.readFileSync(path.join(__dirname,'function-assist-routing.js'),'utf8');
-  return app.includes('FunctionAssistRouting.classify(attempt.code)') && app.includes('FunctionExecutionCore.execute(attempt.code)') &&
-    routing.includes('api.inspectFunctionStructure(source)') &&
-    ['script.js','workspace.js','tips.js','style.css','tests.html'].every(name=>!fs.readFileSync(path.join(__dirname,name),'utf8').includes('function-preflight'));
+  const gateway=app.match(/^let executeConfirmedFunctionAssist = function[\s\S]*?^};/m);
+  if(!gateway)return false;
+  let checks=0,calls=0,result,received;
+  const context=vm.createContext({scanfInput:{value:'2\n5'},functionAssistInputGeneration:0,
+    isFunctionAssistAttemptCurrent:()=>++checks===1,
+    FunctionExecutionCore:{execute(source,options){calls++;received=options;result=core.execute(source,options);return result;}}});
+  // Stop after dispatch via the second current-attempt guard. Real UI is tested
+  // in tests-function-assist / Stage5 / FA1, not simulated by this gateway check.
+  vm.runInContext(gateway[0]+'\nexecuteConfirmedFunctionAssist('+JSON.stringify({approved:true,status:'CONFIRM',operationToken:0,code})+');',context,{timeout:10000});
+  return calls===1 && received?.input==='2\n5' && result.ok && result.status==='completed' && result.output==='3' &&
+    result.variables.find(v=>v.name==='s')?.value===3;
+
 });
 
 // 時間はこのNode環境での観測値です。端末の正式上限や合否閾値には使いません。

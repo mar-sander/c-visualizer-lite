@@ -65,7 +65,7 @@ const FunctionExecutionCoreTests = (() => {
   no('定義重複',textbook+definition('return a+b;'));
   no('未閉鎖コメント',textbook+'/*');
   no('未完成コード','int main(void){\nint kasan(int a,');
-  no('教材06(2)分岐return',difference);
+  yes('教材06(2)分岐return',difference,'',{s:3});
   for(const body of ['if(a<b){return b-a;}\nreturn a;','for(a=0;a<2;a++){b=b+1;}\nreturn b;', 'while(a<2){a=a+1;}\nreturn a;', 'int x[2]={1,2};\nreturn a;', 'scanf("%d",&a);\nreturn a;', 'printf("x");\nreturn a;', 'return kasan(a,b);', 'return other(a,b);', 'return a;\nprintf("unreachable");','{int x;}\nreturn a;', 'static int x=1;\nreturn x;', 'return sizeof(a);'])no('サブ関数未対応 '+body,program(body));
   for(const statement of ['int s=kasan(2,5);','s=1+kasan(2,5);','printf("%d",kasan(2,5));','if(1){\ns=kasan(2,5);\n}','for(s=0;s<1;s++){\ns=kasan(2,5);\n}'])no('対応外main呼出形 '+statement,main('int s;\n'+statement)+definition('return a+b;'));
   no('グローバル変数','int g=4;\n'+textbook);
