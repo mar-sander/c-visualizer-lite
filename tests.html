@@ -9248,8 +9248,12 @@
     function hasValidPublishedUpdate(doc, today = new Date()){
       const labels = [...doc.querySelectorAll('.brand small')];
       if(labels.length !== 1) return false;
-      const match = labels[0].textContent.match(/^試験運用版\s+UPDATE: (\d{4})\.(\d{2})\.(\d{2})$/);
+      const mobile = labels[0].querySelector('.header-update-mobile');
+      const desktop = labels[0].querySelector('.header-update-desktop');
+      const match = mobile?.textContent.match(/^Beta_Edition UP:(\d{4})\.(\d{2})\.(\d{2})$/);
       if(!match) return false;
+      if(!desktop || desktop.firstChild.textContent !== `Beta_Edition UP:${match[1]}.${match[2]}.${match[3]} | ` ||
+        !/^(\d{2}:\d{2}|--:--)$/.test(desktop.querySelector('#header-clock')?.textContent || '')) return false;
       const [year, month, day] = match.slice(1).map(Number);
       const date = new Date(year, month - 1, day);
       return year >= 2000 && date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day &&

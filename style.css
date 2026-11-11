@@ -134,6 +134,26 @@ button:focus-visible,select:focus-visible {
   margin-top: 2px
 }
 
+/* L-UI16: 既存のPC境界に合わせ、更新情報の時刻だけを操作可能にします。 */
+.header-update-desktop { display: none; }
+#header-clock {
+  appearance: none;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  font-variant-numeric: tabular-nums;
+}
+#header-clock[aria-pressed="true"] { color: var(--accent-yellow); }
+@media (min-width: 901px) {
+  .header-update-mobile { display: none; }
+  .header-update-desktop { display: inline; white-space: nowrap; }
+}
+
 .header-button,.step-button,.close-button {
   border: 1px solid var(--line);
   background: var(--surface2);
