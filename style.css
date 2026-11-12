@@ -3454,3 +3454,15 @@ body {
 .function-assist-scope.is-active { border-color:#f5d547; }
 .function-assist-scope h4 { margin:0 0 10px; font-size:12px; }
 .function-assist-scope .scalar-boxes { flex-wrap:wrap; }
+
+/* L-SCANF-VIS1: INPUT hooks are intentionally visually neutral.
+   Semantic final text preserves layout/reading order; only the new suffix hides. */
+.result-input, .result-output, .result-separator { white-space: inherit }
+.result-reveal-final.result-segments { opacity: 1 }
+.result-reveal-pending { opacity: 0 }
+.result-reveal-prefix { visibility: hidden }
+
+/* Execution-card echo only; RESULT styling and animation remain unchanged. */
+.execution-transcript { white-space: pre-wrap }
+.execution-output { color: var(--accent-yellow) }
+.execution-input-echo { color: var(--text) }

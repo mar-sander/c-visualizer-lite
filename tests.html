@@ -5469,7 +5469,7 @@
           if(JSON.stringify(result) !== snapshot) fail('表示生成でresultを変更しました');
           const index = result.steps.findIndex(step => step.scanfInput);
           ui.eval(`activeStep = ${index}; renderStep()`);
-          if(doc.getElementById('output-value').textContent !== '円の半径？ ' || !doc.querySelector('.scanf-step-input')) fail('STEPにエコーが混入しました');
+          if(doc.getElementById('output-value').textContent !== '円の半径？ 2\n' || !doc.querySelector('.scanf-step-input')) fail('STEPの取得済み入力エコーが違います');
           ui.showResultPage();
           if(visible() !== finalDisplay || ui.eval('resultReveal') !== null) fail('RESULT往復で内容またはRevealが変化しました');
           const stored = JSON.parse(ui.localStorage.getItem('c-visualizer-lite-history-v1'));

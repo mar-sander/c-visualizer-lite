@@ -414,6 +414,8 @@ const errorLines = new Set();
 let alignmentCheckPending = false;
 let resultRevealPending = false;
 let resultReveal = null;
+// Normal-path presentation only. Never stored in engine snapshots or history.
+let normalResultDisplay = null;
 let runSuccessFeedbackTimer = 0;
 let pendingRunSuccess = null;
 let runErrorFeedbackTimer = 0;
@@ -449,28 +451,33 @@ scanfAccordion.addEventListener('animationend', () => {
 function cancelResultReveal(){
   if(!resultReveal) return;
   clearTimeout(resultReveal.timer);
-  resultReveal.node.replaceChildren(document.createTextNode(resultReveal.output));
+  renderResultValue(resultReveal.node, resultReveal.output, resultReveal.segments);
   resultReveal = null;
 }
 
-function revealResult(node, output){
-  if(!output || reducedMotion.matches) return;
-  const characters = Array.from(output);
+function revealResult(node, output, presentation = {}){
+  if(!output || reducedMotion.matches || presentation.start === output.length) return;
+  const prefix = output.slice(0, presentation.start || 0);
+  const characters = Array.from(output.slice(prefix.length));
   const glyphs = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ+-*/=<>#';
   // 長い出力も約600ms以内。左から最大5組に分け、各組を3回揺らして確定します。
   const groupSize = Math.max(1, Math.ceil(characters.length / 5));
-  const finalText = element('span', 'result-reveal-final', output);
+  const finalText = element('span', 'result-reveal-final');
+  if(presentation.segments){
+    finalText.classList.add('result-segments');
+    appendResultSegments(finalText, presentation.segments, prefix.length);
+  }else finalText.textContent = output;
   const animatedText = element('span', 'result-reveal-text');
   animatedText.setAttribute('aria-hidden', 'true');
   node.replaceChildren(finalText, animatedText);
-  const animation = {node, output, timer:null};
+  const animation = {node, output, segments:presentation.segments, timer:null};
   resultReveal = animation;
   const started = performance.now();
 
   function update(){
     // 同一演出・同一画面だけを更新します。中断時も必ず正式な値へ戻します。
     if(resultReveal !== animation) return;
-    if(!node.isConnected || !hasCurrentResult() || activeStep !== -1 || reducedMotion.matches){
+    if(!node.isConnected || !(presentation.isCurrent ? presentation.isCurrent() : hasCurrentResult()) || activeStep !== -1 || reducedMotion.matches){
       cancelResultReveal();
       return;
     }
@@ -480,10 +487,25 @@ function revealResult(node, output){
       return;
     }
     const end = Math.min(fixedCount + groupSize, characters.length);
-    animatedText.textContent = characters.slice(0, end).map((character, index) => {
+    const text = characters.slice(0, end).map((character, index) => {
       if(index < fixedCount || /\s/u.test(character)) return character;
       return glyphs[Math.floor(Math.random() * glyphs.length)];
     }).join('');
+    if(presentation.segments){
+      const spacer = element('span', 'result-reveal-prefix', prefix);
+      animatedText.replaceChildren(spacer);
+      // Keep INPUT/OUTPUT hooks on the visible animation layer as well.
+      const revealed = Array.from(text);
+      let offset = 0, characterOffset = 0;
+      for(const segment of presentation.segments){
+        const suffix = segment.text.slice(Math.max(0, prefix.length - offset));
+        const count = Array.from(suffix).length;
+        const value = revealed.slice(characterOffset, characterOffset + count).join('');
+        if(value) animatedText.append(element('span', 'result-segment result-' + segment.kind, value));
+        characterOffset += count;
+        offset += segment.text.length;
+      }
+    }else animatedText.textContent = text;
     animation.timer = setTimeout(update, 40);
   }
   update();
@@ -1071,15 +1093,27 @@ function showIdle(title, message){
   outputCard.hidden = false;
 }
 
-function setOutput(value){
-  const hasOutput = value.length > 0;
+// Display-only echo reuses RESULT segments; engine stdout/history stay untouched.
+function renderExecutionOutput(node, value, segments){
+  node.replaceChildren();
+  node.classList.toggle('execution-transcript', !!segments);
+  if(!segments){ node.textContent = value || '—'; return; }
+  for(const segment of segments){
+    const kind = segment.kind === 'input' ? 'input-echo' : segment.kind;
+    node.append(element('span', 'execution-' + kind, segment.text));
+  }
+  if(!node.textContent) node.textContent = '—';
+}
+
+function setOutput(value, segments){
+  const hasOutput = segments ? segments.some(segment => segment.text.length) : value.length > 0;
   $('output-state').textContent = hasOutput ? 'このSTEPまでの出力' : 'まだ出力されていません';
-  $('output-value').textContent = hasOutput ? value : '—';
+  renderExecutionOutput($('output-value'), value, segments);
   outputCard.classList.toggle('has-output', hasOutput);
 }
 
-function showFinalSummary(state){
-  $('summary-output').textContent = state ? state.output || '—' : '—';
+function showFinalSummary(state, segments){
+  renderExecutionOutput($('summary-output'), state?.output || '', segments);
   const values = $('summary-variables');
   values.replaceChildren();
   if(!state){ values.textContent = '—'; return; }
@@ -1217,6 +1251,7 @@ function hasCurrentResult(){
 
 function invalidateResult(message = 'コードが変更されました。RUNで新しい結果を確認してください。'){
   discardFunctionAssist();
+  normalResultDisplay = null;
   cancelResultReveal();
   clearRunSuccessFeedback();
   clearInputInjection();
@@ -1459,7 +1494,10 @@ function renderStep(){
   $('step-slider').value = String(activeStep + 1);
   $('step-slider').setAttribute('aria-valuetext', `STEP ${activeStep + 1} / ${currentSteps.length}`);
   outputCard.hidden = false;
-  setOutput(step.outputAtStep);
+  const segments = currentSteps.some(item => item.scanfInput)
+    ? buildResultSegments({steps:currentSteps.slice(0, activeStep + 1), output:step.outputAtStep}) : null;
+  setOutput(step.outputAtStep, segments);
+  if(segments) renderExecutionOutput($('summary-output'), step.outputAtStep, segments);
   $('feedback').textContent = '';
 }
 
@@ -1495,11 +1533,134 @@ function buildResultTranscript(result){
   return transcript;
 }
 
+// INPUT is a learning visualization, not C stdout. Separators retain their
+// input owner even when a following printf supplies the same newline.
+function buildResultSegments(result){
+  const segments = [];
+  let previousOutput = '';
+  let pendingInput = null;
+  const append = (kind, key, text) => {
+    if(text) segments.push({kind, key, text});
+  };
+  function finishInput(){
+    if(pendingInput === null) return false;
+    append('separator', pendingInput, '\n');
+    pendingInput = null;
+    return true;
+  }
+  function appendOutput(text, key){
+    if(!text) return;
+    if(finishInput() && text.startsWith('\n')) text = text.slice(1);
+    append('output', key, text);
+  }
+  result.steps.forEach((step, index) => {
+    const key = index + ':' + step.lineNo;
+    appendOutput(step.outputAtStep.slice(previousOutput.length), key);
+    previousOutput = step.outputAtStep;
+    if(step.scanfInput){
+      finishInput();
+      const input = step.scanfInput;
+      // Include execution identity and consumed value; repeated strings cannot alias.
+      const identity = JSON.stringify([key, input.specifier, input.target,
+        input.targetType, input.rawInput, input.inputDisplay, input.storedDisplay]);
+      append('input', identity, input.specifier === '%c' ? input.rawInput : input.inputDisplay);
+      pendingInput = identity;
+    }
+  });
+  appendOutput(result.output.slice(previousOutput.length), 'tail');
+  finishInput();
+  return segments;
+}
+
+function appendResultSegments(node, segments, revealStart = Infinity){
+  let offset = 0;
+  for(const segment of segments){
+    const span = element('span', 'result-segment result-' + segment.kind);
+    span.dataset.resultKind = segment.kind;
+    const fixed = Math.max(0, Math.min(segment.text.length, revealStart - offset));
+    span.append(document.createTextNode(segment.text.slice(0, fixed)));
+    if(fixed < segment.text.length){
+      span.append(element('span', 'result-reveal-pending', segment.text.slice(fixed)));
+    }
+    node.append(span);
+    offset += segment.text.length;
+  }
+}
+
+function renderResultValue(node, output, segments){
+  node.replaceChildren();
+  if(segments && output) appendResultSegments(node, segments);
+  else node.textContent = output || '出力はまだありません';
+}
+
+// Returns a UTF-16 offset only when both text and execution-segment prefixes agree.
+// The final segment may grow; substring search never determines INPUT positions.
+function resultSegmentPrefix(previous, next){
+  let length = 0;
+  for(let i = 0; i < previous.length; i++){
+    const before = previous[i], after = next[i];
+    if(!after || before.kind !== after.kind || before.key !== after.key) return null;
+    if(before.text !== after.text &&
+       !(i === previous.length - 1 && after.text.startsWith(before.text))) return null;
+    length += before.text.length;
+  }
+  return length;
+}
+
+function prepareNormalResultDisplay(result, code, input, action, previous){
+  const segments = buildResultSegments(result);
+  const output = buildResultTranscript(result);
+  const status = result.inputRequired ? 'waiting' : 'complete';
+  // Conservative fallback if an engine snapshot ever violates the legacy transcript.
+  const compatible = segments.map(segment => segment.text).join('') === output;
+  const inputContinues = previous && (input === previous.input || !previous.input ||
+    input.startsWith(previous.input + '\n') ||
+    (previous.input.endsWith('\n') && input.startsWith(previous.input)));
+  const continuous = action === 'input' && previous?.compatible && compatible &&
+    previous.code === code && inputContinues &&
+    (previous.status === 'waiting' || previous.status === 'complete');
+  const start = continuous ? resultSegmentPrefix(previous.segments, segments) : null;
+  return {code, input, status, segments:compatible ? segments : null, output,
+    compatible, continuous:start !== null, start:start === null ? 0 : start};
+}
+
+// A continuous INPUT keeps the connected RESULT card/value through Injection
+// and commit. Only auxiliary UI is replaced; Reveal then masks the new suffix.
+function mountNormalResultState(result, display){
+  const current = flow.querySelector('.result-state');
+  const value = current?.querySelector('.result-value');
+  const nextValue = result.querySelector('.result-value');
+  if(!display?.continuous || !value ||
+     value.textContent !== display.output.slice(0, display.start)){
+    flow.replaceChildren(result);
+    return;
+  }
+  renderResultValue(value, display.output, display.segments);
+  for(const child of Array.from(current.children)){
+    if(child !== value) child.remove();
+  }
+  let afterValue = false;
+  for(const child of Array.from(result.children)){
+    if(child === nextValue) afterValue = true;
+    else current.insertBefore(child, afterValue ? null : value);
+  }
+}
+
+function revealNormalResult(node, display){
+  revealResult(node, display.output, {
+    segments:display.segments, start:display.start,
+    isCurrent:() => normalResultDisplay === display && !resultInputDirty &&
+      display.code === editor.getValue() && display.input === scanfInput.value
+  });
+}
+
 // 完了時と入力待ち時で、同じRESULTとVARIABLESの見た目を使います。
-function createResultState(state, displayOutput){
+function createResultState(state, displayOutput, segments){
   const result = element('div', 'result-state');
   result.append(element('span', 'result-label', 'RESULT'));
-  result.append(element('output', 'result-value', displayOutput || '出力はまだありません'));
+  const value = element('output', 'result-value');
+  renderResultValue(value, displayOutput, segments);
+  result.append(value);
   const variables = element('div', 'result-variables');
   variables.append(element('span', 'result-variables-label', 'VARIABLES'));
   const values = element('div', 'result-variable-values');
@@ -1522,7 +1683,10 @@ function showResultPage(allowPrevious = false){
   resultRevealPending = false;
   activeStep = -1;
   showExecutionLine(null);
-  const result = createResultState(finalState, finalState.displayOutput);
+  const display = !functionAssistResult && normalResultDisplay;
+  if(display) renderExecutionOutput($('summary-output'), finalState.output,
+    display.segments?.some(segment => segment.kind === 'input') ? display.segments : null);
+  const result = createResultState(finalState, finalState.displayOutput, display?.segments);
   const resultValue = result.querySelector('.result-value');
   if(finalState.learningHints?.missingReturnZero){
     const hint = element('aside', 'result-learning-hint');
@@ -1544,15 +1708,20 @@ function showResultPage(allowPrevious = false){
     renderStep();
   });
   result.append(viewFlow);
-  flow.replaceChildren(result);
+  mountNormalResultState(result, display);
+  const mountedValue = flow.querySelector('.result-value');
   if(functionAssistAttempt?.approved && functionAssistAttempt.reusable) functionAssistAttempt.viewSurface = result;
   $('step-controls').hidden = true;
   outputCard.hidden = true;
   $('feedback').textContent = '';
-  if(shouldReveal) revealResult(resultValue, finalState.displayOutput);
+  if(shouldReveal){
+    if(display) revealNormalResult(mountedValue, display);
+    else revealResult(resultValue, finalState.displayOutput);
+  }
 }
 
 function showFailure(result){
+  normalResultDisplay = null;
   cancelResultReveal();
   playRunErrorFeedback();
   const warnings = (result.warningText || []).filter(Boolean);
@@ -1572,20 +1741,23 @@ function showFailure(result){
   return warnings;
 }
 
-function showWaiting(state){
+function showWaiting(state, display, shouldReveal = false){
+  cancelResultReveal();
   const request = state.inputRequest;
-  const result = createResultState(state, buildResultTranscript(state));
+  const result = createResultState(state, buildResultTranscript(state), display?.segments);
   const box = element('div', 'waiting-state');
   box.append(element('h3', '', 'WAITING FOR INPUT'));
   box.append(element('p', '', `scanfで使用する値を入力し、INPUTを押してください。RUNでも実行できます。`));
   box.append(element('small', '', `${request.lineNo}行目 · ${request.specifier} · ${request.target}`));
   result.append(box);
-  flow.replaceChildren(result);
+  mountNormalResultState(result, display);
   $('step-controls').hidden = true;
   outputCard.hidden = true;
   $('feedback').textContent = '';
   setScanfAccordionOpen(true, true);
   scanfInput.focus();
+  // Initial WAITING stays static as before; INPUT reveals only the new suffix.
+  if(display && shouldReveal) revealNormalResult(flow.querySelector('.result-value'), display);
 }
 
 function showAnalysisPending(){
@@ -1628,6 +1800,7 @@ const isFunctionAssistAttemptCurrent = function(attempt){
 };
 
 const clearFunctionAssistDisplay = function(){
+  normalResultDisplay = null;
   cancelResultReveal();
   clearRunSuccessFeedback();
   clearRunErrorFeedback();
@@ -2001,8 +2174,8 @@ resetCode = function(){
   return resetCodeWithoutFunctionAssist();
 };
 window.addEventListener('pagehide', () => {
+  cancelResultReveal();
   if(discardFunctionAssist()){
-    cancelResultReveal();
     clearRunSuccessFeedback();
     clearInputInjection();
   }
@@ -2011,6 +2184,9 @@ window.addEventListener('pagehide', () => {
 
 // 解析と結果の確定は共通です。起点の操作に応じて表示専用の演出だけを選びます。
 const executeNormalCode = function(action, attempt){
+  const previousDisplay = action === 'input' ? normalResultDisplay : null;
+  const preserveSummary = action === 'input' && !!previousDisplay;
+  normalResultDisplay = null;
   cancelResultReveal();
   clearRunSuccessFeedback();
   clearRunErrorFeedback();
@@ -2025,7 +2201,7 @@ const executeNormalCode = function(action, attempt){
   waitingCode = null;
   activeStep = -1;
   showExecutionLine(null);
-  showFinalSummary(null);
+  if(!preserveSummary) showFinalSummary(null);
   setOutput('');
   const code = editor.getValue();
   $('codeInput').value = code;
@@ -2033,22 +2209,39 @@ const executeNormalCode = function(action, attempt){
     visualizeCode();
     const result = window.cVisualizerLiteResult;
     const input = scanfInput.value;
+    const display = result && prepareNormalResultDisplay(result, code, input, action, previousDisplay);
+    const previousValue = flow.querySelector('.result-value');
+    const keepResult = display?.continuous && previousValue &&
+      previousValue.textContent === previousDisplay.output;
+    if(preserveSummary && !keepResult) showFinalSummary(null);
+    const prepareInputDisplay = () => {
+      if(keepResult){
+        // This is the last displayed snapshot, never the new calculation.
+        normalResultDisplay = previousDisplay;
+        const viewFlow = flow.querySelector('.result-flow-button');
+        if(viewFlow) viewFlow.disabled = true;
+      }else showAnalysisPending();
+    };
     const isSameInput = () => isFunctionAssistAttemptCurrent(attempt) && editor.getValue() === code && scanfInput.value === input;
     const consumedInput = result?.steps.some(step => step.scanfInput);
+    const executionSegments = result?.inputRequired || consumedInput ? display?.segments : null;
     if(result?.inputRequired && !result.hasWarnings){
       currentSteps = [];
       const showPartialResult = () => {
         if(!isSameInput()) return;
         waitingCode = code;
-        showWaiting(result);
+        normalResultDisplay = display;
+        renderExecutionOutput($('summary-output'), result.output, executionSegments);
+        showWaiting(result, display, action === 'input');
       };
       if(action === 'input' && consumedInput){
-        showAnalysisPending();
+        prepareInputDisplay();
         playInputInjection(showPartialResult);
       }else showPartialResult();
       return;
     }
     if(!result || result.hasWarnings || !result.steps.length){
+      showFinalSummary(null);
       currentSteps = [];
       const failed = result || { warningText:[], output:'' };
       const warnings = showFailure(failed);
@@ -2057,6 +2250,7 @@ const executeNormalCode = function(action, attempt){
     }
     const showCompleteResult = () => {
       if(!isSameInput()) return;
+      normalResultDisplay = display;
       currentSteps = result.steps;
       finalState = {
         output:result.output,
@@ -2067,7 +2261,7 @@ const executeNormalCode = function(action, attempt){
       };
       resultCode = code;
       resultScanfInput = input;
-      showFinalSummary(finalState);
+      showFinalSummary(finalState, executionSegments);
       markJumpableLines();
       resultRevealPending = true;
       showResultPage();
@@ -2077,11 +2271,12 @@ const executeNormalCode = function(action, attempt){
       showAnalysisPending();
       playRunSuccessFeedback(showCompleteResult);
     }else if(consumedInput){
-      showAnalysisPending();
+      prepareInputDisplay();
       playInputInjection(showCompleteResult);
     }else showCompleteResult();
   }catch(error){
     clearInputInjection();
+    showFinalSummary(null);
     currentSteps = [];
     const failed = { warningText:['処理を表示できませんでした。コードを確認して、再RUNしてください。'], output:'' };
     const warnings = showFailure(failed);

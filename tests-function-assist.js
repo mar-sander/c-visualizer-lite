@@ -149,7 +149,7 @@ const FunctionAssistTests = (() => {
     await record('NORMAL複数scanf RUN→WAITING→INPUTを維持',async()=>{
       await start('int main(void){\nint a,b;\nscanf("%d",&a);\nscanf("%d",&b);\nprintf("%d %d",a,b);\nreturn 0;\n}');run();assert(w.eval('waitingCode!==null'));eq(history().length,0);
       w.eval("scanfInput.value='2';scanfInput.dispatchEvent(new Event('input'));executeCode('input');");await wait(()=>w.eval('waitingCode!==null'));
-      w.eval("scanfInput.value='2\\n5';scanfInput.dispatchEvent(new Event('input'));executeCode('input');");await wait(()=>!!w.document.querySelector('.result-state'));eq(history()[0].output,'2 5');eq(w.__assistCounts.confirmed,0);
+      w.eval("scanfInput.value='2\\n5';scanfInput.dispatchEvent(new Event('input'));executeCode('input');");await wait(()=>!!w.document.querySelector('.result-flow-button') && w.eval('hasCurrentResult() && !pendingInputInjection'));eq(history()[0].output,'2 5');eq(w.__assistCounts.confirmed,0);
     });
     return {total:rows.length,passed:rows.filter(r=>r.pass).length,failed:rows.filter(r=>!r.pass).length,rows};
   }
