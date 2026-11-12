@@ -5077,14 +5077,14 @@
             !doc.querySelector('.result-state')?.textContent.includes("answer = 'Y' (89)")) fail('char入力からRESULTへ進みません');
           const index = bridge.steps.findIndex(step => step.scanfInput);
           ui.eval(`activeStep = ${index}; renderStep()`);
-          if(!doc.querySelector('.scanf-step-input')?.textContent.includes("'Y' (89)") ||
+          if(doc.querySelector('.scanf-step-input .input-notation')?.textContent !== 'Y' ||
             !doc.querySelector('.scalar-variable-history')?.textContent.includes("— → 'Y' (89)")) fail('char INPUTと箱の表示が違います');
         });
         await record('半角スペース入力を見える形で表示', async fail => {
           const bridge = await run('char c;\nscanf("%c", &c);', ' ');
           const index = bridge.steps.findIndex(step => step.scanfInput);
           ui.eval(`activeStep = ${index}; renderStep()`);
-          if(!doc.querySelector('.scanf-step-input')?.textContent.includes("' ' (32)") ||
+          if(doc.querySelector('.scanf-step-input .input-notation-value')?.dataset.inputSymbol !== '␠' ||
             !doc.querySelector('.scalar-variable-history')?.textContent.includes("' ' (32)")) fail('空白入力が不可視になりました');
         });
         await record('4型入力の途中不足から全入力で成功', async fail => {

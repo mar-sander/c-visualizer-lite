@@ -63,10 +63,10 @@ async function test(name,fn){try{await fn();rows.push({name,pass:true});}catch(e
    await p.evaluate(()=>showResultPage());assert.equal(await summary(),'A = 10\nB = 20\nC = 30\nSUM = 60\n');
    assert.equal(await p.evaluate(()=>JSON.stringify(cVisualizerLiteResult)),snapshot);assert.equal(await p.evaluate(()=>resultReveal),null);
  });
- await test('printf yellow / echo neutral, same font and line metrics; RESULT stays yellow',async()=>{
+ await test('printf and echo yellow, same font and line metrics; RESULT input is yellow',async()=>{
    await run(sample,'10\n20\n30');
    const styles=await p.evaluate(()=>{const parent=document.getElementById('summary-output'),out=parent.querySelector('.execution-output'),echo=parent.querySelector('.execution-input-echo'),a=getComputedStyle(out),b=getComputedStyle(echo);return {out:a.color,echo:b.color,font:[a.fontFamily,a.fontSize,a.lineHeight,a.fontWeight],echoFont:[b.fontFamily,b.fontSize,b.lineHeight,b.fontWeight],whiteSpace:getComputedStyle(parent).whiteSpace,resultInput:getComputedStyle(document.querySelector('.result-input')).color};});
-   assert.equal(styles.out,'rgb(255, 230, 0)');assert.equal(styles.echo,'rgb(242, 242, 242)');assert.deepEqual(styles.font,styles.echoFont);assert.equal(styles.whiteSpace,'pre-wrap');assert.equal(styles.resultInput,'rgb(255, 230, 0)');
+   assert.equal(styles.out,'rgb(255, 230, 0)');assert.equal(styles.echo,'rgb(255, 230, 0)');assert.deepEqual(styles.font,styles.echoFont);assert.equal(styles.whiteSpace,'pre-wrap');assert.equal(styles.resultInput,'rgb(255, 230, 0)');
  });
  await test('INPUT edit keeps previous echo snapshot until explicit execution; error clears it',async()=>{
    await run(sample,'10\n20\n30');const old=await summary();await p.locator('#scanfInput').fill('bad');assert.equal(await summary(),old);assert.equal(await p.evaluate(()=>hasCurrentResult()),false);await p.locator('#input-submit').click();await p.waitForSelector('.failure-state');assert.equal(await summary(),'—');assert.equal(await p.locator('#summary-output .execution-input-echo').count(),0);
@@ -74,7 +74,7 @@ async function test(name,fn){try{await fn();rows.push({name,pass:true});}catch(e
  await test('no-scanf program keeps FA1 output text and default styling',async()=>{
    const code=main('printf("  A\\n\\nB ");');await run(code);
    await q.evaluate(code=>{editor.setValue(code);scanfInput.value='';runCode();},code);await q.waitForFunction(()=>hasCurrentResult());
-   assert.equal(await summary(),await q.locator('#summary-output').textContent());assert.equal(await p.locator('#summary-output .execution-input-echo').count(),0);assert.equal(await p.locator('#summary-output').evaluate(n=>getComputedStyle(n).color),await q.locator('#summary-output').evaluate(n=>getComputedStyle(n).color));
+   assert.equal(await summary(),await q.locator('#summary-output').textContent());assert.equal(await p.locator('#summary-output .execution-input-echo').count(),0);assert.equal(await p.locator('#summary-output').evaluate(n=>getComputedStyle(n).color),'rgb(255, 230, 0)');
    await p.locator('.result-flow-button').click();await q.locator('.result-flow-button').click();
    assert.equal(await summary(),await q.locator('#summary-output').textContent());assert.equal(await p.locator('#output-value').textContent(),await q.locator('#output-value').textContent());
  });

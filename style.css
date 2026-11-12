@@ -3492,3 +3492,26 @@ body {
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+/* L-SCANF-VIS3: shared optical spacing, independent of stdout and font size. */
+:root { --input-notation-gap: 0.08em; }
+.input-notation { display: inline-flex; max-width: 100%; white-space: pre; align-items: baseline; vertical-align: baseline; }
+.input-notation::before { content: '［' / ''; flex: none; }
+.input-notation::after { content: '］' / ''; flex: none; align-self: flex-end; }
+.input-notation-value { display: inline-block; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; margin-inline: var(--input-notation-gap); }
+.input-notation-waiting .input-notation-value { min-width: 0.6em; }
+.input-notation-whitespace { position: relative; }
+.input-notation-whitespace::after { content: attr(data-input-symbol) / ''; }
+.input-notation-raw { position: absolute; opacity: 0; }
+.input-notation-whitespace { min-width: 1ch; }
+
+/* L-SCANF-VIS3 FA1: semantic color roles, including plain stdout and Reveal. */
+#summary-output, .result-output { color: var(--accent-yellow); }
+.result-input, .input-notation { color: var(--text); }
+
+/* L-SCANF-VIS3 FA2: yellow values, translucent INPUT brackets, mobile deduplication. */
+.result-input, .execution-input-echo, .input-notation { color: var(--accent-yellow); }
+.input-notation::before, .input-notation::after { opacity: 0.5; }
+@media (max-width: 600px) {
+  .final-summary { display: none; }
+}
