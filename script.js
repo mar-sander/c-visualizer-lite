@@ -2429,6 +2429,7 @@ function visualizeCode(){
       const scanfInputData = {
         specifier, target:name, targetType,
         rawInput:scanfValues[inputIndex],
+        inputLineIndex:inputIndex, // Display-only physical textarea row (zero-based).
         inputDisplay:specifier === '%c' ? displayScalarValue(converted.value, 'char') : inputText,
         storedDisplay:scalarDisplay(name)
       };

@@ -3466,3 +3466,29 @@ body {
 .execution-transcript { white-space: pre-wrap }
 .execution-output { color: var(--accent-yellow) }
 .execution-input-echo { color: var(--text) }
+
+/* Native textarea background; no editing overlay or duplicate visible text. */
+#scanfInput {
+  --input-consumed-bg: #383838;
+  background-origin: padding-box;
+  background-clip: padding-box;
+  background-repeat: no-repeat;
+}
+.input-consumption-mirror {
+  position: fixed;
+  top: 0;
+  left: -100000px;
+  visibility: hidden;
+  pointer-events: none;
+  padding: 0;
+  border: 0;
+  overflow-wrap: break-word;
+}
+.input-consumption-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
