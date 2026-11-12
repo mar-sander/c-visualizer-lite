@@ -423,6 +423,7 @@ let inputInjectionTimer = 0;
 let pendingInputInjection = null;
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 const scanfInput = $('scanfInput');
+const inputConsumption = new InputConsumptionView(scanfInput, () => editor.getValue());
 const inputSubmit = $('input-submit');
 const scanfAccordion = $('scanf-accordion');
 const scanfAccordionToggle = $('scanf-accordion-toggle');
@@ -1250,6 +1251,7 @@ function hasCurrentResult(){
 }
 
 function invalidateResult(message = 'コードが変更されました。RUNで新しい結果を確認してください。'){
+  inputConsumption.reset();
   discardFunctionAssist();
   normalResultDisplay = null;
   cancelResultReveal();
@@ -2046,6 +2048,7 @@ const showFunctionAssistConfirmation = function(attempt, route){
 };
 
 function executeCode(action){
+  if(action === 'run') inputConsumption.reset();
   if(action === 'input' && canContinueFunctionInput(functionAssistAttempt)){
     const attempt = functionAssistAttempt;
     if(attempt.reusable && attempt.completedInput === scanfInput.value &&
@@ -2080,6 +2083,7 @@ function executeCode(action){
     executeNormalCode(action, attempt);
     return;
   }
+  inputConsumption.reset();
   attempt.functionPath = true;attempt.route = route.priority;
   clearFunctionAssistDisplay();
   if(route.route === 'CONFIRM' && action === 'run'){
@@ -2166,6 +2170,7 @@ const renderFunctionAssistStep = function(step){
 // The legacy reset API is retained; pending product approvals must also expire.
 const resetCodeWithoutFunctionAssist = resetCode;
 resetCode = function(){
+  inputConsumption.reset();
   if(discardFunctionAssist()){
     ++functionAssistEditGeneration;
     invalidateResult('コードをリセットしました。');
@@ -2229,6 +2234,7 @@ const executeNormalCode = function(action, attempt){
       currentSteps = [];
       const showPartialResult = () => {
         if(!isSameInput()) return;
+        inputConsumption.commit(result, code, input);
         waitingCode = code;
         normalResultDisplay = display;
         renderExecutionOutput($('summary-output'), result.output, executionSegments);
@@ -2243,6 +2249,7 @@ const executeNormalCode = function(action, attempt){
     if(!result || result.hasWarnings || !result.steps.length){
       showFinalSummary(null);
       currentSteps = [];
+      inputConsumption.commit(result, code, input);
       const failed = result || { warningText:[], output:'' };
       const warnings = showFailure(failed);
       saveHistory(code, 'check', failed, warnings);
@@ -2250,6 +2257,7 @@ const executeNormalCode = function(action, attempt){
     }
     const showCompleteResult = () => {
       if(!isSameInput()) return;
+      inputConsumption.commit(result, code, input);
       normalResultDisplay = display;
       currentSteps = result.steps;
       finalState = {
@@ -2281,12 +2289,14 @@ const executeNormalCode = function(action, attempt){
     const failed = { warningText:['処理を表示できませんでした。コードを確認して、再RUNしてください。'], output:'' };
     const warnings = showFailure(failed);
     saveHistory(code, 'check', failed, warnings);
+    inputConsumption.reset();
     console.error('Visualizer Lite RUN failed', error);
   }
 };
 
 editor.on('cursorActivity', updateCursor);
 editor.on('change', () => {
+  inputConsumption.reset();
   ++functionAssistEditGeneration;
   const hadFunctionState = discardFunctionAssist();
   if(hadFunctionState || resultCode !== null || errorLines.size || waitingCode !== null || pendingRunSuccess || pendingInputInjection) invalidateResult();
@@ -2294,6 +2304,7 @@ editor.on('change', () => {
   if($('sample-select').value) $('sample-select').value = '';
 });
 scanfInput.addEventListener('input', () => {
+  inputConsumption.edit();
   ++functionAssistInputGeneration;
   if(canContinueFunctionInput(functionAssistAttempt)){
     const attempt = functionAssistAttempt;
