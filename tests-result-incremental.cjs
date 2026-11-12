@@ -66,10 +66,10 @@ const sequence = main('int a, b, c;\nprintf("Q1: ");\nscanf("%d", &a);\nprintf("
    const actual=await page.evaluate(()=>({stdout:cVisualizerLiteResult.output,
      inputNodes:[...document.querySelectorAll('.result-input')].map(n=>n.textContent),
      consumed:cVisualizerLiteResult.steps.filter(s=>s.scanfInput).map(s=>s.scanfInput.specifier==='%c'?s.scanfInput.rawInput:s.scanfInput.inputDisplay),
-     htmlChildren:document.querySelectorAll('.result-input *').length,
+     unsafeChildren:document.querySelectorAll('.result-input script, .result-input img, .result-input iframe').length,
      mutated:JSON.stringify(cVisualizerLiteResult).includes('result-segment')}));
    assert.equal(actual.stdout,expected.stdout);assert.deepEqual(actual.inputNodes,actual.consumed);
-   assert.equal(actual.htmlChildren,0);assert.equal(actual.mutated,false);
+   assert.equal(actual.unsafeChildren,0);assert.equal(actual.mutated,false);
  });
  await test('initial WAITING keeps existing static display',async()=>{await run(sequence);const p=await presentation();assert.equal(p.text,'Q1: ');assert.equal(p.animating,false);assert.equal(p.waiting,true);assert.deepEqual(p.kinds,[['output','Q1: ']]);await page.screenshot({path:path.join(evidence,'waiting-initial.png'),fullPage:true});});
  await test('INPUT 1 reveals only input and next prompt; waits again',async()=>{await submit('12');const p=await presentation();assert.equal(p.prefix,'Q1: ');assert.equal(p.pending,'12\nQ2: ');assert.equal(p.waiting,true);assert.equal(p.animating,true);assert.equal(p.accessibleCopies,1);assert.equal(p.text,'Q1: 12\nQ2: ');});

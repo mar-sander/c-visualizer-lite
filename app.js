@@ -452,7 +452,7 @@ scanfAccordion.addEventListener('animationend', () => {
 function cancelResultReveal(){
   if(!resultReveal) return;
   clearTimeout(resultReveal.timer);
-  renderResultValue(resultReveal.node, resultReveal.output, resultReveal.segments);
+  renderResultValue(resultReveal.node, resultReveal.output, resultReveal.segments, resultReveal.waiting);
   resultReveal = null;
 }
 
@@ -471,7 +471,7 @@ function revealResult(node, output, presentation = {}){
   const animatedText = element('span', 'result-reveal-text');
   animatedText.setAttribute('aria-hidden', 'true');
   node.replaceChildren(finalText, animatedText);
-  const animation = {node, output, segments:presentation.segments, timer:null};
+  const animation = {node, output, segments:presentation.segments, waiting:presentation.waiting, timer:null};
   resultReveal = animation;
   const started = performance.now();
 
@@ -493,7 +493,13 @@ function revealResult(node, output, presentation = {}){
       return glyphs[Math.floor(Math.random() * glyphs.length)];
     }).join('');
     if(presentation.segments){
-      const spacer = element('span', 'result-reveal-prefix', prefix);
+      const spacer = element('span', 'result-reveal-prefix');
+      let remaining = prefix.length;
+      appendResultSegments(spacer, presentation.segments.map(segment => {
+        const text = segment.text.slice(0, Math.max(0, remaining));
+        remaining -= segment.text.length;
+        return {...segment, text};
+      }).filter(segment => segment.text));
       animatedText.replaceChildren(spacer);
       // Keep INPUT/OUTPUT hooks on the visible animation layer as well.
       const revealed = Array.from(text);
@@ -502,7 +508,12 @@ function revealResult(node, output, presentation = {}){
         const suffix = segment.text.slice(Math.max(0, prefix.length - offset));
         const count = Array.from(suffix).length;
         const value = revealed.slice(characterOffset, characterOffset + count).join('');
-        if(value) animatedText.append(element('span', 'result-segment result-' + segment.kind, value));
+        if(value){
+          const span = element('span', 'result-segment result-' + segment.kind);
+          if(segment.kind === 'input') span.append(createInputNotation(value));
+          else span.textContent = value;
+          animatedText.append(span);
+        }
         characterOffset += count;
         offset += segment.text.length;
       }
@@ -1095,15 +1106,19 @@ function showIdle(title, message){
 }
 
 // Display-only echo reuses RESULT segments; engine stdout/history stay untouched.
-function renderExecutionOutput(node, value, segments){
+function renderExecutionOutput(node, value, segments, waiting = false){
   node.replaceChildren();
   node.classList.toggle('execution-transcript', !!segments);
   if(!segments){ node.textContent = value || '—'; return; }
   for(const segment of segments){
     const kind = segment.kind === 'input' ? 'input-echo' : segment.kind;
-    node.append(element('span', 'execution-' + kind, segment.text));
+    const span = element('span', 'execution-' + kind);
+    if(segment.kind === 'input') span.append(createInputNotation(segment.text));
+    else span.textContent = segment.text;
+    node.append(span);
   }
-  if(!node.textContent) node.textContent = '—';
+  if(waiting) node.append(createInputNotation('', true));
+  if(!node.textContent && !waiting) node.textContent = '—';
 }
 
 function setOutput(value, segments){
@@ -1458,7 +1473,8 @@ function renderStep(){
     : step.loopDecision?.kind === 'while' ? renderWhileDecisionStep(step.loopDecision) : null;
   const input = step.scanfInput ? element('div', 'scanf-step-input') : null;
   if(input){
-    input.append(element('small', '', 'INPUT'), element('span', '', step.scanfInput.inputDisplay));
+    input.append(element('small', '', 'INPUT'), createInputNotation(
+      step.scanfInput.specifier === '%c' ? step.scanfInput.rawInput : step.scanfInput.inputDisplay));
   }
   // 判定では値が変わらないので、空の変化カードを重ねません。
   const previousVariables = new Map(activeStep > 0 ? currentSteps[activeStep - 1].variablesAtStep : []);
@@ -1574,25 +1590,52 @@ function buildResultSegments(result){
   return segments;
 }
 
+// UI only. Raw text remains intact for transcript offsets, continuity and copying.
+// Decorative pseudo-elements have empty accessibility alternatives; one label
+// describes each accepted value/wait without reading the decoration twice.
+function createInputNotation(text, waiting = false){
+  const frame = element('span', 'input-notation' + (waiting ? ' input-notation-waiting' : ''));
+  frame.setAttribute('role', 'img');
+  const visible = text.replace(/ /g, '␠').replace(/\t/g, '⇥').replace(/\n/g, '↵');
+  frame.setAttribute('aria-label', waiting ? '入力待ち' : '入力済み: ' + visible);
+  const value = element('span', 'input-notation-value', text);
+  value.setAttribute('aria-hidden', 'true');
+  if(visible !== text){
+    value.dataset.inputSymbol = visible;
+    value.classList.add('input-notation-whitespace');
+    value.replaceChildren(element('span', 'input-notation-raw', text));
+  }
+  frame.append(value);
+  return frame;
+}
+
 function appendResultSegments(node, segments, revealStart = Infinity){
   let offset = 0;
   for(const segment of segments){
     const span = element('span', 'result-segment result-' + segment.kind);
     span.dataset.resultKind = segment.kind;
     const fixed = Math.max(0, Math.min(segment.text.length, revealStart - offset));
-    span.append(document.createTextNode(segment.text.slice(0, fixed)));
-    if(fixed < segment.text.length){
-      span.append(element('span', 'result-reveal-pending', segment.text.slice(fixed)));
+    if(segment.kind === 'input'){
+      // Input segments are atomic identities: brackets and value share the mask.
+      const notation = createInputNotation(segment.text);
+      if(fixed < segment.text.length) notation.classList.add('result-reveal-pending');
+      span.append(notation);
+    }else{
+      span.append(document.createTextNode(segment.text.slice(0, fixed)));
+      if(fixed < segment.text.length){
+        span.append(element('span', 'result-reveal-pending', segment.text.slice(fixed)));
+      }
     }
     node.append(span);
     offset += segment.text.length;
   }
 }
 
-function renderResultValue(node, output, segments){
+function renderResultValue(node, output, segments, waiting = false){
   node.replaceChildren();
   if(segments && output) appendResultSegments(node, segments);
-  else node.textContent = output || '出力はまだありません';
+  else node.textContent = output || (waiting ? '' : '出力はまだありません');
+  if(waiting) node.append(createInputNotation('', true));
 }
 
 // Returns a UTF-16 offset only when both text and execution-segment prefixes agree.
@@ -1622,7 +1665,7 @@ function prepareNormalResultDisplay(result, code, input, action, previous){
     previous.code === code && inputContinues &&
     (previous.status === 'waiting' || previous.status === 'complete');
   const start = continuous ? resultSegmentPrefix(previous.segments, segments) : null;
-  return {code, input, status, segments:compatible ? segments : null, output,
+  return {code, input, status, waiting:!!result.inputRequired, segments:compatible ? segments : null, output,
     compatible, continuous:start !== null, start:start === null ? 0 : start};
 }
 
@@ -1637,7 +1680,7 @@ function mountNormalResultState(result, display){
     flow.replaceChildren(result);
     return;
   }
-  renderResultValue(value, display.output, display.segments);
+  renderResultValue(value, display.output, display.segments, display.waiting);
   for(const child of Array.from(current.children)){
     if(child !== value) child.remove();
   }
@@ -1650,18 +1693,18 @@ function mountNormalResultState(result, display){
 
 function revealNormalResult(node, display){
   revealResult(node, display.output, {
-    segments:display.segments, start:display.start,
+    segments:display.segments, start:display.start, waiting:display.waiting,
     isCurrent:() => normalResultDisplay === display && !resultInputDirty &&
       display.code === editor.getValue() && display.input === scanfInput.value
   });
 }
 
 // 完了時と入力待ち時で、同じRESULTとVARIABLESの見た目を使います。
-function createResultState(state, displayOutput, segments){
+function createResultState(state, displayOutput, segments, waiting = false){
   const result = element('div', 'result-state');
   result.append(element('span', 'result-label', 'RESULT'));
   const value = element('output', 'result-value');
-  renderResultValue(value, displayOutput, segments);
+  renderResultValue(value, displayOutput, segments, waiting);
   result.append(value);
   const variables = element('div', 'result-variables');
   variables.append(element('span', 'result-variables-label', 'VARIABLES'));
@@ -1746,7 +1789,7 @@ function showFailure(result){
 function showWaiting(state, display, shouldReveal = false){
   cancelResultReveal();
   const request = state.inputRequest;
-  const result = createResultState(state, buildResultTranscript(state), display?.segments);
+  const result = createResultState(state, buildResultTranscript(state), display?.segments, true);
   const box = element('div', 'waiting-state');
   box.append(element('h3', '', 'WAITING FOR INPUT'));
   box.append(element('p', '', `scanfで使用する値を入力し、INPUTを押してください。RUNでも実行できます。`));
@@ -2122,7 +2165,13 @@ const renderFunctionAssistStep = function(step){
     'branch-decision':step.branchDecision
       ? `${step.branchDecision.condition} は${step.branchDecision.conditionMet ? '真' : '偽'}です。${step.branchDecision.selectedBranch === 'if' ? 'if側' : 'else側'}のreturnへ進みます。` : ''
   };
-  detail.append(element('small', '', context), element('p', '', descriptions[step.functionEvent] || '処理を確認します。'));
+  const description = element('p');
+  if(step.functionEvent === 'scanf' && step.scanfInput){
+    description.append(document.createTextNode('入力された整数 '),
+      createInputNotation(step.scanfInput.inputDisplay),
+      document.createTextNode(' を ' + step.scanfInput.target + ' に保存します。'));
+  }else description.textContent = descriptions[step.functionEvent] || '処理を確認します。';
+  detail.append(element('small', '', context), description);
   if(step.branchDecision?.comparison){
     const comparison = step.branchDecision.comparison;
     detail.append(element('p', '', `比較する値：${comparison.leftDisplay} ${comparison.operator} ${comparison.rightDisplay}${comparison.conversionNote ? `。${comparison.conversionNote}` : ''}`));
@@ -2237,7 +2286,7 @@ const executeNormalCode = function(action, attempt){
         inputConsumption.commit(result, code, input);
         waitingCode = code;
         normalResultDisplay = display;
-        renderExecutionOutput($('summary-output'), result.output, executionSegments);
+        renderExecutionOutput($('summary-output'), result.output, executionSegments, true);
         showWaiting(result, display, action === 'input');
       };
       if(action === 'input' && consumedInput){
