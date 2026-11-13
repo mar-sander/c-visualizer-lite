@@ -701,9 +701,9 @@ function historyVariablePairs(result){
   ];
 }
 
-function historySaveFailure(){
-  $('feedback').textContent = '履歴を保存できませんでした。今回の実行結果は確認できます。';
-  historyTransferMessage('履歴を保存できませんでした。既存履歴は変更していません。', true);
+function historySaveFailure(message = '履歴を保存できませんでした。'){
+  $('feedback').textContent = `${message}今回の実行結果は確認できます。`;
+  historyTransferMessage(`${message}既存履歴は変更していません。`, true);
 }
 
 function saveHistory(code, kind, result, warnings = []){
@@ -715,13 +715,6 @@ function saveHistory(code, kind, result, warnings = []){
       variables:historyVariablePairs(result),
       warnings
     }));
-    // 配列を含む記録はexport→importの上限も検査し、欠落・切捨てを成功扱いにしません。
-    if(result?.arrays?.length && !isValidImportedHistoryEntry({
-      id:'pending', timestamp:new Date().toISOString(), ...snapshot
-    })){
-      historySaveFailure();
-      return false;
-    }
     const previous = historyEntries[0];
     const same = previous && ['code', 'kind', 'output', 'variables', 'warnings'].every(key =>
       JSON.stringify(previous[key]) === JSON.stringify(snapshot[key]));
@@ -734,6 +727,12 @@ function saveHistory(code, kind, result, warnings = []){
         id:crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`,
         timestamp:new Date().toISOString(), locked:false, ...snapshot
       }, ...historyEntries];
+    }
+    // 新規・更新する全記録をimportと同じ条件で検査します。
+    // 既存の不適合記録は削除せず、更新も成功扱いにしません。
+    if(!isValidImportedHistoryEntry(nextEntries[0])){
+      historySaveFailure('履歴が読み込み上限または保存形式に合わないため、保存できませんでした。');
+      return false;
     }
     nextEntries = limitHistoryEntries(nextEntries);
     if(!persistHistory(nextEntries)){
@@ -844,6 +843,11 @@ function mergeHistoryImport(imported){
 historyExport.addEventListener('click', () => {
   if(!historyEntries.length) return;
   try{
+    // 過去の版が保存した不適合記録は削除せず、書き出し前に通知します。
+    if(!historyEntries.every(isValidImportedHistoryEntry)){
+      historyTransferMessage('読み込み上限または保存形式に合わない履歴が含まれています。書き出しを中止しました。既存履歴は変更していません。',true);
+      return;
+    }
     const archive = {
       format:HISTORY_FILE_FORMAT, version:HISTORY_FILE_VERSION,
       exportedAt:new Date().toISOString(), entries:historyEntries
