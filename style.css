@@ -3512,6 +3512,6 @@ body {
 /* L-SCANF-VIS3 FA2: yellow values, translucent INPUT brackets, mobile deduplication. */
 .result-input, .execution-input-echo, .input-notation { color: var(--accent-yellow); }
 .input-notation::before, .input-notation::after { opacity: 0.5; }
-@media (max-width: 600px) {
+@media (max-width: 900px) {
   .final-summary { display: none; }
 }
