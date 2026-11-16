@@ -353,6 +353,7 @@ function resetUnlockFeedback(){
 }
 
 function showUnlockFeedback(unlockId){
+  clearTimeout(unlockFeedbackTimer);
   $('secret-code-success-text').textContent = UNLOCK_LABELS[unlockId] || 'UNLOCKED';
   secretCodeSuccess.hidden = false;
   $('secret-code-form').setAttribute('aria-hidden', 'true');
@@ -398,7 +399,11 @@ secretCodeDialog.addEventListener('click', event => {
     event.clientY < rect.top || event.clientY > rect.bottom;
   if(outside) secretCodeDialog.close();
 });
-secretCodeDialog.addEventListener('close', resetUnlockFeedback);
+secretCodeDialog.addEventListener('close', () => {
+  // closeイベントが届く前に再表示された場合は、新しい演出を保持します。
+  if(secretCodeDialog.open) return;
+  resetUnlockFeedback();
+});
 
 let currentSteps = [];
 let finalState = null;
