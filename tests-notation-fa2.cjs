@@ -1,5 +1,7 @@
 /* FA2: actual composited bracket pixels and mobile boundary/state coverage. */
 'use strict';
+const legacyControl=process.env.LEGACY_CONTROL==='1';
+if(legacyControl&&!process.argv[3])throw Error('LEGACY_CONTROL=1 requires an explicit historical baseline URL');
 const {chromium,devices}=require(process.env.PLAYWRIGHT_MODULE||'playwright'),{PNG}=require(require('path').join(process.env.PLAYWRIGHT_MODULE||'playwright','../pngjs'));
 const fs=require('fs'),path=require('path'),assert=require('assert/strict');
 const target=process.argv[2]||'http://127.0.0.1:19561',base=process.argv[3]||'http://127.0.0.1:19461',out=process.argv[4]||'fa2-evidence';fs.mkdirSync(out,{recursive:true});
@@ -15,7 +17,7 @@ async function bracketPixels(p,sel,label){const n=p.locator(sel).first();await n
 }
 (async()=>{const b=await chromium.launch({channel:'chrome',headless:true});
  const c=await b.newContext({viewport:{width:1440,height:1100},reducedMotion:'reduce'}),p=await c.newPage(),q=await c.newPage();p.on('pageerror',e=>errors.push(String(e)));await p.goto(target);await q.goto(base);
- await test('FA1 identity control: input white, brackets opaque',async()=>{await run(q,sample,'10\n20\n30');const s=await q.locator('.result-value .input-notation').first().evaluate(n=>({color:getComputedStyle(n).color,opacity:getComputedStyle(n,'::before').opacity}));assert.deepEqual(s,{color:'rgb(242, 242, 242)',opacity:'1'});});
+ await test(legacyControl?'FA1 identity control: input white, brackets opaque':'current reference: input yellow, brackets half opacity',async()=>{await run(q,sample,'10\n20\n30');const s=await q.locator('.result-value .input-notation').first().evaluate(n=>({color:getComputedStyle(n).color,opacity:getComputedStyle(n,'::before').opacity}));assert.deepEqual(s,legacyControl?{color:'rgb(242, 242, 242)',opacity:'1'}:{color:'rgb(255, 230, 0)',opacity:'0.5'});});
  await test('RESULT and execution: bracket-only 50% opacity and unchanged 0.08em gap',async()=>{await run(p,sample,'10\n20\n30');for(const root of ['.result-value','#summary-output'])await inspect(p,root+' .input-notation');});
  for(const [sel,label]of [['.result-value .input-notation','result-brackets'],['#summary-output .input-notation','summary-brackets']])await test('actual raster '+label,()=>bracketPixels(p,sel,label));
  await test('FLOW output and scanf card use the same decoration only',async()=>{await p.evaluate(()=>{activeStep=currentSteps.findLastIndex(s=>s.scanfInput);renderStep();});await inspect(p,'#output-value .input-notation');await inspect(p,'.scanf-step-input .input-notation');await bracketPixels(p,'#output-value .input-notation','flow-brackets');await bracketPixels(p,'.scanf-step-input .input-notation','step-brackets');});

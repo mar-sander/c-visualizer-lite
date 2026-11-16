@@ -2,6 +2,8 @@
    PLAYWRIGHT_MODULE=<existing Playwright> node tests-result-continuity.cjs
      [candidate URL] [previous candidate URL] [evidence directory] */
 'use strict';
+const legacyControl=process.env.LEGACY_CONTROL==='1';
+if(legacyControl&&!process.argv[3])throw Error('LEGACY_CONTROL=1 requires an explicit historical baseline URL');
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const target=process.argv[2]||'http://127.0.0.1:19061',prior=process.argv[3]||'http://127.0.0.1:18961',evidence=process.argv[4]||'continuity-evidence';
@@ -58,10 +60,11 @@ function samePositions(a,b){assert.deepEqual(a.glyphs.map(g=>[g.ch,g.x,g.y,g.wid
  const context=await browser.newContext({viewport:{width:1440,height:1000},timezoneId:'Asia/Tokyo'});
  const p=await context.newPage(),errors=[];p.on('pageerror',e=>errors.push(String(e)));
  await p.clock.install();await p.clock.pauseAt(new Date());await p.goto(target);
- await test('prior candidate reproduces visible RESULT replacement (negative control)',async()=>{
+ await test(legacyControl?'prior candidate reproduces visible RESULT replacement (negative control)':'current reference keeps RESULT during input feedback',async()=>{
    const q=await context.newPage();await q.clock.install();await q.clock.pauseAt(new Date());await q.goto(prior);await run(q);
    assert.equal(await formal(q),'A = ');await edit(q,'10');await q.evaluate(()=>submitInput());
-   assert.equal(await q.locator('.result-value').count(),0);assert.match(await q.locator('.idle-state').textContent(),/解析中です/);
+   if(legacyControl){assert.equal(await q.locator('.result-value').count(),0);assert.match(await q.locator('.idle-state').textContent(),/解析中です/);}
+   else{assert.equal(await q.locator('.result-value').count(),1);assert.equal(await formal(q),'A = ');assert.equal(await q.locator('.idle-state').count(),0);assert.equal(await q.evaluate(()=>!!pendingInputInjection),true);}
    await q.screenshot({path:path.join(evidence,'prior-input-gap.png'),fullPage:true});await q.close();
  });
  for(const width of [1440,768,390]){

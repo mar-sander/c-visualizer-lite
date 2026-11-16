@@ -2,6 +2,8 @@
    PLAYWRIGHT_MODULE=<existing Playwright> node tests-execution-echo.cjs
      [FA2 URL] [FA1 URL] [evidence directory] */
 'use strict';
+const legacyControl=process.env.LEGACY_CONTROL==='1';
+if(legacyControl&&!process.argv[3])throw Error('LEGACY_CONTROL=1 requires an explicit historical baseline URL');
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const target=process.argv[2]||'http://127.0.0.1:19161',prior=process.argv[3]||'http://127.0.0.1:19061',evidence=process.argv[4]||'echo-evidence';
@@ -28,9 +30,9 @@ async function test(name,fn){try{await fn();rows.push({name,pass:true});}catch(e
    const state=await p.evaluate(()=>({engine:cVisualizerLiteResult,stored:JSON.parse(localStorage.getItem('c-visualizer-lite-history-v1'))}));
    assert.deepEqual(state.engine,result);assert.equal(state.stored.entries[0].output,result.output);assert.equal('segments' in state.stored.entries[0],false);
  }
- await test('FA1 negative control: execution summary omits inputs but RESULT includes them',async()=>{
+ await test(legacyControl?'FA1 negative control: execution summary omits inputs but RESULT includes them':'current reference: summary and RESULT include consumed input',async()=>{
    await q.evaluate(code=>{editor.setValue(code);scanfInput.value='10\n20\n30';runCode();},sample);await q.waitForFunction(()=>hasCurrentResult());
-   assert.equal(await q.locator('#summary-output').textContent(),'A = B = C = SUM = 60\n');assert.equal(await q.locator('.result-value').textContent(),'A = 10\nB = 20\nC = 30\nSUM = 60\n');
+   assert.equal(await q.locator('#summary-output').textContent(),legacyControl?'A = B = C = SUM = 60\n':'A = 10\nB = 20\nC = 30\nSUM = 60\n');assert.equal(await q.locator('.result-value').textContent(),'A = 10\nB = 20\nC = 30\nSUM = 60\n');
  });
  const cases=[['int','%d','10','%d'],['int','%d','-10','%d'],['int','%d',' +002 ','%d'],['int','%d','\n\n 7 \n999','%d'],
    ['float','%f','2.50','%f'],['float','%f','-0.50','%f'],['double','%lf','+2.25','%f'],
