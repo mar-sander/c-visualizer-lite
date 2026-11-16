@@ -1,5 +1,7 @@
 /* CSS role + raster verification. PLAYWRIGHT_MODULE=<install> node tests-input-color-roles.cjs URL VIS3_BASE EVIDENCE */
 'use strict';
+const legacyControl=process.env.LEGACY_CONTROL==='1';
+if(legacyControl&&!process.argv[3])throw Error('LEGACY_CONTROL=1 requires an explicit historical baseline URL');
 const {chromium,devices}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
 const {PNG}=require(require('path').join(process.env.PLAYWRIGHT_MODULE||'playwright','../pngjs'));
 const fs=require('fs'),path=require('path'),assert=require('assert/strict');
@@ -16,7 +18,7 @@ async function roles(p,root){const isResult=root==='.result-value';await color(p
 (async()=>{
  const b=await chromium.launch({channel:'chrome',headless:true});
  const c=await b.newContext({viewport:{width:1440,height:1100},reducedMotion:'reduce',timezoneId:'Asia/Tokyo'}),p=await c.newPage(),q=await c.newPage();p.on('pageerror',e=>errors.push(String(e)));await p.goto(url);await q.goto(base);
- await test('FA1 control reproduces white input and yellow plain summary',async()=>{await run(q,sample,'10\n20\n30');await color(q,'.result-value .input-notation','rgb(242, 242, 242)');await q.screenshot({path:path.join(out,'before-mixed.png'),fullPage:true});await run(q,main('printf("OUTPUT");'));await color(q,'#summary-output',yellow);await q.screenshot({path:path.join(out,'before-output-only.png'),fullPage:true});});
+ await test(legacyControl?'FA1 control reproduces white input and yellow plain summary':'current reference uses yellow input and plain stdout',async()=>{await run(q,sample,'10\n20\n30');await color(q,'.result-value .input-notation',legacyControl?'rgb(242, 242, 242)':inputYellow);await q.screenshot({path:path.join(out,'before-mixed.png'),fullPage:true});await run(q,main('printf("OUTPUT");'));await color(q,'#summary-output',yellow);await q.screenshot({path:path.join(out,'before-output-only.png'),fullPage:true});});
  await test('initial waiting current frame is inputYellow in RESULT and summary',async()=>{await run(p);for(const root of ['.result-value','#summary-output']){await roles(p,root);assert.equal(await p.locator(root+' .input-notation-waiting').count(),1);}});
  for(const [input,n]of [['10',1],['10\n20',2],['10\n20\n30',3]])await test('staged INPUT '+n+' role separation',async()=>{await submit(p,input);for(const root of ['.result-value','#summary-output']){await roles(p,root);assert.equal(await p.locator(root+' .input-notation:not(.input-notation-waiting)').count(),n);assert.equal(await p.locator(root+' .input-notation-waiting').count(),n===3?0:1);}});
  await test('actual RESULT and execution glyph pixels have specified colors',async()=>{for(const [root,label]of [['.result-value','result'],['#summary-output','summary']]){await raster(p,root+' '+(label==='result'?'.result-output':'.execution-output'),yellow,label+'-output-pixels');await raster(p,root+' .input-notation',inputYellow,label+'-input-pixels');}});

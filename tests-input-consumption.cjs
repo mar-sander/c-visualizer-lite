@@ -1,5 +1,6 @@
 /* PLAYWRIGHT_MODULE=<existing installation> node tests-input-consumption.cjs URL BASE EVIDENCE */
 'use strict';
+if(process.env.LEGACY_CONTROL==='1'&&!process.argv[3])throw Error('LEGACY_CONTROL=1 requires an explicit historical baseline URL');
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
 const {PNG}=require(path.join(process.env.PLAYWRIGHT_MODULE||'playwright','../pngjs'));
@@ -53,7 +54,9 @@ function pixel(buffer,x,y){const p=PNG.sync.read(buffer),i=(Math.floor(y)*p.widt
   const result=await run(c,value);assert.deepEqual(await marks(),expected);
   assert.deepEqual(result.steps.flatMap(s=>s.scanfInput?[s.scanfInput.inputLineIndex]:[]),expected);
   const prior=await q.evaluate(({c,value})=>{editor.setValue(c);scanfInput.value=value;document.getElementById('codeInput').value=c;visualizeCode();return cVisualizerLiteResult;},{c,value});
-  const copy=JSON.parse(JSON.stringify(result));for(const s of copy.steps||[])if(s.scanfInput)delete s.scanfInput.inputLineIndex;
+  const copy=JSON.parse(JSON.stringify(result));
+  // Only the historical pre-consumption API lacks this field; current comparisons retain it.
+  if(process.env.LEGACY_CONTROL==='1')for(const s of copy.steps||[])if(s.scanfInput)delete s.scanfInput.inputLineIndex;
   assert.deepEqual(copy,prior);
  });
  for(const [name,value,expected]of [
