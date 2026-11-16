@@ -8,7 +8,7 @@ Node.js、Playwright、pngjs、インストール済みChromeを使用します�
 node verify-suite.cjs C:\path\outside-repository\evidence
 ~~~
 
-No.Mへの手動操作依頼ではなく、次の検証担当向け手順です。runnerはloopbackの空きportへRange対応の読取サーバーを起動し、16 HTML＋9 CJS＋5 Node入口を逐次実行します。結果・ログ・画像は指定したrepo外ディレクトリだけに保存します。欠けたreport、非zero終了、ブラウザerror、FAILを成功にしません。実行後にサーバーを閉じます。環境不足やtimeoutはreportを欠損/エラーとして記録します。
+No.Mへの手動操作依頼ではなく、次の検証担当向け手順です。runnerはloopbackの空きportへRange対応の読取サーバーを起動し、16 HTML＋10 CJS＋5 Node入口を逐次実行します。結果・ログ・画像は指定したrepo外ディレクトリだけに保存します。欠けたreport、非zero終了、ブラウザerror、FAILを成功にしません。実行後にサーバーを閉じます。環境不足やtimeoutはreportを欠損/エラーとして記録します。
 
 SUITE_ONLYにカンマ区切りの入口名を指定すると限定実行できます。JSONに選定範囲を記録するため、限定実行を全件実行と混同しないでください。無指定は全入口です。
 
@@ -26,7 +26,7 @@ SUITE_ONLYにカンマ区切りの入口名を指定すると限定実行でき�
 
 ## 既知問題と数え方
 
-learning-supportは実タイマーのcloseイベント競合で途中終了する場合があります。catch前までの実測行だけを数え、中断後の行は未実行とします。今回のフル実行は467件を完了しても、別の高速close→reopen再現で製品競合を確認しています。製品修正はL-QA2の対象外です。
+L-QA2ではlearning-supportが実タイマーのcloseイベント競合で途中終了する場合がありました。L-QA3ではSECRET CODEと動画のclose後処理を現在のopen状態でガードし、連続submit時の解放タイマーを置き換えています。`tests-dialog-lifecycle.cjs`は通常/reduced-motionの36ケースを実時計・ネイティブcloseイベントで検証します。通常開閉、0/5/25/100msの再表示、新しい解放の維持、自動close、連続submit、閉じ直し、Esc/背景/ボタン/直接close、動画の再生・巻戻し・focus、履歴を含みます。統合runnerがこのCJSも自動検出するため、無指定は16 HTML＋10 CJS＋5 Node入口です。元mainでの失敗と修正後の実測はL-QA3の納品記録を参照してください。catch前までの実測行だけを数え、中断後の行は未実行とします。
 
 テスト入口間には同一ケースの重複があります。入口別件数を足した値は固有仕様数やcoverage率ではありません。Pixel5はエミュレーションで、Android実機ではありません。Chromeバージョンの固定文言を持つ古いレポートは、実際に取得したrunner/browser.versionと区別してください。
 

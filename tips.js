@@ -69,6 +69,8 @@
 
   // 動画を閉じるときは、音の有無によらず必ず再生を止めます。
   dialog.addEventListener('close', () => {
+    // 再表示後に届いた前回のcloseで、再生・focusを巻き戻さない。
+    if (dialog.open) return;
     video.pause();
     try { video.currentTime = 0; } catch (_error) { /* 未読込時は巻き戻し不要 */ }
     if (document.fullscreenElement && dialog.contains(document.fullscreenElement)) {
