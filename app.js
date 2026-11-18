@@ -1787,7 +1787,7 @@ function showFailure(result){
   // 安全上限の実際のTRUE判定を失敗画面で示します。通常STEPや成功RESULTには進めません。
   const limitStep = result.steps?.findLast(step => step.loopDecision?.kind === 'while' && step.loopDecision.nextAction === 'limit');
   if(limitStep) box.append(renderWhileDecisionStep(limitStep.loopDecision));
-  if(result.output) box.append(element('p', 'partial-output', `农止までの出力：${result.output}`));
+  if(result.output) box.append(element('p', 'partial-output', `停止までの出力：${result.output}`));
   flow.replaceChildren(box);
   $('step-controls').hidden = true;
   outputCard.hidden = true;
