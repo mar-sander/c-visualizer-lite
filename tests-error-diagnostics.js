@@ -27,7 +27,7 @@
   add('配列の範囲外', 'int a[2]={1,2};\n@error printf("%d",a[2]);', '存在しません');
   add('配列の未初期化', 'int a[2];\n@error printf("%d",a[1]);', 'まだ値');
   add('配列の添字の型', 'int a[2]={1,2};\nfloat k=1.0f;\n@error printf("%d",a[k]);', 'int型');
-  add('配列の添字の式は未対応', 'int a[2]={1,2};\n@error printf("%d",a[0+1]);', '未対応');
+  add('配列の不正な添字式', 'int a[2]={1,2};\n@error printf("%d",a[0+]);', '未対応');
   add('他型配列は未対応', '@error double a[2]={1,2};', 'int');
   add('printfの引数不足', '@error printf("%d");', '引数');
   add('printfの書式未対応', '@error printf("%s","ok");', '未対応');
@@ -84,7 +84,7 @@
   add('子forヘッダ', 'int i=9,j=8;\nfor(i=0;i<1;i++){\n@error for(int j=0;j<1;j++){\nprintf("%d",j);\n}\n}', '初期化部', {variables:[['i','9'],['j','8']],noExecutionFrom:5,stopLine:5});
   add('孫forヘッダ', 'int i=9,j=8,k=7;\nfor(i=0;i<1;i++){\nfor(j=0;j<1;j++){\n@error for(k=0;k<1;){\nprintf("%d",k);\n}\n}\n}', '省略', {variables:[['i','9'],['j','8'],['k','7']],noExecutionFrom:5,stopLine:5});
   add('4階層forの限界', 'int i=9,j=8,k=7,m=6;\nfor(i=0;i<1;i++){\nfor(j=0;j<1;j++){\nfor(k=0;k<1;k++){\n@error for(m=0;m<1;m++){\nprintf("%d",m);\n}\n}\n}\n}', '最大3階層');
-  add('子for内の配列添字式', 'int i=9,j=8,a[2]={1,2};\nfor(i=0;i<1;i++){\nfor(j=0;j<1;j++){\n@error a[j+1]=3;\n}\n}', '未対応');
+  add('子for内の不正な配列添字式', 'int i=9,j=8,a[2]={1,2};\nfor(i=0;i<1;i++){\nfor(j=0;j<1;j++){\n@error a[j+]=3;\n}\n}', '未対応');
   add('構造拒否を本文実行時エラーより先に診断', 'int i=9;\nfor(i=0;i<1;i++){\ni=1/0;\n@error scanf("%d",&i);\nbreak;\n}', 'scanf', {variables:[['i','9']],noExecutionFrom:5,stopLine:5});
   add('停止後の独立エラーを実行しない', 'int i=9;\nfor(i=0;i<1;i++){\n@error scanf("%d",&i);\nbreak;\n}\nprintf("%d",missing);', 'scanf');
   add('子for実行時の配列範囲外', 'int i=0,j=0,a[1]={8};\nfor(i=0;i<1;i++){\nfor(j=0;j<1;j++){\n@error a[0]=a[1];\n}\n}', '存在しません');

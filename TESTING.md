@@ -33,3 +33,7 @@ L-QA2ではlearning-supportが実タイマーのcloseイベント競合で途中
 ## 拡張前の改善候補
 
 配列/関数の正例・未対応拒否・snapshot独立性・INPUT取消の契約を共有case inventoryで追跡する。legacy参照版をSHAとソースhashで保存する。実時計の競合回帰は別の明示suiteへ追加し、製品を修正して安定化する。端末の安全予算・quota・容量上限と記録量の検証を別Stageで整備する。今回、大規模なframework移行、製品test hook、既存test削除・skipは行っていません。
+
+## L-EXAM1
+
+無指定の統合runnerは新規 `tests-array-index-expressions.cjs` を含む16 HTML＋11 CJS＋5 Nodeの32入口を実行します。元号変換の原文と段階INPUT、read/write/printf/for内条件、各種異常添字、未実行側の構文事前検査、snapshot往復、履歴、390/900/901/1440pxを固定期待値で検証します。旧添字式拒否のうち許可文法に当たるケースは成功へ更新し、禁止構文と範囲外の拒否ケースを維持します。初版の31入口/5585件は比較基準であり、L-EXAM1の実測件数はStage証拠を参照してください。

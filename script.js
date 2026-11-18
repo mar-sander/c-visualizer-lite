@@ -52,21 +52,40 @@ function containsArrayElementSyntax(text){
   return /\b[A-Za-z_]\w*\s*\[/.test(String(text));
 }
 
-// 添字は、符号付き整数literalまたは単一のscalar identifierだけを許可します。
+// L-EXAM1: side effectのない整数添字。通常の式parserと同じ優先順位を使います。
+const ARRAY_INDEX_LIMITS = Object.freeze({characters:2048, tokens:256, depth:32});
+function inspectArrayIndexExpression(expression){
+  const source = String(expression).trim();
+  if(!source || source.length > ARRAY_INDEX_LIMITS.characters) return false;
+  const tokenized = tokenizeExpression(source);
+  if(!tokenized.ok || tokenized.tokens.length > ARRAY_INDEX_LIMITS.tokens || /\+\+|--/.test(source)) return false;
+  let parentheses = 0, unaryCount = 0, expectsOperand = true;
+  for(const token of tokenized.tokens){
+    if(!/^(?:[A-Za-z_]\w*|\d+|[()+\-*/%])$/.test(token) || C_SYNTAX_TYPES.has(token) || C_SYNTAX_KEYWORDS.has(token)) return false;
+    if(token === '(') parentheses++;
+    if(token === ')') parentheses--;
+    if(expectsOperand && (token === '+' || token === '-')) unaryCount++;
+    if(parentheses < 0 || parentheses + unaryCount > ARRAY_INDEX_LIMITS.depth) return false;
+    expectsOperand = token !== ')' && !/^(?:[A-Za-z_]\w*|\d+)$/.test(token);
+  }
+  return parentheses === 0 && inspectConditionalExpressionSyntax(source);
+}
+
 function parseSupportedArrayAccess(text){
   const match = String(text).trim().match(
-    /^([A-Za-z_]\w*)\s*\[\s*([+-]?\d+|[A-Za-z_]\w*)\s*\]$/
+    /^([A-Za-z_]\w*)\s*\[\s*([^\[\]]+?)\s*\]$/
   );
   if(!match) return null;
-  const sourceIndex = match[2];
+  const sourceIndex = match[2].trim();
+  if(!inspectArrayIndexExpression(sourceIndex)) return null;
   const isFixedIndex = /^[+-]?\d+$/.test(sourceIndex);
-  if(isFixedIndex && /^[+-]?0\d+$/.test(sourceIndex)) return null;
+  const isVariableIndex = /^[A-Za-z_]\w*$/.test(sourceIndex);
   return {
     source:match[0],
     name:match[1],
     sourceIndex,
-    indexKind:isFixedIndex ? 'fixed' : 'variable',
-    indexVariable:isFixedIndex ? null : sourceIndex,
+    indexKind:isFixedIndex ? 'fixed' : isVariableIndex ? 'variable' : 'expression',
+    indexVariable:isVariableIndex ? sourceIndex : null,
     resolvedIndex:isFixedIndex ? Number(sourceIndex) : null
   };
 }
@@ -1912,6 +1931,20 @@ function visualizeCode(){
       resolvedIndex = variables[access.indexVariable];
     }
 
+    if(access.indexKind === 'expression'){
+      // Only int operands are allowed; no implicit floating conversion in an index.
+      const tokens = tokenizeExpression(access.sourceIndex).tokens;
+      for(const token of tokens.filter(token => /^[A-Za-z_]\w*$/.test(token))){
+        if(getSymbolKind(token) !== 'scalar') return {ok:false, error:`添字式の変数 ${token} は宣言済みのint変数でなければなりません。`};
+        if(getScalarType(token) !== 'int') return {ok:false, error:`添字式の変数 ${token} はint型でなければなりません。`};
+      }
+      const evaluated = evaluateArithmeticExpression(access.sourceIndex, variables, null, variableTypes);
+      if(!evaluated.ok) return evaluated;
+      if(evaluated.type !== 'int') return {ok:false, error:'添字式の結果はint型でなければなりません。'};
+      resolvedIndex = evaluated.value;
+    }
+    if(!Number.isSafeInteger(resolvedIndex)) return {ok:false, error:'配列添字は安全な整数として扱えません。'};
+
     const resolvedAccess = {
       ...access,
       index:resolvedIndex,
@@ -1920,7 +1953,7 @@ function visualizeCode(){
     if(resolvedIndex < 0 || resolvedIndex >= array.length){
       const resolution = access.indexKind === 'variable'
         ? `${access.indexVariable}の値は${resolvedIndex}なので、${access.name}[${access.sourceIndex}]は${access.name}[${resolvedIndex}]を表します。`
-        : '';
+        : access.indexKind === 'expression' ? `添字式 ${access.sourceIndex} の計算結果は${resolvedIndex}なので、${access.name}[${resolvedIndex}]を表します。` : '';
       return {
         ok:false,
         access:resolvedAccess,
@@ -1954,6 +1987,7 @@ function visualizeCode(){
   }
 
   function describeVariableIndexResolution(access){
+    if(access?.indexKind === 'expression') return `添字式 ${access.sourceIndex} の計算結果は${access.resolvedIndex}です。そのため、${access.name}[${access.sourceIndex}]は${access.name}[${access.resolvedIndex}]を表します。`;
     if(!access || access.indexKind !== 'variable') return '';
     return `${access.indexVariable}の値は${access.resolvedIndex}です。そのため、${access.name}[${access.sourceIndex}]は${access.name}[${access.resolvedIndex}]を表します。`;
   }
@@ -2269,11 +2303,14 @@ function visualizeCode(){
       }
 
       const arrayWriteMatch = trimmed.match(
-        /^([A-Za-z_]\w*\s*\[\s*(?:[+-]?\d+|[A-Za-z_]\w*)\s*\])\s*=\s*(.+);$/
+        /^([A-Za-z_]\w*\s*\[[^\[\]]+\])\s*=\s*(.+);$/
       );
       if(arrayWriteMatch){
         const access = parseSupportedArrayAccess(arrayWriteMatch[1]);
         const expr = arrayWriteMatch[2].trim();
+        if(!access || !inspectConditionalExpressionSyntax(expr, true)){
+          return stopArrayLine('配列添字の構文を確認', '添字は安全なint算術式（+ - * / %、括弧、単項+ -）だけに対応しています。呼出・配列・代入や不正な式、配列要素の更新演算は実行しません。');
+        }
 
         const location = resolveArrayLocation(access);
         if(!location.ok){
@@ -2322,8 +2359,8 @@ function visualizeCode(){
       }
 
       const supportedAccessMatches = [...structuralCode.matchAll(
-        /\b[A-Za-z_]\w*\s*\[\s*(?:[+-]?\d+|[A-Za-z_]\w*)\s*\]/g
-      )];
+        /\b[A-Za-z_]\w*\s*\[[^\[\]]+\]/g
+      )].filter(match => parseSupportedArrayAccess(match[0]));
       const isSimpleReadStatement =
         /^[A-Za-z_]\w*\s*=/.test(trimmed) ||
         /^printf\s*\(/.test(trimmed) ||
@@ -2332,7 +2369,7 @@ function visualizeCode(){
       if(!isSimpleReadStatement || (!isSupportedArrayStatement(trimmed) && !( !insideIf && !insideLoop && /^int\s+[A-Za-z_]\w*\s*=/.test(trimmed) && supportedAccessMatches.length >= 1))){
         return stopArrayLine(
           'この配列要素の使い方は未対応',
-          '添字には、整数または宣言済みのint変数を1つだけ使用できます。<code>a[i + 1]</code>のような計算式、配列要素の更新演算はまだ実行しません。'
+          '添字には安全なint算術式（+ - * / %、括弧、単項+ -）を使用できます。呼出・配列・代入や不正な式、配列要素の更新演算は実行しません。'
         );
       }
       hasSupportedArrayRead = true;
@@ -4326,7 +4363,7 @@ function visualizeCode(){
     function validateDirectArrayStatement(trimmed, structuralBodyCode){
       if(!containsArrayElementSyntax(structuralBodyCode)) return { ok:true, matched:false };
       if(!isSupportedArrayStatement(trimmed)){
-        return {ok:false, title:'for文本体の配列操作は未対応', message:'単純添字を使った代入・式・printfだけに対応しています。添字の計算式・要素更新は実行しません。未対応の文を含むfor全体を実行しません。'};
+        return {ok:false, title:'for文本体の配列操作は未対応', message:'安全なint添字を使った代入・式・printfだけに対応しています。不正な添字式・要素更新は実行しません。未対応の文を含むfor全体を実行しません。'};
       }
       return { ok:true, matched:true };
     }
@@ -5173,7 +5210,7 @@ function visualizeCode(){
     const legend = hasUninitialized
       ? `<div class="array-legend">—：まだ値を入れていない要素</div>`
       : '';
-    const variableAccess = accesses.find(access => access.indexKind === 'variable');
+    const variableAccess = accesses.find(access => access.indexKind === 'variable' || access.indexKind === 'expression');
     const resolution = variableAccess && Number.isInteger(variableAccess.resolvedIndex)
       ? `<div class="array-access-resolution"><code>${escapeHtml(name)}[${escapeHtml(variableAccess.sourceIndex)}]</code><span aria-hidden="true">→</span><code>${escapeHtml(name)}[${variableAccess.resolvedIndex}]</code></div>`
       : '';

@@ -1158,10 +1158,13 @@ function renderLiteArray(array, showAccess = false){
     element('span', 'lite-array-type', `${array.type}[${array.length}]`));
   card.append(header);
   const accesses = showAccess ? array.accesses || [] : [];
-  for(const variableAccess of accesses.filter(access => access.indexKind === 'variable')){
+  for(const variableAccess of accesses.filter(access => access.indexKind === 'variable' || access.indexKind === 'expression')){
     if(!Number.isInteger(variableAccess.resolvedIndex)) continue;
     card.append(element('div', 'lite-array-resolution',
       `${variableAccess.role ? variableAccess.role + '：' : ''}${array.name}[${variableAccess.sourceIndex}] → ${array.name}[${variableAccess.resolvedIndex}]${variableAccess.role ? `（${variableAccess.value}）` : ''}`));
+    if(variableAccess.indexKind === 'expression'){
+      card.append(element('div', 'lite-array-resolution', `添字式：${variableAccess.sourceIndex} = ${variableAccess.resolvedIndex} · ${variableAccess.mode === 'write' ? '代入値' : '読出値'}：${variableAccess.initialized ? variableAccess.value : '未初期化'}`));
+    }
   }
   const scroll = element('div', 'lite-array-scroll');
   scroll.tabIndex = 0;

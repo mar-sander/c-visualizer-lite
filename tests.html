@@ -3351,7 +3351,7 @@
         name:'Stage1B array scanfはunsupported維持',
         code:makeMainCode(`    int a[1];\n    scanf("%d", &a[0]);\n    return 0;`),
         input:'9',
-        expect:{ arrays:[{ name:'a', values:['—'] }], warningMin:1, hintsInclude:['整数または宣言済みのint変数を1つだけ'] }
+        expect:{ arrays:[{ name:'a', values:['—'] }], warningMin:1, hintsInclude:['安全なint算術式'] }
       }
     ];
 
@@ -3405,9 +3405,9 @@
         expect:{ variables:['x = 7'], warningMin:1, hintsInclude:['a[i]はa[1]', 'まだ値が代入されていない'], stepArrays:[{ name:'a', activeIndex:'[1]', accessLabel:'参照', sourceIndex:'i', resolvedIndex:1, resolutionIncludes:'a[i]→a[1]' }] }
       },
       {
-        name:'Stage2A index expression i+1はunsupported維持',
+        name:'L-EXAM1 index expression i+1 read',
         code:makeMainCode(`    int a[3] = {1, 2, 3};\n    int i = 0;\n    int x = 9;\n    x = a[i + 1];\n    return 0;`),
-        expect:{ variables:['x = 9'], warningMin:1, hintsInclude:['a[i + 1]'] }
+        expect:{ variables:['x = 2'], warningMax:0, stepArrays:[{ name:'a', resolvedIndex:1, resolutionIncludes:'a[i + 1]→a[1]' }] }
       },
       {
         name:'Stage2A variable index element updateはunsupported維持',
@@ -3443,7 +3443,7 @@
         name:'Stage2A array scanfのvariable indexはunsupported維持',
         code:makeMainCode(`    int a[1];\n    int i = 0;\n    scanf("%d", &a[i]);\n    return 0;`),
         input:'9',
-        expect:{ arrays:[{ name:'a', values:['—'] }], warningMin:1, hintsInclude:['整数または宣言済みのint変数を1つだけ'] }
+        expect:{ arrays:[{ name:'a', values:['—'] }], warningMin:1, hintsInclude:['安全なint算術式'] }
       }
     ];
 
@@ -3512,9 +3512,9 @@
         expect:{ arrays:[{ name:'a', values:['499'] }], variables:['i = 500'], output:'出力はまだありません。', outputExcludes:['WRONG'], warningMin:1, hintsInclude:['安全上限'], stepArrayCount:4, stepArrays:[{ name:'a', values:['0'], sourceIndex:'0', resolvedIndex:0 }, { name:'a', values:['1'] }, { name:'a', values:['2'] }, { name:'a', values:['499'] }], stepsInclude:['4～499回目の反復を省略しました', '【500回目】'], executedExcludes:['printf("WRONG'] }
       },
       {
-        name:'Stage2B for bodyのindex expressionはunsupported維持',
+        name:'L-EXAM1 for bodyのindex expression',
         code:makeMainCode(`    int a[2] = {1, 2};\n    int i = 9;\n    for(i = 0; i < 1; i++){\n        printf("%d", a[i + 1]);\n    }\n    return 0;`),
-        expect:{ output:'出力はまだありません。', variables:['i = 9'], warningMin:1, hintsInclude:['添字の計算式'] }
+        expect:{ output:'2', variables:['i = 1'], warningMax:0 }
       },
       {
         name:'Stage2B for bodyのelement updateはunsupported維持',
@@ -8796,7 +8796,7 @@
           r=await run('int a[2];\na[0] = 5;\n'+statement+'\na[0] = 99;\nprintf("WRONG");\nreturn 0;');
           record(name+'安全停止・後続write/outputなし',r.hasWarnings&&r.output===''&&r.arrays[0].values[0]===5&&!!doc.querySelector('.failure-state'));
         }
-        for(const [name,body] of [['不正宣言','int a[0];'],['添字式','int a[2] = {0};\nprintf("%d", a[0+1]);'],['配列scanf','int a[2];\nscanf("%d", &a[0]);']]){
+        for(const [name,body] of [['不正宣言','int a[0];'],['不正添字式','int a[2] = {0};\nprintf("%d", a[0 + ]);'],['配列scanf','int a[2];\nscanf("%d", &a[0]);']]){
           r=await run(body+'\nprintf("WRONG");\nreturn 0;');
           record(name+'を既存方針で拒否',r.hasWarnings&&!r.output.includes('WRONG'));
         }
@@ -8895,12 +8895,13 @@
         ['負数添字','int i = -1;','a[i] = 9;'],
         ['未宣言添字','','a[i] = 9;'],
         ['長さと同値','int i = 3;','printf("%d", a[i]);'],
-        ['要素更新は既存未対応','int i = 0;','a[i]++;'],
-        ['複雑な添字は拡張しない','int i = 0;','a[i + 1] = 9;']
+        ['要素更新は既存未対応','int i = 0;','a[i]++;']
       ]){
         r=run('int a[3] = {0};\n'+indexDecl+'\n'+statement+'\nprintf("WRONG");\nreturn 0;');
         record(name+': 安全拒否',r.hasWarnings&&r.output===''&&same(r.arrays[0].values,[0,0,0]));
       }
+      r=run('int a[3] = {0};\nint i=0;\na[i+1]=9;\nprintf("%d",a[1]);\nreturn 0;');
+      record('L-EXAM1 式添字write',!r.hasWarnings&&r.output==='9'&&same(r.arrays[0].values,[0,9,0]));
       r=run('int a[3];\nint i;\n'+loop(3,'a[i] = i;')+'\nreturn 0;');
       const writes=r.steps.flatMap(s=>s.arrayViews||[]).flatMap(v=>v.accesses).filter(a=>a.mode==='write');
       record('未初期化からの代入前後・Symbolなし',writes.length===3&&writes.every(a=>a.previousValue===null&&a.previousInitialized===false)&&same(JSON.parse(JSON.stringify(r)),r));
@@ -9010,7 +9011,7 @@
         ['非int添字','int a[2] = {5};\nfloat k = 0.5f;','x < a[k]','x = a[i];'],
         ['配列でない','int a = 5;','x < a[i]','x = a[i];'],
         ['本文read失敗','int a[2];','i == 1','x = a[i];'],
-        ['複雑添字','int a[2] = {5};','x < a[i+1]','x = a[i];'],
+        ['式添字の範囲外','int a[2] = {5};','x < a[i+1]','x = a[i];'],
         ['複数read右側範囲外','int a[2] = {5};','a[0] < a[2]','x = a[i];'],
         ['本文write範囲外','int a[2] = {5};','i == 1','a[2] = 9;'],
         ['入れ子if拒否','int a[2] = {5};','i == 1','if(x < a[i]){\nx = a[i];\n}']
@@ -9074,7 +9075,7 @@
       for(const [label,decl,statement] of [
         ['範囲外RHS','int a[2] = {8,9};','a[0] = a[2];'],['未初期化RHS','int a[2];\na[0] = 8;','a[0] = a[1];'],['非int添字','int a[2] = {8,9};\nfloat k = 0.0f;','a[0] = a[k];'],['未宣言添字','int a[2] = {8,9};','a[0] = a[k];'],['負添字','int a[2] = {8,9};','a[-1] = a[0];'],['式途中失敗','int a[2] = {8,9};','a[0] = a[1] / 0;'],['複数read右失敗','int a[2] = {8,9};','a[0] = a[1] + a[2];']
       ]){r=run(makeMainCode(decl+'\n'+statement+'\nprintf("WRONG");\nreturn 0;'));record(label+' 誤代入なし',r.hasWarnings&&r.output===''&&r.arrays[0].values[0]===8);}
-      for(const bad of ['a[j + 1] = a[0];','a[0] += a[1];','a[0] = mystery(a[1]);','a[0] = a[1]++;']){r=run(makeMainCode('int i = 9, j = 0, a[2] = {8,9};\nfor(i = 0; i < 2; i++){\na[0] = 1;\nif(i == 0){\n'+bad+'\n}\n}\nprintf("WRONG");'));record('事前停止 '+bad,r.hasWarnings&&r.output===''&&new Map(r.variables).get('i')==='9'&&same(r.arrays[0].values,[8,9]));}
+      for(const bad of ['a[j + ] = a[0];','a[0] += a[1];','a[0] = mystery(a[1]);','a[0] = a[1]++;']){r=run(makeMainCode('int i = 9, j = 0, a[2] = {8,9};\nfor(i = 0; i < 2; i++){\na[0] = 1;\nif(i == 0){\n'+bad+'\n}\n}\nprintf("WRONG");'));record('事前停止 '+bad,r.hasWarnings&&r.output===''&&new Map(r.variables).get('i')==='9'&&same(r.arrays[0].values,[8,9]));}
       // A different algorithm using only supported simple indices: selection via a tracked index.
       r=run(makeMainCode('int i, j, m, d, a[4] = {3,8,1,5};\nfor(i = 0; i < 3; i++){\nm = i;\nfor(j = i + 1; j < 4; j++){\nif(a[j] > a[m]){\nm = j;\n}\n}\nd = a[i];\na[i] = a[m];\na[m] = d;\n}\nprintf("%d %d %d %d", a[0],a[1],a[2],a[3]);'));record('P1 別方式・選択ソート',!r.hasWarnings&&r.output==='8 5 3 1');
       return results;
