@@ -2184,6 +2184,17 @@ const renderFunctionAssistStep = function(step){
       document.createTextNode(' を ' + step.scanfInput.target + ' に保存します。'));
   }else description.textContent = descriptions[step.functionEvent] || '処理を確認します。';
   detail.append(element('small', '', context), description);
+  if(Array.isArray(step.argumentBindings)){
+    for(const binding of step.argumentBindings){
+      detail.append(element('p', '', `${binding.expression}：${binding.sourceType} ${binding.sourceDisplay} → ${binding.parameterName}：${binding.parameterType} ${binding.display}`));
+    }
+  }
+  if(step.functionEvent === 'return' && step.returnExpression){
+    detail.append(element('p', '', `return ${step.returnExpression.expression}：${step.returnExpression.type} ${step.returnExpression.display} → 戻り値：${step.returnType} ${step.returnDisplay}`));
+  }
+  if(step.functionEvent === 'return-assign' && step.targetType){
+    detail.append(element('p', '', `戻り値：${step.returnType} ${step.returnDisplay} → ${step.target}：${step.targetType} ${step.storedDisplay}`));
+  }
   if(step.branchDecision?.comparison){
     const comparison = step.branchDecision.comparison;
     detail.append(element('p', '', `比較する値：${comparison.leftDisplay} ${comparison.operator} ${comparison.rightDisplay}${comparison.conversionNote ? `。${comparison.conversionNote}` : ''}`));
@@ -2201,8 +2212,9 @@ const renderFunctionAssistStep = function(step){
       const box = element('div', 'scalar-variable');
       const key = `${scope.scopeId}:${variable.name}`;
       box.dataset.variableKey = key;
+      box.dataset.variableType = variable.type;
       const value = variable.display === '未初期化' ? '—' : variable.display;
-      box.append(element('span', 'scalar-variable-name', variable.name), element('span', 'scalar-variable-value', value));
+      box.append(element('span', 'scalar-variable-name', `${variable.type} ${variable.name}`), element('span', 'scalar-variable-value', value));
       if(previous.has(key) && previous.get(key) !== variable.display){
         box.append(element('span', 'scalar-variable-history', `${previous.get(key) === '未初期化' ? '—' : previous.get(key)} → ${value}`));
       }

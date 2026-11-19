@@ -1,5 +1,9 @@
 # C Code Visualizer Lite 検証入口
 
+## L-EXAM3
+
+統合runnerは`tests-typed-functions.cjs`も自動検出し、34入口を実行します。EXAM3_GATE=3A/3B/3Cで個別ゲート、無指定で全ゲートです。原文EXAM-05の完全stdout、署名0～4引数/型順序、3段階の数値変換、未対応構文・型・初期化・安全予算、typed FLOW/STEP往復、確認/取消/連打/履歴復元/INPUT、390/900/1440pxを検証します。旧void単独0引数・小数実引数・int戻り変換の期待だけ新仕様へ更新し、拒否テストは維持します。未対応署名が未呼出でもNORMALへ流さない安全契約に合わせ、対応するrouting期待を更新しました。実機は別途未確認です。5797件はL-EXAM2の基準であり、最終件数と失敗履歴はL-EXAM3納品記録を参照してください。
+
 ## 現行mainの回帰
 
 Node.js、Playwright、pngjs、インストール済みChromeを使用します。依存は製品フォルダ外へ配置し、PLAYWRIGHT_MODULEにPlaywrightの絶対パスを設定します。

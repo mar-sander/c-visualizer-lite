@@ -1,6 +1,6 @@
 # L-FUNC1 — Function Catalog / Preflight API
 
-本ファイル群は製品から未参照です。RUN、INPUT、エディタ、解析エンジン、履歴に接続しません。
+L-EXAM3現在、この純粋APIは製品のFunction Assistルーティングと実行コアから参照します。API自身は実行・DOM・製品状態へのアクセスを行いません。以下のL-FUNC1/2に関する将来表現は歴史的説明です。
 
 ## 利用方法
 
@@ -11,7 +11,7 @@ const { inspectFunctionStructure } = require('./function-preflight.js');
 const result = inspectFunctionStructure(sourceCode);
 ```
 
-ブラウザの開発ページでは通常scriptとして読み込むと、lexical bindingの`FunctionPreflight.inspectFunctionStructure`を利用できます。`window`のプロパティや製品状態へ書き込みません。既存のindex.htmlへscriptタグを追加しないでください。
+ブラウザの開発ページでは通常scriptとして読み込むと、lexical bindingの`FunctionPreflight.inspectFunctionStructure`を利用できます。`window`のプロパティや製品状態へ書き込みません。製品index.htmlには依存順どおり一度だけ接続済みです。
 
 同じ文字列には決定的なJSON互換データを返します。結果は呼出ごとに新しく生成し、別呼出との可変状態を共有しません。入力を補正・実行せず、DOM、localStorage、CodeMirror、window、既存結果、日時・乱数にも依存しません。
 
@@ -62,17 +62,17 @@ const result = inspectFunctionStructure(sourceCode);
 
 ## 対応範囲
 
-戻り型int、int引数2個のサブ関数を初期候補とします。定義には仮引数名が必要です。プロトタイプの引数名省略は認識します。関数ヘッダ内の空白・コメント・改行、次の独立行の開き波かっこを検出できます。これは後続エンジンの書式対応を約束しません。
+L-EXAM3では戻り型int/double、int/double仮引数0～4個（0個はvoid単独）のサブ関数を候補とします。各関数・宣言・定義のdescriptor={returnType,parameterTypes}を安全性の契約とし、文字列signatureは表示・互換用に維持します。定義には仮引数名が必要です。プロトタイプの引数名省略は認識します。関数ヘッダ内の空白・コメント・改行、次の独立行の開き波かっこを検出できます。これは後続エンジンの書式対応を約束しません。
 
-呼出の初期形はmain直下の`先に宣言されたintスカラー = f(実引数2個);`です。実引数は識別子または符号付き10進整数リテラルの形を認識します。識別子がintか、初期化済みか、値が安全かは評価しません。`requiresRuntimeArgumentValidation:true`を保持します。
+呼出の初期形はmain直下の`先に宣言されたint/doubleスカラー = f(署名と同数の実引数);`です。実引数は識別子または符号付き10進整数/小数リテラルの形を認識します。識別子がint/doubleか、初期化済みか、値が安全かは評価しません。`requiresRuntimeArgumentValidation:true`を保持します。
 
 main内の通常の型・配列・initializer・if／else if／for／while・printf／scanfをサブ関数と混同しません。ただし、NONEを既存エンジンの構文受け入れ保証として使用してはいけません。
 
 ## 明示的な限界と停止
 
 - 再帰・main呼出・サブ関数から別関数、式中／入れ子／printf引数内／宣言時／分岐やループ内の呼出は阻害診断を返します。
-- void、非int署名、ポインタ／配列引数、間接呼出、グローバル変数、複雑な宣言は初期範囲外です。
-- サブ関数内の配列・非int／static等の局所宣言・scanf・ループ等も、検出できる範囲で未対応診断を返します。
+- float/char/void戻り型、int/double以外の仮引数型、ポインタ／配列引数、間接呼出、グローバル変数、複雑な宣言は初期範囲外です。
+- サブ関数内の配列・int/double以外／static等の局所宣言・scanf/printf・ループ等も、検出できる範囲で未対応診断を返します。
 - 全C構文、プリプロセッサ、完全なスコープ・型解析は実装しません。無効なreturn文や任意の本文構文をすべて検証するAPIではありません。
 - 前処理はincludeだけを認識します。それ以外のディレクティブ・継続マクロ・行継続コメントは安全なNONEにせず停止候補とします。ヘッダの中身は読みません。
 - 定義のない未使用宣言は情報診断だけです。呼び出されるなら定義欠落の阻害診断になります。
@@ -94,3 +94,7 @@ node verify-function-preflight.js
 ## L-FUNC2への契約
 
 L-FUNC2は単一mainの共通処理切り出しが対象です。このAPIを使ってRUNを自動分岐したり、関数を実行したりしません。`functions`の境界を将来共有しますが、新しい正規表現で関数範囲を再探索しないでください。引継ぎ先は元baseと成果物のハッシュを照合し、既存全回帰の実行成功を共通化の必須ゲートとします。
+
+## L-EXAM3の実行との境界
+
+未対応署名・本文に阻害診断があるサブ関数は、未呼出でもNORMALへフォールバックしません。合法な署名を確認後、FunctionExecutionCoreが全本文の対応構文を検証し、引数評価・仮引数変換・return式/戻り型変換・代入先変換を別々に実行します。intは既存Lite安全整数モデル、doubleはfinite Number。preflightだけで初期化や数値結果を保証せずreadyForExecution=falseを維持します。

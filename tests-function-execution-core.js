@@ -44,7 +44,8 @@ const FunctionExecutionCoreTests = (() => {
   no('未初期化引数',program(undefined,'a,5','int a;'),{unchanged:99,callCount:0});
   no('float引数・暗黙変換禁止',program(undefined,'a,5','float a=2.0f;'),{unchanged:99,callCount:0});
   no('char引数・暗黙変換禁止',program(undefined,'a,5',"char a='A';"),{unchanged:99,callCount:0});
-  for(const expr of ['1/0','a/0','a%0','9007199254740991+1','9007199254740991*2','1.5','wa','mainOnly','a+'])no('returnエラー '+expr,program((expr==='wa'?'int wa;\n':'')+'return '+expr+';','2,5','int mainOnly=42;'),{unchanged:99});
+  for(const expr of ['1/0','a/0','a%0','9007199254740991+1','9007199254740991*2','wa','mainOnly','a+'])no('returnエラー '+expr,program((expr==='wa'?'int wa;\n':'')+'return '+expr+';','2,5','int mainOnly=42;'),expr==='a+'?{callCount:0}:{unchanged:99});
+  yes('int戻り型へ小数を切捨て',program('return 1.5;'),'s = 1\n',{s:1});
   no('局所代入の0除算',program('int wa=4;\nwa=a/0;\nreturn wa;'),{unchanged:99});
   no('局所宣言の未初期化',program('int wa;\nint x=wa;\nreturn x;'),{unchanged:99});
   no('局所未宣言代入',program('wa=a+b;\nreturn wa;'),{unchanged:99});
@@ -53,7 +54,8 @@ const FunctionExecutionCoreTests = (() => {
   no('return不正式',program('return a+b'));
   no('引数名と局所名の衝突',program('int a=3;\nreturn a;'));
   no('局所再宣言',program('int x;\nint x;\nreturn 1;'));
-  for(const args of ['', '2', '2,5,8', '2.5,5', 'a+1,5', 'kasan(2,5),5', 'a++,5', 'a[0],5','&a,5','0x2,5','9007199254740992,0'])no('不正実引数 '+args,program(undefined,args,'int a=2;'));
+  for(const args of ['', '2', '2,5,8', 'a+1,5', 'kasan(2,5),5', 'a++,5', 'a[0],5','&a,5','0x2,5','9007199254740992,0'])no('不正実引数 '+args,program(undefined,args,'int a=2;'));
+  yes('double実引数をint仮引数へ変換',program(undefined,'2.5,5'),'s = 7\n',{s:7});
   no('未宣言代入先',textbook.replace('    int s;\n',''));
   no('非int代入先',textbook.replace('    int s;','    float s;'));
   no('非int戻り型',textbook.replace('int kasan','float kasan'));
