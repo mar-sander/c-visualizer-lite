@@ -347,7 +347,8 @@ const FunctionPreflight = (() => {
       }
 
       for(let index = open + 1; index < close; index++){
-        if(value(index) === '(' && [')', ']'].includes(value(index - 1))){
+        const castOperand = value(index-3) === '(' && ['int','double'].includes(value(index-2)) && value(index-1) === ')';
+        if(value(index) === '(' && [')', ']'].includes(value(index - 1)) && !castOperand){
           diagnose('INDIRECT_CALL_UNSUPPORTED', '間接的な関数呼出らしい構造は対応外です。', tokens[index].range, 'UNSUPPORTED');
         }
         if(!identifier(index) || value(index + 1) !== '(' || NON_CALLS.has(value(index)) || nestedHeaders.has(index)) continue;
