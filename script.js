@@ -86,7 +86,7 @@ function parseSupportedArrayAccess(text){
     sourceIndex,
     indexKind:isFixedIndex ? 'fixed' : isVariableIndex ? 'variable' : 'expression',
     indexVariable:isVariableIndex ? sourceIndex : null,
-    resolvedIndex:isFixedIndex ? Number(sourceIndex) : null
+    resolvedIndex:isFixedIndex ? normalizeIntegerZero(Number(sourceIndex)) : null
   };
 }
 
@@ -200,7 +200,7 @@ function parseArrayDeclaration(text){
     };
   }
 
-  const values = items.map(item => Number(item));
+  const values = items.map(item => normalizeIntegerZero(Number(item)));
   while(values.length < length) values.push(0);
 
   return {
@@ -1052,7 +1052,8 @@ function inlineUnsupportedControlBodyCode(structuralCode){
 }
 
 function makeVisibleDisplayText(text){
-  return text.replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim();
+  // FLOW paragraphs already use pre-wrap; keep the exact output inside quotes.
+  return String(text);
 }
 
 function isIdentifier(text){
@@ -1141,12 +1142,14 @@ function promoteNumericType(left, right){
 
 // float literalとfloat演算の結果は単精度へ丸め、変数への保存時も代入先型へ変換します。
 // doubleはNumberの精度を使用し、intへの変換は安全な範囲で0方向に切り捨てます。
+// Integral zero has no sign; floating zero keeps its IEEE-754 sign.
+function normalizeIntegerZero(value){ return value === 0 ? 0 : value; }
 function convertScalarValue(value, type){
   if(!Number.isFinite(value)) return { ok:false, error:'計算結果が有限の数値ではありません。' };
   if(type === 'char'){
     const integer = Math.trunc(value);
     return Number.isSafeInteger(integer) && integer >= 0 && integer <= 127
-      ? { ok:true, value:integer }
+      ? { ok:true, value:normalizeIntegerZero(integer) }
       : { ok:false, error:'Visualizerではcharの実装依存差を避けるため、保存できるコード値を基本ASCIIの0～127に限定しています。' };
   }
   if(type === 'float'){
@@ -1159,7 +1162,7 @@ function convertScalarValue(value, type){
   if(type === 'int'){
     const integer = Math.trunc(value);
     return Number.isSafeInteger(integer)
-      ? { ok:true, value:integer }
+      ? { ok:true, value:normalizeIntegerZero(integer) }
       : { ok:false, error:'計算結果はintの安全な整数として扱えません。' };
   }
   return { ok:false, error:'変数の型情報を確認できません。' };
@@ -1355,8 +1358,6 @@ function evaluateArithmeticExpression(expr, variables, resolveArrayAccess = null
       const targetType=consume();consume();
       const operand=parseFactor();if(!operand.ok)return operand;
       const converted=convertScalarValue(operand.value,targetType);if(!converted.ok)return converted;
-      // C integer zero has no sign; a later double cast must not revive -0.
-      if(targetType === 'int' && converted.value === 0) converted.value=0;
       castConversions.push({sourceType:operand.type,sourceValue:operand.value,sourceDisplay:displayScalarValue(operand.value,operand.type),targetType,targetValue:converted.value,targetDisplay:displayScalarValue(converted.value,targetType)});
       return {ok:true,value:converted.value,type:targetType,readable:`(${targetType})${operand.readable}`};
     }
@@ -1370,7 +1371,9 @@ function evaluateArithmeticExpression(expr, variables, resolveArrayAccess = null
     if(token === '-'){
       const factor = parseFactor();
       if(!factor.ok) return factor;
-      return { ok:true, value:-factor.value, type:factor.type === 'char' ? 'int' : factor.type, readable:`-${factor.readable}` };
+      const type = factor.type === 'char' ? 'int' : factor.type;
+      const value = type === 'int' ? normalizeIntegerZero(-factor.value) : -factor.value;
+      return { ok:true, value, type, readable:`-${factor.readable}` };
     }
 
     if(token.startsWith("'")) return parseCharacterLiteral(token);
@@ -1706,6 +1709,10 @@ function describeLearningType(type){
 }
 
 function makeInitialValueExplanation(name, expr, result, type = 'int', assignedValue = result.value){
+  const initialization = {name, expression:expr, sourceType:result.type, sourceValue:result.value,
+    sourceDisplay:displayScalarValue(result.value,result.type), targetType:type, targetValue:assignedValue,
+    targetDisplay:displayScalarValue(assignedValue,type)};
+  const stored = initialization.targetDisplay;
   if(type !== 'int'){
     const value = displayScalarValue(assignedValue, type);
     const learningType = describeLearningType(type);
@@ -1713,27 +1720,29 @@ function makeInitialValueExplanation(name, expr, result, type = 'int', assignedV
       ? `<code>${escapeHtml(expr)}</code> に対応するコード値を読み取り、`
       : /^[+-]?(?:\d+\.?\d*|\.\d+)[fF]?$/.test(expr.trim())
         ? '' : `<code>${escapeHtml(expr)}</code> を計算し、`;
-    return {
+    return {initialization,
       analysis:`${learningType}の変数 <code>${name}</code> を作り、${operation}<code>${escapeHtml(value)}</code> を代入しました。${escapeHtml(describeExpressionDetails(result))}`,
       step:`${name} という${learningType}の箱を作り、${escapeHtml(value)} を代入しました。${escapeHtml(describeExpressionDetails(result))}`
     };
   }
   if(result.comparison){
     const cValue = result.comparison.conditionMet ? '成立を1' : '不成立を0';
-    return {
-      analysis:`${describeComparison(result)} C言語では条件の${cValue}として扱うため、<code>${name}</code> に <code>${result.value}</code> を代入しました。`,
-      step:`${describeComparison(result)} ${name} に ${result.value} を代入しました。`
+    return {initialization,
+      analysis:`${describeComparison(result)} C言語では条件の${cValue}として扱うため、<code>${name}</code> に <code>${stored}</code> を代入しました。`,
+      step:`${describeComparison(result)} ${name} に ${stored} を代入しました。`
     };
   }
   if(isSimpleIntegerLiteral(expr)){
-    return {
-      analysis:`整数型の変数 <code>${name}</code> を作り、<code>${result.value}</code> を代入しました。`,
-      step:`${name} という整数型の箱を作り、${result.value} を代入しました。`
+    return {initialization,
+      analysis:`整数型の変数 <code>${name}</code> を作り、<code>${stored}</code> を代入しました。`,
+      step:`${name} という整数型の箱を作り、${stored} を代入しました。`
     };
   }
-  return {
-    analysis:`整数型の変数 <code>${name}</code> を作り、<code>${escapeHtml(expr)}</code> を計算した結果 <code>${result.value}</code> を代入しました。`,
-    step:`${name} という整数型の箱を作り、${escapeHtml(result.readable)} の結果である ${result.value} を代入しました。${escapeHtml(describeExpressionDetails(result))}`
+  const conversion = result.type !== 'int'
+    ? `計算値 ${result.type} ${initialization.sourceDisplay} → int ${stored} に変換します。` : '';
+  return {initialization,
+    analysis:`整数型の変数 <code>${name}</code> を作り、<code>${escapeHtml(expr)}</code> を計算しました。${escapeHtml(conversion)}格納値 <code>${stored}</code> を代入しました。`,
+    step:`${name} という整数型の箱を作り、${escapeHtml(result.readable)} を計算しました。${escapeHtml(conversion)}格納値 int ${stored} を代入しました。${escapeHtml(describeExpressionDetails(result))}`
   };
 }
 
@@ -2101,8 +2110,9 @@ function visualizeCodeUnchecked(){
   }
 
   function addStep(lineNo, text, markAsExecuted = true, arrayViews = [], branchDecision = null, scanfInputData = null, loopDecision = null){
-    const mathDecision=branchDecision?.mathCalls?.length ? branchDecision : loopDecision?.mathCalls?.length ? loopDecision : null;
-    if(mathDecision) text += '<br>'+escapeHtml(describeMathCalls(mathDecision));
+    const expressionDecision = branchDecision || loopDecision;
+    const expressionDetails = expressionDecision ? describeExpressionDetails(expressionDecision) : '';
+    if(expressionDetails) text += '<br>'+escapeHtml(expressionDetails);
     const conversionNote = branchDecision?.conversionNote || loopDecision?.conversionNote;
     const step = { step:stepNo++, lineNo, text:conversionNote ? `${text}<br>${escapeHtml(conversionNote)}` : text };
     if(arrayViews.length) step.arrayViews = arrayViews;
@@ -2381,6 +2391,7 @@ function visualizeCodeUnchecked(){
           declareScalar(item.name, item.value, 'int');
           const explanation = item.expr === undefined ? {analysis:item.name + ' は未初期化のint変数です。', step:item.name + ' の箱を作りました。中身はまだ入っていません。'} : makeInitialValueExplanation(item.name, item.expr, item.result, 'int', item.value);
           addAnalysis(analysis, lineNo, explanation.analysis); addStep(lineNo, explanation.step);
+          steps[steps.length - 1].initialization = explanation.initialization;
         }
       }
       return;
@@ -2503,10 +2514,11 @@ function visualizeCodeUnchecked(){
         );
         addStep(
           lineNo,
-          `${escapeHtml(resolutionExplanation)}代入元：${escapeHtml(expr)}（${escapeHtml(result.readable)} = ${result.value}）。代入先：${access.name}[${writeAccess.resolvedIndex}]。${previousValue === UNINITIALIZED ? "未初期化" : previousValue} → ${result.value}。`,
+          `${escapeHtml(resolutionExplanation)}代入元：${escapeHtml(expr)}（${escapeHtml(result.readable)} = ${result.value}）。代入先：${access.name}[${writeAccess.resolvedIndex}]。${previousValue === UNINITIALIZED ? "未初期化" : previousValue} → ${result.value}。${escapeHtml(describeExpressionDetails(result))}`,
           true,
           makeArrayViews([...(result.arrayAccesses || []).map(a => ({...a, role:'代入元'})), {...writeAccess, ...(result.arrayAccesses?.length ? {role:'代入先'} : {})}])
         );
+        Object.assign(steps[steps.length - 1], expressionMetadata(result));
         return;
       }
 
@@ -2750,6 +2762,7 @@ function visualizeCodeUnchecked(){
           const explanation = makeInitialValueExplanation(item.name, item.expr, item.result, multipleDeclaration.type, item.value);
           addAnalysis(analysis, lineNo, explanation.analysis);
           addStep(lineNo, explanation.step);
+          steps[steps.length - 1].initialization = explanation.initialization;
         }
       }
       return;
@@ -2812,6 +2825,7 @@ function visualizeCodeUnchecked(){
           true,
           resultArrayViews(result)
         );
+        steps[steps.length - 1].initialization = explanation.initialization;
       }else{
         if(hasSupportedArrayRead){
           const errorContext = getArrayExpressionErrorContext(result);
@@ -2902,6 +2916,7 @@ function visualizeCodeUnchecked(){
           true,
           makeArrayViews(results.flatMap(result => result.arrayAccesses || []))
         );
+        steps[steps.length - 1].printfOutput = {text:formatted.text};
       }else{
         if(hasSupportedArrayRead){
           const errorContext = getArrayExpressionErrorContext(failedResult || {});
@@ -4965,6 +4980,7 @@ function visualizeCodeUnchecked(){
       // 反復ごとに判定を記録し、最後の不成立判定も独立したSTEPにします。
       const loopDecision = {
         kind:'for',
+        ...expressionMetadata(conditionResult),
         condition:node.condition,
         iteration:nextLocalIteration,
         depth:node.forDepth,

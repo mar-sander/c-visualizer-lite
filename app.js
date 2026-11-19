@@ -1301,6 +1301,24 @@ function invalidateResult(message = 'コードが変更されました。RUNで�
   $('feedback').textContent = '再RUNが必要です。';
 }
 
+// Uses only the recorded printf text. Rendering never evaluates a C expression.
+function appendRecordedPrintfOutput(container, step, includeOutput = false){
+  const text = step.printfOutput?.text;
+  if(typeof text !== 'string') return;
+  if(includeOutput) container.append(element('p', '', `このprintfで「${text}」を表示しました。`));
+  const runs = [...text.matchAll(/ +/g)].map(match => match[0].length);
+  const spaces = runs.reduce((sum, length) => sum + length, 0);
+  const newlines = (text.match(/\r\n|\r|\n/g) || []).length;
+  const tabs = (text.match(/\t/g) || []).length;
+  const zeroWidth = (text.match(/[\u200b-\u200d\u2060\ufeff]/g) || []).length;
+  const notes = [];
+  if(spaces) notes.push(`半角空白 ${spaces}個（先頭 ${text.match(/^ */)[0].length}個・末尾 ${text.match(/ *$/)[0].length}個、空白列の長さ ${runs.join('・')}）`);
+  if(newlines) notes.push(`改行 ${newlines}個`);
+  if(tabs) notes.push(`タブ ${tabs}個`);
+  if(zeroWidth) notes.push(`ゼロ幅文字 ${zeroWidth}個`);
+  if(notes.length) container.append(element('p', 'printf-whitespace-note', notes.join(' ／ ') + '。'));
+}
+
 function decodeEngineExplanation(html){
   const node = document.createElement('div');
   node.innerHTML = html.replace(/<br\s*\/?\s*>/gi, '\n');
@@ -1471,7 +1489,9 @@ function renderStep(){
         ? describeScanfPurpose(step.scanfInput)
       : decodeEngineExplanation(step.text))
   );
-  if(step.branchDecision?.mathCalls?.length) explanation.append(element('p', '', describeMathCalls(step.branchDecision)));
+  if(step.branchDecision?.castConversions?.length || step.branchDecision?.mathCalls?.length)
+    explanation.append(element('p', '', describeExpressionDetails(step.branchDecision)));
+  appendRecordedPrintfOutput(explanation, step);
   if(step.arrayLoopContext?.length){
     const indexNames = new Set((step.arrayViews || []).flatMap(view => view.accesses || [])
       .map(access => access.indexVariable).filter(Boolean));
@@ -2185,6 +2205,7 @@ const renderFunctionAssistStep = function(step){
       document.createTextNode(' を ' + step.scanfInput.target + ' に保存します。'));
   }else description.textContent = descriptions[step.functionEvent] || '処理を確認します。';
   detail.append(element('small', '', context), description);
+  appendRecordedPrintfOutput(detail, step, true);
   if(step.castConversions?.length || step.mathCalls?.length) detail.append(element('p', '', describeExpressionDetails(step)));
   if(Array.isArray(step.argumentBindings)){
     for(const binding of step.argumentBindings){
