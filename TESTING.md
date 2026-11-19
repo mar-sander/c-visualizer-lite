@@ -37,3 +37,14 @@ L-QA2ではlearning-supportが実タイマーのcloseイベント競合で途中
 ## L-EXAM1
 
 無指定の統合runnerは新規 `tests-array-index-expressions.cjs` を含む16 HTML＋11 CJS＋5 Nodeの32入口を実行します。元号変換の原文と段階INPUT、read/write/printf/for内条件、各種異常添字、未実行側の構文事前検査、snapshot往復、履歴、390/900/901/1440pxを固定期待値で検証します。旧添字式拒否のうち許可文法に当たるケースは成功へ更新し、禁止構文と範囲外の拒否ケースを維持します。初版の31入口/5585件は比較基準であり、L-EXAM1の実測件数はStage証拠を参照してください。
+
+
+## L-EXAM2
+
+現在の無指定runnerは16 HTML＋12 CJS＋5 Node、全33入口です。`tests-loop-break-arrays.cjs`の137件（2A:57、2B:38、2C:42）を追加し、既存5,660件の件数は維持します。合計5,797件は入口別検証行の合計で、固有仕様数ではありません。実測PASS/FAIL/SKIPはStage納品記録を参照してください。
+
+新入口はbreak所有範囲、更新・再判定スキップ、500境界、事前検査、安全添字、while配列snapshot、原文EXAM-01/03、INPUT/echo/履歴、FLOW全STEP往復、390/900/1440pxを検査します。比較用ソートは固定6例とseed 0x20261118のLCGによる16例を、独立した数値sortと比較します。正式ソースliteralはRev.1ケースのSHA256と照合します。
+
+EXAM_GATE=2A/2B/2Cは新入口だけの限定段階検査です。全体回帰ではEXAM_GATEとSUITE_ONLYを設定せず全入口を実行してください。旧break/while配列の拒否期待は今回許可した範囲だけ正例へ更新し、診断suiteの旧loop内break拒否2例はcontinue拒否へ置換しました。loop外break、continue、switch、未対応ネスト、不正添字の拒否を維持します。
+
+修正前mainの初回全体実測は32入口/5,660件中5,659 PASS・1 FAIL（INPUT reduced-motionの240ms境界）でした。製品・テストを変更しない独立再確認では当該入口21/21 PASSです。初回失敗記録も保存し、再確認の重複21件を全体件数へ加算しません。今回この表示経路の製品・テストは変更していません。

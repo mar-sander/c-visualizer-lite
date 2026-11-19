@@ -1962,9 +1962,9 @@
         expect:{ output:'出力はまだありません。', outputExcludes:['WRONG-DECLARATION', 'WRONG-AFTER-DECLARATION'], variables:['i = 9'], variablesExclude:['local ='], warningMin:1, hintsInclude:['for文内の変数宣言は未対応'], stepCounts:{ 'for文の初期化':0 }, executedExcludes:['int local = i;', 'printf("WRONG-DECLARATION', 'printf("WRONG-AFTER-DECLARATION'] }
       },
       {
-        name:'for本体のbreakは未対応で全体停止',
-        code:makeMainCode(`    int i = 9;\n    for(i = 0; i < 2; i++){\n        break;\n    }\n    printf("WRONG-AFTER-BREAK");\n    return 0;`),
-        expect:{ output:'出力はまだありません。', outputExcludes:['WRONG-AFTER-BREAK'], variables:['i = 9'], warningMin:1, hintsInclude:['for文本体の文は未対応'], stepCounts:{ 'for文の初期化':0 }, executedExcludes:['break;', 'printf("WRONG-AFTER-BREAK'] }
+        name:'L-EXAM2 for直接breakは更新せず後続へ',
+        code:makeMainCode(`    int i = 9;\n    for(i = 0; i < 2; i++){\n        break;\n    }\n    printf("AFTER-BREAK");\n    return 0;`),
+        expect:{ output:'AFTER-BREAK', variables:['i = 0'], warningMax:0, stepsInclude:['breakを実行'], stepCounts:{ 'for文の初期化':1, 'for文の更新':0 } }
       },
       {
         name:'for本体のcontinueは未対応で全体停止',
@@ -2374,9 +2374,9 @@
         expect:{ output:'出力はまだありません。', outputExcludes:['WRONG'], variables:['i = 7'], warningMin:1, hintsInclude:['入れ子のブロックは未対応'], stepCounts:{ 'for文の初期化':0 } }
       },
       {
-        name:'Stage3 for内if分岐のbreakを事前拒否',
-        code:makeMainCode(`    int i = 7;\n    for(i = 0; i < 1; i++){\n        if(1){\n            break;\n        }\n    }\n    printf("WRONG");\n    return 0;`),
-        expect:{ output:'出力はまだありません。', outputExcludes:['WRONG'], variables:['i = 7'], warningMin:1, hintsInclude:['if分岐内の文は未対応'], stepCounts:{ 'for文の初期化':0 } }
+        name:'L-EXAM2 for内if breakを所有forが消費',
+        code:makeMainCode(`    int i = 7;\n    for(i = 0; i < 1; i++){\n        if(1){\n            break;\n        }\n    }\n    printf("AFTER");\n    return 0;`),
+        expect:{ output:'AFTER', variables:['i = 0'], warningMax:0, stepsInclude:['breakを実行'], stepCounts:{ 'for文の更新':0 } }
       },
       {
         name:'Stage3 for内if分岐のcontinueを事前拒否',
@@ -2399,9 +2399,9 @@
         expect:{ output:'出力はまだありません。', outputExcludes:['WRONG'], variables:['i = 9'], warningMin:1, hintsInclude:['if分岐内の更新文は未対応'], stepCounts:{ 'for文の初期化':0 } }
       },
       {
-        name:'Stage3 内側ifの未選択elseも事前検査',
-        code:makeMainCode(`    int i = 9;\n    for(i = 0; i < 1; i++){\n        if(1){\n            if(1){\n                printf("WRONG-EARLY");\n            }else{\n                break;\n            }\n        }\n    }\n    printf("WRONG-AFTER");\n    return 0;`),
-        expect:{ output:'出力はまだありません。', outputExcludes:['WRONG'], variables:['i = 9'], warningMin:1, hintsInclude:['if分岐内の文は未対応'], stepCounts:{ 'for文の初期化':0 } }
+        name:'L-EXAM2 内側ifの未選択breakは実行しない',
+        code:makeMainCode(`    int i = 9;\n    for(i = 0; i < 1; i++){\n        if(1){\n            if(1){\n                printf("EARLY");\n            }else{\n                break;\n            }\n        }\n    }\n    printf("AFTER");\n    return 0;`),
+        expect:{ output:'EARLYAFTER', variables:['i = 1'], warningMax:0, executedExcludes:['break;'] }
       },
       {
         name:'Stage3 不完全な内側braceでは後続mainを実行しない',
@@ -2747,9 +2747,9 @@
         expect:{ output:'出力はまだありません。', outputExcludes:['WRONG'], variables:['i = 10'], variablesExclude:['value ='], warningMin:1, hintsInclude:['while文内の変数宣言は未対応'], stepCounts:{ 'while文の条件':0 } }
       },
       {
-        name:'Stage1A while内breakを事前拒否',
-        code:makeMainCode(`    int i = 0;\n    while(i < 3){\n        break;\n    }\n    printf("WRONG");\n    return 0;`),
-        expect:{ output:'出力はまだありません。', variables:['i = 0'], warningMin:1, hintsInclude:['breakは未対応'], stepCounts:{ 'while文の条件':0 }, executedExcludes:['printf("WRONG'] }
+        name:'L-EXAM2 while直接breakは再判定せず後続へ',
+        code:makeMainCode(`    int i = 0;\n    while(i < 3){\n        break;\n    }\n    printf("AFTER");\n    return 0;`),
+        expect:{ output:'AFTER', variables:['i = 0'], warningMax:0, stepsInclude:['breakを実行'], stepCounts:{ 'while文の条件':1 } }
       },
       {
         name:'Stage1A while内continueを事前拒否',
@@ -2958,9 +2958,9 @@
         expect:{ output:'出力はまだありません。', variables:['i = 0'], variablesExclude:['value ='], warningMin:1, hintsInclude:['if分岐内の変数宣言は未対応'], stepCounts:{ 'while文の条件':0 } }
       },
       {
-        name:'Stage1B while内ifのbreakを事前拒否',
-        code:makeMainCode(`    int i = 0;\n    while(i < 0){\n        if(1){\n            break;\n        }\n    }\n    printf("WRONG");\n    return 0;`),
-        expect:{ output:'出力はまだありません。', variables:['i = 0'], warningMin:1, hintsInclude:['if分岐内の文は未対応'], stepCounts:{ 'while文の条件':0 }, executedExcludes:['break;', 'printf("WRONG");'] }
+        name:'L-EXAM2 0反復whileのbreakは実行しない',
+        code:makeMainCode(`    int i = 0;\n    while(i < 0){\n        if(1){\n            break;\n        }\n    }\n    printf("AFTER");\n    return 0;`),
+        expect:{ output:'AFTER', variables:['i = 0'], warningMax:0, stepCounts:{ 'while文の条件':1 }, executedExcludes:['break;'] }
       },
       {
         name:'Stage1B while内ifのcontinueを事前拒否',
@@ -7882,13 +7882,11 @@
     "name": "L-WHILE1 P2 範囲保護 break",
     "code": "#include <stdio.h>\nint main(void){\nint i=0;\nwhile(i<1){\nbreak;\ni++;\n}\nprintf(\"WRONG\");\nreturn 0;\n}",
     "expect": {
-      "warningMin": 1,
-      "outputExcludes": [
-        "WRONG"
-      ],
-      "phase2": {
-        "decisions": []
-      }
+      "warningMax": 0,
+      "output": "WRONG",
+      "variables": ["i = 0"],
+      "stepsInclude": ["breakを実行"],
+      "stepCounts": {"while文の条件":1}
     }
   },
   {
@@ -8915,11 +8913,12 @@
       record('圧縮後の範囲外停止: 最終値・省略終了値・後続抑止',r.hasWarnings&&r.output===''&&same(r.arrays[0].values,[1,2,3,4,5,6,7,8,9,10])&&same(r.steps.find(s=>s.stepKind==='loop-omission').arrayViews[0].values,[1,2,3,4,5,6,7,8,9,10]));
       r=run('int a[10] = {0};\nint i;\n'+loop(10,'a[i] = i + 1;\nif(i == 7){\nreturn 0;\n}')+'\nprintf("WRONG");');
       record('圧縮後のreturn: 最終反復前snapshotと更新停止',!r.hasWarnings&&r.output===''&&new Map(r.variables).get('i')==='7'&&same(r.arrays[0].values,[1,2,3,4,5,6,7,8,0,0])&&same(r.steps.find(s=>s.stepKind==='loop-omission').arrayViews[0].values,[1,2,3,4,5,6,7,0,0,0]));
+      r=run('int a[1] = {0};\nint i = 0;\nwhile(i < 1){\na[i] = 8;\ni++;\n}\nprintf("AFTER");\nreturn 0;');
+      record('L-EXAM2 while配列writeと後続実行',!r.hasWarnings&&r.output==='AFTER'&&r.arrays[0].values[0]===8);
       for(const [name,body] of [
         ['0回for内ifの未対応更新','int a[1] = {0};\nint i;\nfor(i = 0; i < 0; i++){\nif(i == 0){\na[i]++;\n}\n}'],
         ['二重forの未対応更新','int a[1] = {0};\nint i;\nint j;\nfor(i = 0; i < 1; i++){\nfor(j = 0; j < 1; j++){\na[j]++;\n}\n}'],
         ['forヘッダ','int a[1] = {0};\nint i;\nfor(i = 0; i < a[0]; i++){\nprintf("WRONG");\n}'],
-        ['while内配列','int a[1] = {0};\nint i = 0;\nwhile(i < 1){\na[i] = 8;\ni++;\n}']
       ]){
         r=run(body+'\nprintf("WRONG");\nreturn 0;');
         record(name+': 対象外の事前検証を維持',r.hasWarnings&&r.output===''&&r.arrays[0].values[0]===0);
