@@ -2184,6 +2184,7 @@ const renderFunctionAssistStep = function(step){
       document.createTextNode(' を ' + step.scanfInput.target + ' に保存します。'));
   }else description.textContent = descriptions[step.functionEvent] || '処理を確認します。';
   detail.append(element('small', '', context), description);
+  if(step.castConversions?.length) detail.append(element('p', '', describeExplicitCastConversions(step)));
   if(Array.isArray(step.argumentBindings)){
     for(const binding of step.argumentBindings){
       detail.append(element('p', '', `${binding.expression}：${binding.sourceType} ${binding.sourceDisplay} → ${binding.parameterName}：${binding.parameterType} ${binding.display}`));

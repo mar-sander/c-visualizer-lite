@@ -30,7 +30,7 @@ record('P5 unsupported directive',()=>assert.equal(router.classify('#pragma once
 for(const [name,code,priority] of [
  ['multiplication parentheses',normal.replace('int x=1;','int x=2 * (3+4);'),'P3'],
  ['parenthesized arithmetic',normal.replace('int x=1;','int x=(2+3)*(4+5);'),'P3'],
- ['scalar cast is not call',normal.replace('int x=1;','int x=(int)(2.5);'),'P4'],
+ ['scalar cast is not call',normal.replace('int x=1;','int x=(int)(2.5);'),'P3'],
  ['indirect call',normal.replace('int x=1;','int x=(*foo)(2);'),'P1'],
  ['pointer call',normal.replace('int x=1;','int x=table[0](2);'),'P1'],
  ['comment-hidden unknown',normal.replace('int x=1;','int x=1; /* foo(2) */'),'P3'],

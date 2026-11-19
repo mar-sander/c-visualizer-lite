@@ -1193,6 +1193,35 @@ function displayScalarValue(value, type){
   return String(value);
 }
 
+const EXPLICIT_CAST_LIMITS = Object.freeze({characters:2048,tokens:256,depth:32});
+function hasExplicitCastTokens(tokens){
+  return tokens.some((token,index) => token === '(' && C_SYNTAX_TYPES.has(tokens[index+1]));
+}
+function explicitCastBudgetError(expression){
+  if(!containsExplicitCastCandidate(expression)) return '';
+  if(expression.length>EXPLICIT_CAST_LIMITS.characters) return 'cast式の安全な文字数上限2048を超えています。';
+  // Budget-only lexing includes comparisons. No values are evaluated or rewritten.
+  const tokens=expression.match(/'(?:\\.|[^'\\])*'|(?:\d+\.\d*|\.\d+)[fF]?|\d+|[A-Za-z_]\w*\s*\[[^\[\]]+\]|[A-Za-z_]\w*|<=|>=|==|!=|[^\s]/g)||[];
+  if(tokens.length>EXPLICIT_CAST_LIMITS.tokens) return 'cast式の安全なtoken数上限256を超えています。';
+  let depth=0;
+  for(const token of tokens){if(token==='('&&++depth>EXPLICIT_CAST_LIMITS.depth)return 'cast式の括弧の安全な深さ32を超えています。';if(token===')')depth--;}
+  return '';
+}
+function describeExplicitCastConversions(result){
+  return (result.castConversions || []).map(c => `明示変換：${c.sourceType} ${c.sourceDisplay} → ${c.targetType} ${c.targetDisplay}。`).join(' ');
+}
+function containsExplicitCastCandidate(code){
+  const source=codeOutsideStringAndLineComment(code);
+  return /\(\s*(?:int|double|float|char|void|long|short|signed|unsigned)\b/.test(source) || /\(\s*[A-Za-z_]\w*\s*\)\s*[A-Za-z_\d.(]/.test(source);
+}
+function inspectExplicitCastStatement(code){
+  if(!containsExplicitCastCandidate(code)) return true;
+  const assign=code.match(/^[A-Za-z_]\w*(?:\s*\[[^\[\]]+\])?\s*=\s*(.+);$/);
+  if(assign) return inspectConditionalExpressionSyntax(assign[1],true);
+  const print=matchSimplePrintfStatement(code);
+  if(print) return (print[2]===undefined?[]:splitArgs(print[2])).every(arg=>inspectConditionalExpressionSyntax(arg,true));
+  return false;
+}
 function evaluateArithmeticExpression(expr, variables, resolveArrayAccess = null, variableTypes = null){
   if(/\+\+|--/.test(expr)){
     return { ok:false, error:'式の中で使う ++ と -- は現在未対応です。値を1増減するときは、単独の更新文として使用してください。' };
@@ -1202,9 +1231,13 @@ function evaluateArithmeticExpression(expr, variables, resolveArrayAccess = null
   if(!tokenResult.ok) return { ok:false, error:tokenResult.error };
 
   const tokens = tokenResult.tokens;
+  const hasCast = hasExplicitCastTokens(tokens);
+  if(hasCast && (expr.length > EXPLICIT_CAST_LIMITS.characters || tokens.length > EXPLICIT_CAST_LIMITS.tokens)) return {ok:false,error:'cast式の安全上限（2048文字・256token）を超えています。'};
   let pos = 0;
   const usedVars = [];
   const arrayAccesses = [];
+  const castConversions = [];
+  let factorDepth = 0;
 
   // 配列要素のread後に式の別部分で失敗しても、read済みの情報を失わないようにします。
   // 配列要素そのものの解決失敗（access）は、既存のerror metadataを優先します。
@@ -1280,8 +1313,22 @@ function evaluateArithmeticExpression(expr, variables, resolveArrayAccess = null
   }
 
   function parseFactor(){
+    if(hasCast && factorDepth >= EXPLICIT_CAST_LIMITS.depth) return {ok:false,error:'cast式の括弧・単項演算の安全な深さ32を超えています。'};
+    factorDepth++;
+    try{return parseFactorValue();}finally{factorDepth--;}
+  }
+  function parseFactorValue(){
     const token = consume();
     if(token === undefined) return { ok:false, error:'式が途中で終わっています。' };
+    if(token === '(' && ['int','double'].includes(peek()) && tokens[pos+1] === ')'){
+      const targetType=consume();consume();
+      const operand=parseFactor();if(!operand.ok)return operand;
+      const converted=convertScalarValue(operand.value,targetType);if(!converted.ok)return converted;
+      // C integer zero has no sign; a later double cast must not revive -0.
+      if(targetType === 'int' && converted.value === 0) converted.value=0;
+      castConversions.push({sourceType:operand.type,sourceValue:operand.value,sourceDisplay:displayScalarValue(operand.value,operand.type),targetType,targetValue:converted.value,targetDisplay:displayScalarValue(converted.value,targetType)});
+      return {ok:true,value:converted.value,type:targetType,readable:`(${targetType})${operand.readable}`};
+    }
 
     if(token === '+'){
       const factor = parseFactor();
@@ -1365,6 +1412,7 @@ function evaluateArithmeticExpression(expr, variables, resolveArrayAccess = null
     type:result.type,
     readable:result.readable,
     usedVars,
+    ...(castConversions.length ? {castConversions} : {}),
     arrayAccesses:[...arrayAccesses],
     arrayAccess:arrayAccesses[0] || null
   };
@@ -1445,6 +1493,7 @@ function stripWrappingParentheses(expr){
 // 条件チェーンの事前検査専用。変数の値や型を参照せず、演算も行いません。
 // 未到達の式の0除算・未初期化等は実行時まで評価しません。
 function inspectConditionalExpressionSyntax(expression, allowArrays = false){
+  if(explicitCastBudgetError(expression)) return false;
   const source = stripWrappingParentheses(expression);
   const found = findComparison(source);
   if(!found.ok) return false;
@@ -1457,17 +1506,28 @@ function inspectConditionalExpressionSyntax(expression, allowArrays = false){
     const tokenized = tokenizeExpression(part);
     if(!tokenized.ok) return false;
     const tokens = tokenized.tokens;
+    const hasCast = hasExplicitCastTokens(tokens);
+    if(hasCast && (part.length > EXPLICIT_CAST_LIMITS.characters || tokens.length > EXPLICIT_CAST_LIMITS.tokens)) return false;
     let position = 0;
+    let factorDepth = 0;
     function factor(){
+      if(hasCast && factorDepth >= EXPLICIT_CAST_LIMITS.depth) return false;
+      factorDepth++;
+      try{return factorValue();}finally{factorDepth--;}
+    }
+    function factorValue(){
       const token = tokens[position++];
       if(token === '+' || token === '-') return factor();
       if(token === '('){
+        if(['int','double'].includes(tokens[position]) && tokens[position+1] === ')'){
+          position+=2;return factor();
+        }
         if(!sum() || tokens[position++] !== ')') return false;
         return true;
       }
       if(token?.startsWith("'")) return parseCharacterLiteral(token).ok;
       if(allowArrays && parseSupportedArrayAccess(token)) return true;
-      return token !== undefined && /^(?:[A-Za-z_]\w*|\d+|(?:\d+\.\d*|\.\d+)[fF]?)$/.test(token);
+      return token !== undefined && !C_SYNTAX_TYPES.has(token) && !C_SYNTAX_KEYWORDS.has(token) && /^(?:[A-Za-z_]\w*|\d+|(?:\d+\.\d*|\.\d+)[fF]?)$/.test(token);
     }
     function term(){
       if(!factor()) return false;
@@ -1490,6 +1550,8 @@ function inspectConditionalExpressionSyntax(expression, allowArrays = false){
 }
 
 function evaluateExpression(expr, variables, resolveArrayAccess = null, variableTypes = null){
+  const castBudgetError=explicitCastBudgetError(expr);
+  if(castBudgetError) return {ok:false,error:castBudgetError};
   // 比較式全体を包む冗長な括弧だけを外し、内側の比較を見つけます。
   const normalizedExpr = stripWrappingParentheses(expr);
   const found = findComparison(normalizedExpr);
@@ -1541,6 +1603,7 @@ function evaluateExpression(expr, variables, resolveArrayAccess = null, variable
     type:'int',
     readable:`${left.readable} ${operator} ${right.readable}`,
     usedVars:[...left.usedVars, ...right.usedVars],
+    ...((left.castConversions || right.castConversions) ? {castConversions:[...(left.castConversions || []),...(right.castConversions || [])]} : {}),
     arrayAccess:left.arrayAccess || right.arrayAccess || null,
     arrayAccesses:[...(left.arrayAccesses || []).map(a => ({...a, role:'比較左辺'})), ...(right.arrayAccesses || []).map(a => ({...a, role:'比較右辺'}))],
     comparison:{
@@ -1588,7 +1651,7 @@ function describeComparison(result){
     }
   };
   const conclusion = conclusions[comparison.operator][comparison.conditionMet];
-  return `${escapeHtml(result.readable)} を計算し、左右の値を比較しました。${comparison.conversionNote || ''}${conclusion}`;
+  return `${escapeHtml(result.readable)} を計算し、左右の値を比較しました。${escapeHtml(describeExplicitCastConversions(result))}${comparison.conversionNote || ''}${conclusion}`;
 }
 
 
@@ -1611,8 +1674,8 @@ function makeInitialValueExplanation(name, expr, result, type = 'int', assignedV
       : /^[+-]?(?:\d+\.?\d*|\.\d+)[fF]?$/.test(expr.trim())
         ? '' : `<code>${escapeHtml(expr)}</code> を計算し、`;
     return {
-      analysis:`${learningType}の変数 <code>${name}</code> を作り、${operation}<code>${escapeHtml(value)}</code> を代入しました。`,
-      step:`${name} という${learningType}の箱を作り、${escapeHtml(value)} を代入しました。`
+      analysis:`${learningType}の変数 <code>${name}</code> を作り、${operation}<code>${escapeHtml(value)}</code> を代入しました。${escapeHtml(describeExplicitCastConversions(result))}`,
+      step:`${name} という${learningType}の箱を作り、${escapeHtml(value)} を代入しました。${escapeHtml(describeExplicitCastConversions(result))}`
     };
   }
   if(result.comparison){
@@ -1630,11 +1693,12 @@ function makeInitialValueExplanation(name, expr, result, type = 'int', assignedV
   }
   return {
     analysis:`整数型の変数 <code>${name}</code> を作り、<code>${escapeHtml(expr)}</code> を計算した結果 <code>${result.value}</code> を代入しました。`,
-    step:`${name} という整数型の箱を作り、${escapeHtml(result.readable)} の結果である ${result.value} を代入しました。`
+    step:`${name} という整数型の箱を作り、${escapeHtml(result.readable)} の結果である ${result.value} を代入しました。${escapeHtml(describeExplicitCastConversions(result))}`
   };
 }
 
 // 対応する指定子だけを左から読み、引数との対応を確定してから出力します。
+const MAX_PRINTF_INTEGER_WIDTH = 64;
 function parsePrintfFormat(format){
   const parts = [];
   const specifiers = [];
@@ -1653,15 +1717,17 @@ function parsePrintfFormat(format){
       parts.push({ literal });
       literal = '';
     }
-    const match = format.slice(index).match(/^%(?:\.(\d+))?(l)?([dcf])/);
-    if(!match || (match[3] !== 'f' && (match[1] !== undefined || match[2]))){
-      return { ok:false, error:'このprintf書式は現在未対応です。%d、%c、%f、%lfと、小数点以下0～20桁の%.Nf／%.Nlfを使用してください。' };
+    const match = format.slice(index).match(/^%([1-9]\d*)?(?:\.(\d+))?(l)?([dcf])/);
+    if(!match || (match[4] !== 'f' && (match[2] !== undefined || match[3])) || (match[1] !== undefined && match[4] !== 'd')){
+      return { ok:false, error:'このprintf書式は現在未対応です。%d（最小幅1～64）、%c、%f、%lfと、小数点以下0～20桁の%.Nf／%.Nlfを使用してください。' };
     }
-    const precision = match[1] === undefined ? 6 : Number(match[1]);
-    if(match[1] !== undefined && (!Number.isSafeInteger(precision) || precision > 20)){
+    const width = match[1] === undefined ? undefined : Number(match[1]);
+    if(width !== undefined && (!Number.isSafeInteger(width) || width > MAX_PRINTF_INTEGER_WIDTH)) return {ok:false,error:'整数の最小フィールド幅は、Visualizerの安全上限である1～64にしてください。'};
+    const precision = match[2] === undefined ? 6 : Number(match[2]);
+    if(match[2] !== undefined && (!Number.isSafeInteger(precision) || precision > 20)){
       return { ok:false, error:'小数点以下の表示桁数は、Visualizerの安全上限である0～20桁にしてください。これはC言語自体の制限ではありません。' };
     }
-    const specifier = { type:match[3], precision };
+    const specifier = { type:match[4], precision, ...(width === undefined ? {} : {width}) };
     specifiers.push(specifier);
     parts.push({ specifier });
     index += match[0].length - 1;
@@ -1677,7 +1743,7 @@ function formatPrintfString(parsed, values){
     if(part.literal !== undefined) return part.literal.replace(/\\([nt"\\])/g,
       (_, escaped) => ({n:'\n', t:'\t', '"':'"', '\\':'\\'})[escaped]);
     const value = values[index++];
-    if(part.specifier.type === 'd') return String(value);
+    if(part.specifier.type === 'd') return part.specifier.width === undefined ? String(value) : String(value).padStart(part.specifier.width,' ');
     if(part.specifier.type === 'c') return String.fromCharCode(value);
     const precision = part.specifier.precision;
     // binary64のこの範囲は整数。指数文字列の桁移動ではなく保存値を正確に展開します。
@@ -1799,6 +1865,7 @@ function visualizeCode(){
   const hints = [];
   const executedLines = new Set();
   const warningLines = new Set();
+  let castFailureIndex = null;
   const mainState = createMainExecutionState();
   // 既存の式評価・snapshotは、mainStateが所有する同じ表を参照します。
   const { variables, variableTypes, variableOrder, arrays, arrayOrder } = mainState;
@@ -2063,14 +2130,14 @@ function visualizeCode(){
     if(before === UNINITIALIZED){
       addStep(
         lineNo,
-        `${stepPrefix}${escapeHtml(resolutionExplanation)}${name} の中身に ${escapeHtml(assigned)} を代入しました。計算：${escapeHtml(result.readable)} = ${escapeHtml(assigned)}`,
+        `${stepPrefix}${escapeHtml(resolutionExplanation)}${name} の中身に ${escapeHtml(assigned)} を代入しました。計算：${escapeHtml(result.readable)} = ${escapeHtml(assigned)}${result.castConversions?.length ? ' '+escapeHtml(describeExplicitCastConversions(result)) : ''}`,
         true,
         resultArrayViews(result)
       );
     }else{
       addStep(
         lineNo,
-        `${stepPrefix}${escapeHtml(resolutionExplanation)}${name} の中身を ${escapeHtml(beforeDisplay)} から ${escapeHtml(assigned)} に変えました。計算：${escapeHtml(result.readable)} = ${escapeHtml(assigned)}`,
+        `${stepPrefix}${escapeHtml(resolutionExplanation)}${name} の中身を ${escapeHtml(beforeDisplay)} から ${escapeHtml(assigned)} に変えました。計算：${escapeHtml(result.readable)} = ${escapeHtml(assigned)}${result.castConversions?.length ? ' '+escapeHtml(describeExplicitCastConversions(result)) : ''}`,
         true,
         resultArrayViews(result)
       );
@@ -2150,6 +2217,16 @@ function visualizeCode(){
   }
 
   function processSimpleLine(rawLine, index, insideIf = false, insideFor = false, insideWhile = false, allowConditionalArrayRead = false, loopControl = null){
+    const before=warningLines.size;
+    const result=processSimpleLineUnchecked(rawLine,index,insideIf,insideFor,insideWhile,allowConditionalArrayRead,loopControl);
+    const code=codeOutsideStringAndLineComment(executableLines[index] || '');
+    if(warningLines.size>before && containsExplicitCastCandidate(code)){
+      castFailureIndex=index;
+      return insideIf||insideFor||insideWhile ? 'execution-error' : 'cast-error';
+    }
+    return result;
+  }
+  function processSimpleLineUnchecked(rawLine, index, insideIf = false, insideFor = false, insideWhile = false, allowConditionalArrayRead = false, loopControl = null){
     const lineNo = index + 1;
     const rawTrimmed = rawLine.trim();
     const trimmed = executableLines[index].trim();
@@ -2778,7 +2855,7 @@ function visualizeCode(){
           .filter(value => value !== null);
         addStep(
           lineNo,
-          `${escapeHtml(resolutionExplanation)}画面に「${escapeHtml(visibleText)}」を表示しました。${charDescriptions.length ? ` 文字 ${charDescriptions.join('、')} を出力しました。` : ''}`,
+          `${escapeHtml(resolutionExplanation)}画面に「${escapeHtml(visibleText)}」を表示しました。${charDescriptions.length ? ` 文字 ${charDescriptions.join('、')} を出力しました。` : ''}${results.some(r=>r.castConversions?.length) ? ' '+escapeHtml(results.map(describeExplicitCastConversions).filter(Boolean).join(' ')) : ''}`,
           true,
           makeArrayViews(results.flatMap(result => result.arrayAccesses || []))
         );
@@ -2929,6 +3006,7 @@ function visualizeCode(){
   function validateMainIfStatement(index, structuralCode){
     const trimmed = executableLines[index].trim();
     const unsupported = (title, message) => ({ ok:false, title, message });
+    if(!inspectExplicitCastStatement(trimmed)) return unsupported('明示変換の構文を確認','未選択側を含め、cast式が不正または対応範囲外です。');
     if(hasMultipleStatementsOnOneLine(trimmed)){
       return unsupported('if分岐内の改行を確認', 'if側・else側では1行に1つの文を書いてください。if文全体は実行しません。');
     }
@@ -2939,6 +3017,9 @@ function visualizeCode(){
       return unsupported('分岐内の更新文は未対応', 'if側・else側の更新文は未対応です。if文全体は実行しません。');
     }
     const printfMatch = matchSimplePrintfStatement(trimmed);
+    if(printfMatch && !parsePrintfFormat(printfMatch[1]).ok){
+      return unsupported('printfの書式を確認',parsePrintfFormat(printfMatch[1]).error);
+    }
     if(/^return\s+0\s*;$/.test(structuralCode) ||
        /^[A-Za-z_]\w*\s*=\s*.+;$/.test(structuralCode) || printfMatch){
       return { ok:true };
@@ -2963,6 +3044,9 @@ function visualizeCode(){
   }
 
   function inspectLoopArrayStatement(code, structuralCode, kind){
+    if(!inspectExplicitCastStatement(code)) return {ok:false,matched:false,title:'明示変換の構文を確認',message:'未選択側を含め、cast式が不正または対応範囲外です。'};
+    const printf=matchSimplePrintfStatement(code);
+    if(printf && !parsePrintfFormat(printf[1]).ok) return {ok:false,matched:false,title:'printfの書式を確認',message:parsePrintfFormat(printf[1]).error};
     if(!containsArrayElementSyntax(structuralCode)) return {ok:true, matched:false};
     if(!isSupportedArrayStatement(code)) return {ok:false,
       title:`${kind}文本体の配列操作は未対応`,
@@ -3189,6 +3273,9 @@ function visualizeCode(){
           ? unsupportedNestedIfForm(structuralCode, ifIndex)
           : failure('if文の書き方を確認', '対応範囲を確定できないif文のため、処理全体は実行しません。', ifIndex);
       }
+      if(containsExplicitCastCandidate(headerMatch[1]) && !inspectConditionalExpressionSyntax(headerMatch[1],options.allowArrayRead === true)){
+        return failure('明示変換の構文を確認', '未選択側を含む不正・未対応のcast式があるため、if文全体は実行しません。', ifIndex);
+      }
       if(containsArrayElementSyntax(headerMatch[1]) && !(options.allowArrayRead && depth === 1 && isArrayReadCondition(headerMatch[1]))){
         return failure(
           'if条件での配列要素readはまだ未対応',
@@ -3373,11 +3460,12 @@ function visualizeCode(){
       if(branch.branchKind !== 'else'){
         const evaluated = evaluateExpression(branch.condition, variables, null, variableTypes);
         if(!evaluated.ok){
+          if(containsExplicitCastCandidate(branch.condition)) castFailureIndex=branch.startIndex;
           addAnalysis(analysis, lineNo, `条件チェーンの条件を評価できませんでした。${context.stopOnRuntimeError ? 'プログラムの実行を停止します。' : '残りの分岐は実行しません。'}`);
           addHint(hints, lineNo, 'if文の条件を評価できません', escapeHtml(evaluated.error));
           warningLines.add(lineNo);
           addStep(lineNo, '条件チェーンの条件を評価できないため、残りの分岐は実行しません。');
-          if(context.stopOnRuntimeError){
+          if(context.stopOnRuntimeError || castFailureIndex !== null){
             return { status:'execution-stopped', stopKind:'runtime-error', stopIndex:branch.startIndex,
               reason:`${context.insideWhile ? 'while文' : 'for文'}内のif文で実行を停止したため、この行は実行されませんでした。` };
           }
@@ -3440,8 +3528,9 @@ function visualizeCode(){
     const result = evaluateExpression(node.condition, variables, node.allowArrayRead ? resolveArrayRead : null, variableTypes);
 
     if(!result.ok){
+      if(containsExplicitCastCandidate(node.condition)) castFailureIndex=node.startIndex;
       const skippedTarget = node.hasElse ? 'if側とelse側の処理' : '中の処理';
-      if(stopOnRuntimeError){
+      if(stopOnRuntimeError || castFailureIndex !== null){
         addAnalysis(analysis, lineNo, `${nested ? '入れ子の' : ''}if文の条件 <code>${escapeHtml(node.condition)}</code> を評価できませんでした。${skippedTarget}は実行せず、プログラムの実行を停止します。`);
         addHint(hints, lineNo, `${nested ? '入れ子の' : ''}if文の条件を評価できません`, escapeHtml(result.error));
         warningLines.add(lineNo);
@@ -5131,6 +5220,10 @@ function visualizeCode(){
 
     if(!/^if\s*\(/.test(structuralCode)){
       const result = processSimpleLine(lines[index], index);
+      if(result === 'cast-error'){
+        executionStop={index,stopKind:'runtime-error',reason:'明示変換を含む式を安全に評価できないため、この行は実行されませんでした。'};
+        break;
+      }
       if(result === 'program-ended'){
         programEndIndex = index;
         break;
@@ -5179,6 +5272,10 @@ function visualizeCode(){
     }
 
     const ifResult = executeIfNode(block, { insideFor:false, stopOnRuntimeError:false });
+    if(castFailureIndex !== null){
+      executionStop={index:castFailureIndex,stopKind:'runtime-error',reason:'明示変換を含む式を安全に評価できないため、この行以降は実行されませんでした。'};
+      break;
+    }
     if(ifResult.status === 'program-ended'){
       programEndIndex = ifResult.stopIndex;
       break;

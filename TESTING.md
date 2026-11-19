@@ -52,3 +52,10 @@ L-QA2ではlearning-supportが実タイマーのcloseイベント競合で途中
 EXAM_GATE=2A/2B/2Cは新入口だけの限定段階検査です。全体回帰ではEXAM_GATEとSUITE_ONLYを設定せず全入口を実行してください。旧break/while配列の拒否期待は今回許可した範囲だけ正例へ更新し、診断suiteの旧loop内break拒否2例はcontinue拒否へ置換しました。loop外break、continue、switch、未対応ネスト、不正添字の拒否を維持します。
 
 修正前mainの初回全体実測は32入口/5,660件中5,659 PASS・1 FAIL（INPUT reduced-motionの240ms境界）でした。製品・テストを変更しない独立再確認では当該入口21/21 PASSです。初回失敗記録も保存し、再確認の重複21件を全体件数へ加算しません。今回この表示経路の製品・テストは変更していません。
+
+
+## L-EXAM4
+
+現行の統合runnerは新規`tests-cast-width.cjs`を含む35入口（16 HTML＋14 CJS＋5 Node）です。EXAM4_GATE=4A/4B/4Cは新入口だけの段階選択、無指定は全段階です。全回帰ではSUITE_ONLYと各Stageの_GATE環境変数を外します。castの優先順位/型/安全境界/未実行構文/関数/FLOW、整数幅1～64と禁止flags、原文math診断、別ファイルのmathなし派生7反復、STEP往復/INPUT/履歴と390/900/1440pxを検証します。5951件はL-EXAM3の過去基準であり、今回の実測値は納品TEST_RESULTS.mdを参照。物理スマホ/タブレットは別途未確認です。
+
+旧scalar castのルーティング拒否期待1件だけを合法なP3へ更新し、配列添字cast・関数実引数cast・未知型・副作用等の拒否は維持します。全体件数は基準5951＋新入口の実測125件＝6076件です。段階再検査や公開前プレビューを重複加算しません。

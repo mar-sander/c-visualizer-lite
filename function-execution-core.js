@@ -57,10 +57,11 @@ const FunctionExecutionCore = (() => {
       if(!tokenized.ok) fault('EXPRESSION_SYNTAX',tokenized.error,statement,'validation');
       if(tokenized.tokens.length > limits.expressionTokens) fault('EXPRESSION_LIMIT','式のトークン数が開発用上限を超えています。',statement,'validation',true);
       let depth = 0;
-      for(const token of tokenized.tokens){
+      for(const [index,token] of tokenized.tokens.entries()){
         if(token === '(' && ++depth > limits.expressionDepth) fault('EXPRESSION_DEPTH','式の括弧が開発用深さ上限を超えています。',statement,'validation',true);
         if(token === ')') depth--;
-        if(C_SYNTAX_KEYWORDS.has(token) || C_SYNTAX_TYPES.has(token)) fault('UNSUPPORTED_EXPRESSION','この式はL-FUNC3の対応範囲外です。',statement,'validation');
+        const castType=['int','double'].includes(token)&&tokenized.tokens[index-1]==='('&&tokenized.tokens[index+1]===')';
+        if((C_SYNTAX_KEYWORDS.has(token) || C_SYNTAX_TYPES.has(token))&&!castType) fault('UNSUPPORTED_EXPRESSION','この式はL-FUNC3の対応範囲外です。',statement,'validation');
       }
       if(!inspectConditionalExpressionSyntax(expr)) fault('EXPRESSION_SYNTAX','式の構文が不正または関数コアの対応範囲外です。',statement,'validation');
     }
@@ -84,28 +85,30 @@ const FunctionExecutionCore = (() => {
       for(const item of statement.declarators){
         if(hasOwnSymbol(staging.variables,item.name)) fault('DUPLICATE_LOCAL','仮引数または局所変数の名前が重複しています。',statement);
         let value = UNINITIALIZED;
+        let castConversions = [];
         if(item.expr !== undefined){
           const result = expressionValue(item.expr,{state:staging},statement,false);
+          castConversions=result.castConversions || [];
           const converted = convertScalarValue(result.value,statement.type);
           if(!converted.ok) fault('VALUE_RANGE',converted.error,statement);
           value = converted.value;
         }
         staging.variables[item.name] = value; staging.variableTypes[item.name] = statement.type;
-        pending.push({name:item.name,value});
+        pending.push({name:item.name,value,castConversions});
       }
-      for(const item of pending){declareExecutionScalar(state,item.name,item.value,statement.type);emit('declare',statement,{target:item.name});}
+      for(const item of pending){declareExecutionScalar(state,item.name,item.value,statement.type);emit('declare',statement,{target:item.name,...(item.castConversions.length?{castConversions:item.castConversions}:{})});}
     }
     function assign(frame, statement){
       if(!hasOwnSymbol(frame.state.variables,statement.name)) fault('UNDECLARED_TARGET','代入先がこのスコープで宣言されていません。',statement);
       const result = expressionValue(statement.expr,frame,statement,false);
-      saveValue(frame,statement.name,result.value,statement);emit('assign',statement,{target:statement.name});
+      saveValue(frame,statement.name,result.value,statement);emit('assign',statement,{target:statement.name,...(result.castConversions?.length?{castConversions:result.castConversions}:{})});
     }
     function print(statement){
       const args = evaluatePrintfArguments(statement.parsedFormat,statement.args,main.state);
       if(!args.ok) fault('PRINTF_VALUE',args.error,statement);
       const formatted = formatPrintfString(statement.parsedFormat,args.values);
       if(output.length+formatted.text.length > limits.outputCharacters) fault('OUTPUT_LIMIT','共通出力が開発用の文字数上限を超えます。',statement,'runtime',true);
-      output += formatted.text;emit('printf',statement);
+      output += formatted.text;const castConversions=args.results.flatMap(r=>r.castConversions||[]);emit('printf',statement,castConversions.length?{castConversions}:{});
     }
     function readInput(statement){
       const name=statement.name;
@@ -286,7 +289,7 @@ const FunctionExecutionCore = (() => {
         if(node.kind==='branch'){
           for(const operand of node.operands)expressionValue(operand,active,node,false);
           const evaluated=expressionValue(node.condition,active,node,false),conditionMet=evaluated.value!==0;
-          emit('branch-decision',node,{branchDecision:{condition:node.condition,conditionMet,selectedBranch:conditionMet?'if':'else',comparison:evaluated.comparison ? {...evaluated.comparison} : null}});
+          emit('branch-decision',node,{branchDecision:{condition:node.condition,conditionMet,selectedBranch:conditionMet?'if':'else',comparison:evaluated.comparison ? {...evaluated.comparison} : null},...(evaluated.castConversions?.length?{castConversions:evaluated.castConversions}: {})});
           node=conditionMet?node.ifReturn:node.elseReturn;tick(node);
         }
         if(node.kind==='declare')declare(active,node);
@@ -294,7 +297,7 @@ const FunctionExecutionCore = (() => {
         else if(node.kind==='return'){
           const result=expressionValue(node.expr,active,node,false),converted=convertScalarValue(result.value,signature.returnType);
           if(!converted.ok)fault('RETURN_VALUE',converted.error,node);
-          control={kind:'return',value:converted.value,type:signature.returnType};emit('return',node,{returnValue:control.value,returnType:control.type,returnDisplay:displayScalarValue(control.value,control.type),returnExpression:{expression:node.expr,type:result.type,value:result.value,display:displayScalarValue(result.value,result.type)}});break;
+          control={kind:'return',value:converted.value,type:signature.returnType};emit('return',node,{returnValue:control.value,returnType:control.type,returnDisplay:displayScalarValue(control.value,control.type),returnExpression:{expression:node.expr,type:result.type,value:result.value,display:displayScalarValue(result.value,result.type)},...(result.castConversions?.length?{castConversions:result.castConversions}:{})});break;
         }
       }
       if(control.kind!=='return')fault('MISSING_RETURN','戻り値が確定しませんでした。',statement);
