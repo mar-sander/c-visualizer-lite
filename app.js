@@ -1567,6 +1567,7 @@ function buildResultTranscript(result){
   }
 
   for(const step of result.steps){
+    if(step.stepKind === 'safety-stop') continue;
     // 省略STEPも、省略区間末尾に到達した時点のsnapshotから出力を取り込みます。
     const output = step.outputAtStep;
     appendOutput(output.slice(previousOutput.length));
@@ -1605,6 +1606,7 @@ function buildResultSegments(result){
     append('output', key, text);
   }
   result.steps.forEach((step, index) => {
+    if(step.stepKind === 'safety-stop') return; // Reserved marker has no duplicated output/snapshot.
     const key = index + ':' + step.lineNo;
     appendOutput(step.outputAtStep.slice(previousOutput.length), key);
     previousOutput = step.outputAtStep;
@@ -1806,12 +1808,31 @@ function showFailure(result){
   markErrorLines(warnings, result.diagnostics);
   if(!warnings.length) warnings.push('対応範囲で処理の流れを確認できませんでした。入力を見直してください。');
   const box = element('div', 'failure-state');
-  box.append(element('h3', '', '確認が必要です'));
+  box.append(element('h3', '', result.executionStop?.stopKind === 'recording-budget' ? '安全上限で停止しました' : '確認が必要です'));
   for(const warning of warnings) box.append(element('p', '', warning));
   // 安全上限の実際のTRUE判定を失敗画面で示します。通常STEPや成功RESULTには進めません。
   const limitStep = result.steps?.findLast(step => step.loopDecision?.kind === 'while' && step.loopDecision.nextAction === 'limit');
   if(limitStep) box.append(renderWhileDecisionStep(limitStep.loopDecision));
-  if(result.output) box.append(element('p', 'partial-output', `停止までの出力：${result.output}`));
+  if(result.executionStop?.stopKind === 'recording-budget'){
+    const terminal = result.steps?.findLast(step=>step.stepKind === 'safety-stop');
+    box.append(element('p','recording-stop-detail',terminal?.text || '総記録量の安全上限で停止しました。'));
+    const accepted = (result.steps || []).filter(step=>step.stepKind !== 'safety-stop');
+    const details = document.createElement('details');
+    details.className = 'recording-stop-flow';
+    details.append(element('summary','','停止までのFLOW（確定済み処理）'));
+    for(const step of accepted){
+      const item = element('div','flow-detail');
+      item.append(element('strong','',`STEP ${step.step}・${step.lineNo}行目：`));
+      const description = document.createElement('span');
+      description.innerHTML = step.text;
+      item.append(description);
+      appendRecordedPrintfOutput(item, step);
+      details.append(item);
+    }
+    box.append(details);
+  }
+  const outputLabel = result.executionStop || result.engine === 'function' ? '停止までの出力：' : '実行できた部分の出力：';
+  if(result.output) box.append(element('p', 'partial-output', `${outputLabel}${result.output}`));
   flow.replaceChildren(box);
   $('step-controls').hidden = true;
   outputCard.hidden = true;
@@ -1921,6 +1942,7 @@ const showFunctionAssistDiagnostic = function(route){
 const adaptFunctionAssistResult = function(result){
   return {
     output:result.output,
+    executionStop:result.ok === false ? {stopKind:'function-stop'} : null,
     variables:result.variables.map(variable => [variable.name, variable.display]),
     arrays:[],
     learningHints:{},
