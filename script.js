@@ -1785,9 +1785,9 @@ function parsePrintfFormat(format){
   return { ok:true, parts, specifiers };
 }
 
-function formatPrintfString(parsed, values){
-  let index = 0;
-  const text = parsed.parts.map(part => {
+function formatPrintfString(parsed, values, checkLength = null){
+  let index = 0, length = 0;
+  function formatPart(part){
     // 一回の走査で既存の対応escapeだけを復号し、生成した文字を再解釈しません。
     if(part.literal !== undefined) return part.literal.replace(/\\([nt"\\])/g,
       (_, escaped) => ({n:'\n', t:'\t', '"':'"', '\\':'\\'})[escaped]);
@@ -1801,7 +1801,15 @@ function formatPrintfString(parsed, values){
       return BigInt(value).toString() + (precision ? '.' + '0'.repeat(precision) : '');
     }
     return (Object.is(value, -0) ? '-' : '') + value.toFixed(precision);
-  }).join('');
+  }
+  const parts = [];
+  for(const part of parsed.parts){
+    const piece = formatPart(part);
+    length += piece.length;
+    if(checkLength) checkLength(length);
+    parts.push(piece);
+  }
+  const text = parts.join('');
   return { text, usedCount:index };
 }
 
@@ -1900,11 +1908,41 @@ function evaluatePrintfArguments(parsedFormat, args, state, resolveArrayRead = n
   return { ok, error, failedResult, values, results };
 }
 
+// Immutable production limits; tests substitute this declaration in an isolated response.
+const NORMAL_RECORDING_LIMITS = Object.freeze({steps:5000, outputCharacters:65536,
+  outputSnapshotCharacters:33554432, snapshotCells:250000, metadataCharacters:2000000,
+  sourceCharacters:60000, sourceLines:2000, inputCharacters:60000});
+const NORMAL_RECORDING_LABELS = Object.freeze({steps:'STEP記録数',outputCharacters:'出力文字数',
+  outputSnapshotCharacters:'STEPに保存する出力の累計文字数',snapshotCells:'変数・配列の記録セル数',
+  metadataCharacters:'FLOW・説明の記録量',sourceCharacters:'コードの文字数',sourceLines:'コードの行数',inputCharacters:'入力の文字数'});
+class NormalRecordingFault extends Error {
+  constructor(resource, limit, attempted, lineNo){
+    super('通常解析の総記録量安全上限');
+    Object.assign(this, {resource, limit, attempted, lineNo});
+  }
+}
 function visualizeCode(){return SafeMathBuiltins.withBudget(visualizeCodeUnchecked);}
 function visualizeCodeUnchecked(){
+  window.cVisualizerLiteResult = null;
   updateCodeEditor();
   const code = document.getElementById('codeInput').value.replace(/\r\n/g, '\n');
   const scanfInput = document.getElementById('scanfInput');
+  const rawInput = String(scanfInput?.value || '');
+  const sourceLines = code.split('\n').length;
+  const admission = code.length > NORMAL_RECORDING_LIMITS.sourceCharacters ? ['sourceCharacters',code.length]
+    : sourceLines > NORMAL_RECORDING_LIMITS.sourceLines ? ['sourceLines',sourceLines]
+    : rawInput.length > NORMAL_RECORDING_LIMITS.inputCharacters ? ['inputCharacters',rawInput.length] : null;
+  if(admission){
+    const [resource,attempted] = admission, limit = NORMAL_RECORDING_LIMITS[resource];
+    const text = `通常解析の総記録量を安全に制限するため、解析前に停止しました（${NORMAL_RECORDING_LABELS[resource]}: 上限 ${limit}、要求 ${attempted}）。C言語自体の制限ではありません。`;
+    window.cVisualizerLiteResult = {steps:[{step:1,lineNo:1,text,stepKind:'safety-stop',lastCompletedStep:0}],
+      output:'',variables:[],arrays:[],variableTypes:{},hasMain:false,hasWarnings:true,inputRequired:false,inputRequest:null,
+      executionStop:{stopKind:'recording-budget',lineNo:1,resource,limit,attempted,lastCompletedStep:0},
+      recordingBudget:{limits:{...NORMAL_RECORDING_LIMITS},used:{steps:0,outputCharacters:0,outputSnapshotCharacters:0,snapshotCells:0,metadataCharacters:0}},
+      learningHints:{},diagnostics:[{lineNo:1,title:'総記録量の安全上限で停止',message:text}],warningText:[text]};
+    for(const id of ['outputResult','variableState','stepResult','codePreview','hintResult']) document.getElementById(id).textContent = '';
+    return;
+  }
   const scanfValues = String(scanfInput?.value || '')
     .replace(/\r\n/g, '\n')
     .split('\n');
@@ -1936,6 +1974,40 @@ function visualizeCodeUnchecked(){
   let successfulScanfCount = 0;
   let inputRequest = null;
   let stepNo = 1;
+  const recordingUsed = {steps:0, outputCharacters:0, outputSnapshotCharacters:0, snapshotCells:0, metadataCharacters:0};
+  let recordingActive = false, recordingLine = 1, recordingStop = null, committedOutput = '';
+  const tentativeUndo = [];
+  function chargeRecording(resource, amount){
+    if(!recordingActive) return;
+    const attempted = recordingUsed[resource] + amount;
+    if(attempted > NORMAL_RECORDING_LIMITS[resource]) throw new NormalRecordingFault(resource,NORMAL_RECORDING_LIMITS[resource],attempted,recordingLine);
+    recordingUsed[resource] = attempted;
+  }
+  // Shadow only the normal engine's recording helpers; core/shared helpers are unchanged.
+  function addAnalysis(map, lineNo, text){
+    recordingLine = lineNo;
+    chargeRecording('metadataCharacters', text.length + 16);
+    const entries = map[lineNo], length = entries?.length || 0;
+    if(recordingActive) tentativeUndo.push(()=>{if(entries){entries.length=length;map[lineNo]=entries;}else delete map[lineNo];});
+    if(!map[lineNo]) map[lineNo] = [];
+    map[lineNo].push(text);
+  }
+  function addHint(list, lineNo, title, text){
+    recordingLine = lineNo || recordingLine;
+    chargeRecording('metadataCharacters', 2*(title.length + text.length) + 160);
+    const prefix = lineNo ? `${lineNo}行目：` : '';
+    list.push(`<div class="warning-line"><strong>${prefix}${title}</strong><br>${text}</div>`);
+    (list.diagnostics ??= []).push({lineNo:lineNo ?? null,title,message:text});
+  }
+  function copyOmittedScalarSnapshot(pairs){
+    chargeRecording('snapshotCells', pairs.length);
+    return pairs.map(([name,value])=>[name,value]);
+  }
+  function journalScalar(name){
+    if(!recordingActive) return;
+    const exists = hasOwnSymbol(variables,name), value = variables[name], type = variableTypes[name], length = variableOrder.length;
+    tentativeUndo.push(()=>{if(exists){variables[name]=value;variableTypes[name]=type;}else{delete variables[name];delete variableTypes[name];}variableOrder.length=length;});
+  }
 
   for(let index = 0; index < executableLines.length; index++){
     for(const ch of bracesOutsideString(executableLines[index])){
@@ -1948,10 +2020,12 @@ function visualizeCodeUnchecked(){
   }
 
   function declareScalar(name, value, type){
+    journalScalar(name);
     declareExecutionScalar(mainState, name, value, type);
   }
 
   function setScalarValue(name, value){
+    journalScalar(name);
     setExecutionScalarValue(mainState, name, value);
   }
 
@@ -1972,6 +2046,8 @@ function visualizeCodeUnchecked(){
   }
 
   function rememberArray(name, arrayState){
+    const exists = hasOwnSymbol(arrays,name), old = arrays[name], length = arrayOrder.length;
+    if(recordingActive) tentativeUndo.push(()=>{if(exists) arrays[name]=old;else delete arrays[name];arrayOrder.length=length;});
     if(!hasOwnSymbol(mainState.arrays, name)) mainState.arrayOrder.push(name);
     mainState.arrays[name] = arrayState;
   }
@@ -1979,6 +2055,8 @@ function visualizeCodeUnchecked(){
   function makeArrayView(access, isDeclaration = false){
     const array = arrays[access.name];
     if(!array) return null;
+    chargeRecording('snapshotCells', array.length);
+    chargeRecording('metadataCharacters',access.name.length+JSON.stringify(access).length+64);
     return {
       name:access.name,
       type:array.type,
@@ -2109,23 +2187,38 @@ function visualizeCodeUnchecked(){
     return `${access.indexVariable}の値は${access.resolvedIndex}です。そのため、${access.name}[${access.sourceIndex}]は${access.name}[${access.resolvedIndex}]を表します。`;
   }
 
-  function addStep(lineNo, text, markAsExecuted = true, arrayViews = [], branchDecision = null, scanfInputData = null, loopDecision = null){
+  function addStep(lineNo, text, markAsExecuted = true, arrayViews = [], branchDecision = null, scanfInputData = null, loopDecision = null, extra = {}){
+    recordingLine = lineNo;
+    chargeRecording('steps', 1);
+    chargeRecording('outputSnapshotCharacters', output.length);
+    chargeRecording('snapshotCells', variableOrder.length);
     const expressionDecision = branchDecision || loopDecision;
     const expressionDetails = expressionDecision ? describeExpressionDetails(expressionDecision) : '';
     if(expressionDetails) text += '<br>'+escapeHtml(expressionDetails);
     const conversionNote = branchDecision?.conversionNote || loopDecision?.conversionNote;
-    const step = { step:stepNo++, lineNo, text:conversionNote ? `${text}<br>${escapeHtml(conversionNote)}` : text };
+    chargeRecording('metadataCharacters', text.length + 64 + (branchDecision ? JSON.stringify(branchDecision).length : 0) + (loopDecision ? JSON.stringify(loopDecision).length : 0) + (scanfInputData ? JSON.stringify(scanfInputData).length : 0));
+    chargeRecording('metadataCharacters', JSON.stringify(extra).length + (conversionNote ? escapeHtml(conversionNote).length+4 : 0));
+    const step = { ...extra, step:stepNo++, lineNo, text:conversionNote ? `${text}<br>${escapeHtml(conversionNote)}` : text };
     if(arrayViews.length) step.arrayViews = arrayViews;
     if(branchDecision) step.branchDecision = branchDecision;
     if(scanfInputData) step.scanfInput = scanfInputData;
     if(loopDecision) step.loopDecision = loopDecision;
     // Lite UI用：STEPを記録した瞬間の状態です。後のprintfや代入を遡及させません。
     step.outputAtStep = output;
-    step.variablesAtStep = variableOrder.map(name => [
-      name, scalarDisplay(name)
-    ]);
+    step.variablesAtStep = variableOrder.map(name => {
+      const value = scalarDisplay(name);
+      chargeRecording('metadataCharacters',name.length+value.length+16);
+      return [name,value];
+    });
     steps.push(step);
+    committedOutput = output;
+    tentativeUndo.length = 0;
     if(markAsExecuted) executedLines.add(lineNo);
+  }
+
+  function addStepWithExtra(extra, ...args){
+    while(args.length < 7) args.push(undefined);
+    addStep(...args, extra);
   }
 
   // main直下・for初期化・for更新で同じ代入処理を共有します。
@@ -2312,10 +2405,8 @@ function visualizeCodeUnchecked(){
         : '残りの本体と、このwhileの次の条件判定は実行しません。';
       const message = `${escapeHtml(reason)}。breakを実行しました。${loopControl.headerLineNo}～${loopControl.endLineNo}行目の${loopControl.kind}だけを終了し、${loopControl.nextLineNo}行目以降へ進みます。${skipped}`;
       addAnalysis(analysis, lineNo, message);
-      addStep(lineNo, message);
-      Object.assign(steps[steps.length - 1], { stepKind:'loop-break',
-        breakDecision:{...loopControl, conditions, breakLineNo:lineNo,
-          exitReason:'break', skipsUpdate:loopControl.kind === 'for', skipsNextCondition:true} });
+      addStepWithExtra({stepKind:'loop-break', breakDecision:{...loopControl, conditions, breakLineNo:lineNo,exitReason:'break', skipsUpdate:loopControl.kind === 'for', skipsNextCondition:true}}, lineNo, message);
+      
       return { status:'break', ownerLoopId:loopControl.sourceId, stopIndex:index };
     }
 
@@ -2390,8 +2481,8 @@ function visualizeCodeUnchecked(){
         }else{
           declareScalar(item.name, item.value, 'int');
           const explanation = item.expr === undefined ? {analysis:item.name + ' は未初期化のint変数です。', step:item.name + ' の箱を作りました。中身はまだ入っていません。'} : makeInitialValueExplanation(item.name, item.expr, item.result, 'int', item.value);
-          addAnalysis(analysis, lineNo, explanation.analysis); addStep(lineNo, explanation.step);
-          steps[steps.length - 1].initialization = explanation.initialization;
+          addAnalysis(analysis, lineNo, explanation.analysis); addStepWithExtra({initialization:explanation.initialization}, lineNo, explanation.step);
+          
         }
       }
       return;
@@ -2499,6 +2590,7 @@ function visualizeCodeUnchecked(){
           return stopArrayLine('この配列への代入は未対応', 'int配列には、現在の対応範囲にある整数式だけを代入してください。');
         }
         const previousValue = location.array.values[location.access.resolvedIndex];
+        tentativeUndo.push(()=>{location.array.values[location.access.resolvedIndex]=previousValue;});
         location.array.values[location.access.resolvedIndex] = result.value;
         const writeAccess = {
           ...location.access,
@@ -2512,13 +2604,13 @@ function visualizeCodeUnchecked(){
           lineNo,
           `${escapeHtml(resolutionExplanation)}<code>${access.name}[${writeAccess.resolvedIndex}]</code> は配列 <code>${access.name}</code> の${writeAccess.resolvedIndex}番の要素です。その要素へ <code>${result.value}</code> を代入しました。`
         );
-        addStep(
+        addStepWithExtra(expressionMetadata(result), 
           lineNo,
           `${escapeHtml(resolutionExplanation)}代入元：${escapeHtml(expr)}（${escapeHtml(result.readable)} = ${result.value}）。代入先：${access.name}[${writeAccess.resolvedIndex}]。${previousValue === UNINITIALIZED ? "未初期化" : previousValue} → ${result.value}。${escapeHtml(describeExpressionDetails(result))}`,
           true,
           makeArrayViews([...(result.arrayAccesses || []).map(a => ({...a, role:'代入元'})), {...writeAccess, ...(result.arrayAccesses?.length ? {role:'代入先'} : {})}])
         );
-        Object.assign(steps[steps.length - 1], expressionMetadata(result));
+        
         return;
       }
 
@@ -2761,8 +2853,8 @@ function visualizeCodeUnchecked(){
         }else{
           const explanation = makeInitialValueExplanation(item.name, item.expr, item.result, multipleDeclaration.type, item.value);
           addAnalysis(analysis, lineNo, explanation.analysis);
-          addStep(lineNo, explanation.step);
-          steps[steps.length - 1].initialization = explanation.initialization;
+          addStepWithExtra({initialization:explanation.initialization}, lineNo, explanation.step);
+          
         }
       }
       return;
@@ -2819,13 +2911,13 @@ function visualizeCodeUnchecked(){
         const explanation = makeInitialValueExplanation(name, expr, result, declarationType, converted.value);
         const resolutionExplanation = describeVariableIndexResolution(result.arrayAccess);
         addAnalysis(analysis, lineNo, `${escapeHtml(resolutionExplanation)}${explanation.analysis}`);
-        addStep(
+        addStepWithExtra({initialization:explanation.initialization}, 
           lineNo,
           `${escapeHtml(resolutionExplanation)}${explanation.step}`,
           true,
           resultArrayViews(result)
         );
-        steps[steps.length - 1].initialization = explanation.initialization;
+        
       }else{
         if(hasSupportedArrayRead){
           const errorContext = getArrayExpressionErrorContext(result);
@@ -2883,8 +2975,12 @@ function visualizeCodeUnchecked(){
         parsedFormat, args, mainState, hasSupportedArrayRead ? resolveArrayRead : null
       );
       if(ok){
-        const formatted = formatPrintfString(parsedFormat, values);
+        const formatted = formatPrintfString(parsedFormat, values, length=>{
+          if(output.length + length > NORMAL_RECORDING_LIMITS.outputCharacters)
+            throw new NormalRecordingFault('outputCharacters', NORMAL_RECORDING_LIMITS.outputCharacters, output.length + length, lineNo);
+        });
         output += formatted.text;
+        recordingUsed.outputCharacters = output.length;
         const visibleText = makeVisibleDisplayText(formatted.text);
         let explanation;
         if(args.length){
@@ -2910,13 +3006,13 @@ function visualizeCodeUnchecked(){
         const charDescriptions = parsedFormat.specifiers
           .map((specifier, i) => specifier.type === 'c' ? escapeHtml(displayScalarValue(values[i], 'char')) : null)
           .filter(value => value !== null);
-        addStep(
+        addStepWithExtra({printfOutput:{text:formatted.text}}, 
           lineNo,
           `${escapeHtml(resolutionExplanation)}画面に「${escapeHtml(visibleText)}」を表示しました。${charDescriptions.length ? ` 文字 ${charDescriptions.join('、')} を出力しました。` : ''}${results.some(r=>r.castConversions?.length || r.mathCalls?.length) ? ' '+escapeHtml(results.map(describeExpressionDetails).filter(Boolean).join(' ')) : ''}`,
           true,
           makeArrayViews(results.flatMap(result => result.arrayAccesses || []))
         );
-        steps[steps.length - 1].printfOutput = {text:formatted.text};
+        
       }else{
         if(hasSupportedArrayRead){
           const errorContext = getArrayExpressionErrorContext(failedResult || {});
@@ -4215,6 +4311,7 @@ function visualizeCodeUnchecked(){
     const lastLineNo = node.endIndex + 1;
 
     function snapshot(){
+      chargeRecording('metadataCharacters', (lastLineNo-firstLineNo+1)*24 + 64);
       const analysisLengths = {};
       for(let lineNo = firstLineNo; lineNo <= lastLineNo; lineNo++){
         analysisLengths[lineNo] = (analysis[lineNo] || []).length;
@@ -4227,6 +4324,7 @@ function visualizeCodeUnchecked(){
     }
 
     function finishIteration(activeIteration){
+      chargeRecording('metadataCharacters', 64);
       iterationRecords.push({
         iterationNumber:activeIteration.iterationNumber,
         before:activeIteration.before,
@@ -4313,7 +4411,7 @@ function visualizeCodeUnchecked(){
             omittedRange:{first:omittedFirst, last:omittedLast, kind:'while', sourceLine:firstLineNo},
             ...(lastRecord.before.arrayViews.length ? {arrayViews:lastRecord.before.arrayViews} : {}),
             outputAtStep:omittedState.outputAtStep,
-            variablesAtStep:omittedState.variablesAtStep.map(([name, value]) => [name, value])
+            variablesAtStep:copyOmittedScalarSnapshot(omittedState.variablesAtStep)
           });
         }
       }
@@ -4775,6 +4873,7 @@ function visualizeCodeUnchecked(){
     }
 
     function snapshot(){
+      chargeRecording('metadataCharacters', (lastLineNo-firstLineNo+1)*24 + 64);
       const analysisLengths = {};
       for(let lineNo = firstLineNo; lineNo <= lastLineNo; lineNo++){
         analysisLengths[lineNo] = (analysis[lineNo] || []).length;
@@ -4788,6 +4887,7 @@ function visualizeCodeUnchecked(){
     }
 
     function finishIteration(activeIteration){
+      chargeRecording('metadataCharacters', 64);
       iterationRecords.push({
         iterationNumber:activeIteration.iterationNumber,
         before:activeIteration.before,
@@ -4900,7 +5000,7 @@ function visualizeCodeUnchecked(){
             // 最終表示反復の開始直前＝省略区間終了時。強調を持ち越しません。
             ...(lastRecord.before.arrayViews.length ? {arrayViews:lastRecord.before.arrayViews} : {}),
             outputAtStep:omittedState.outputAtStep,
-            variablesAtStep:omittedState.variablesAtStep.map(([name, value]) => [name, value])
+            variablesAtStep:copyOmittedScalarSnapshot(omittedState.variablesAtStep)
           });
         }
       }
@@ -5209,7 +5309,10 @@ function visualizeCodeUnchecked(){
   const executionStartIndex = mainRange?.closed ? mainRange.startIndex + 1 : 0;
   const executionEndIndex = mainRange?.closed ? mainRange.endIndex : 0;
 
+  recordingActive = true;
+  try{
   for(let index = executionStartIndex; index < executionEndIndex; index++){
+    recordingLine = index + 1;
     if(executionStop !== null) break;
     const trimmed = executableLines[index].trim();
     const structuralCode = codeOutsideStringAndLineComment(executableLines[index]).trim();
@@ -5355,6 +5458,27 @@ function visualizeCodeUnchecked(){
     index = block.endIndex;
   }
 
+  }catch(error){
+    if(!(error instanceof NormalRecordingFault)) throw error;
+    recordingActive = false;
+    for(let i=tentativeUndo.length-1;i>=0;i--) tentativeUndo[i]();
+    tentativeUndo.length = 0;
+    output = committedOutput;
+    recordingUsed.outputCharacters = output.length;
+    inputRequest = null;
+    const last = steps[steps.length-1];
+    recordingStop = {stopKind:'recording-budget',resource:error.resource,limit:error.limit,attempted:error.attempted,
+      lineNo:error.lineNo,lastCompletedStep:steps.length,lastCompletedLineNo:last?.lineNo ?? null};
+    const text = `総記録量の安全上限で停止しました（${NORMAL_RECORDING_LABELS[error.resource]}: 上限 ${error.limit}、要求 ${error.attempted}）。${error.lineNo}行目の未確定処理は反映していません。最後に確定した処理は${last ? `${last.lineNo}行目のSTEP` : 'ありません'}。後続は実行しません。C言語自体の制限ではありません。`;
+    steps.push({step:steps.length+1,lineNo:error.lineNo,text,stepKind:'safety-stop',lastCompletedStep:steps.length});
+    warningLines.add(error.lineNo);
+    addHint(hints,error.lineNo,'総記録量の安全上限で停止',text);
+    executionStop = {index:error.lineNo-1,stopKind:'recording-budget',reason:text};
+    programEndIndex = null;
+    scanfStopIndex = null;
+  }
+  recordingActive = false;
+
   if(programEndIndex !== null){
     for(let index = programEndIndex + 1; index < executionEndIndex; index++){
       addAnalysis(analysis, index + 1, 'プログラムが終了した後なので、この行は実行されませんでした。');
@@ -5367,7 +5491,7 @@ function visualizeCodeUnchecked(){
     }
   }
 
-  if(executionStop !== null){
+  if(executionStop !== null && !recordingStop){
     for(let index = executionStop.index + 1; index < executionEndIndex; index++){
       addAnalysis(analysis, index + 1, executionStop.reason);
     }
@@ -5539,6 +5663,9 @@ function visualizeCodeUnchecked(){
     ]),
     variableTypes:{ ...variableTypes },
     learningHints:{ missingReturnZero },
+    executionStop:recordingStop || (executionStop ? {stopKind:executionStop.stopKind,lineNo:executionStop.index+1}
+      : scanfStopIndex !== null && !inputRequest ? {stopKind:'input-error',lineNo:scanfStopIndex+1} : null),
+    recordingBudget:{limits:{...NORMAL_RECORDING_LIMITS},used:{...recordingUsed}},
     hasMain,
     hasWarnings,
     inputRequired,
