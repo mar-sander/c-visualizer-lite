@@ -708,7 +708,7 @@
         name:'scanf・2回を入力順に消費',
         code:`#include <stdio.h>\n\nint main(void){\n    int a;\n    int b;\n    scanf("%d", &a);\n    scanf("%d", &b);\n    printf("%d\\n", a + b);\n    return 0;\n}`,
         input:`10\n20`,
-        expect:{ output:'30', variables:['a = 10', 'b = 20'], warningMax:0, stepsInOrder:['入力値 10', '入力値 20', '画面に「30」'] }
+        expect:{ output:'30', variables:['a = 10', 'b = 20'], warningMax:0, stepsInOrder:['入力値 10', '入力値 20', '画面に「30\n」'] }
       },
       {
         name:'scanf・間に別処理があっても入力順を維持',

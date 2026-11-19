@@ -111,7 +111,7 @@ const FunctionExecutionCore = (() => {
       if(!args.ok) fault('PRINTF_VALUE',args.error,statement);
       const formatted = formatPrintfString(statement.parsedFormat,args.values);
       if(output.length+formatted.text.length > limits.outputCharacters) fault('OUTPUT_LIMIT','共通出力が開発用の文字数上限を超えます。',statement,'runtime',true);
-      output += formatted.text;const castConversions=args.results.flatMap(r=>r.castConversions||[]),mathCalls=args.results.flatMap(r=>r.mathCalls||[]);emit('printf',statement,expressionMetadata({castConversions,mathCalls}));
+      output += formatted.text;const castConversions=args.results.flatMap(r=>r.castConversions||[]),mathCalls=args.results.flatMap(r=>r.mathCalls||[]);emit('printf',statement,{...expressionMetadata({castConversions,mathCalls}),printfOutput:{text:formatted.text}});
     }
     function readInput(statement){
       const name=statement.name;
