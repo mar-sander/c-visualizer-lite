@@ -90,11 +90,11 @@ const FunctionPreflightTests = (() => {
     ['ポインタ戻り値','int *kasan(int a,int b);','int *kasan(int a,int b){return 0;}'],
     ['ポインタ引数','int kasan(int *a,int b);','int kasan(int *a,int b){return b;}'],
     ['配列引数','int kasan(int a[],int b);','int kasan(int a[],int b){return b;}'],
-    ['void仮引数','int kasan(void);','int kasan(void){return 0;}'],
     ['引数なし旧形式','int kasan();','int kasan(){return 0;}'],
     ['無名の定義引数','int kasan(int,int);','int kasan(int,int){return 0;}'],
     ['可変長引数','int kasan(int a,...);','int kasan(int a,...){return a;}']
   ]) add(label,proto+'\n'+main('')+'\n'+def,'UNSUPPORTED','FUNCTION_SIGNATURE_UNSUPPORTED');
+  add('void単独は0引数', 'int kasan(void);\n'+main('')+'\nint kasan(void){return 0;}', 'DEFINITE', null, result=>result.functions.find(f=>f.name==='kasan').descriptor.parameterTypes.length===0);
   for(const [label,body,code] of [
     ['式中呼出','s=1+kasan(2,5);','CALL_CONTEXT_UNSUPPORTED'],
     ['printf引数内呼出','printf("%d",kasan(2,5));','CALL_CONTEXT_UNSUPPORTED'],
@@ -141,7 +141,7 @@ const FunctionPreflightTests = (() => {
   add('行コメントの前処理行継続','// comment \\\n'+main(''),'UNSUPPORTED','LINE_SPLICE_UNSUPPORTED');
   add('既存配列readで初期化したスカラー',withCall('int a[1]={0};\nint x=a[0];\nx=kasan(2,5);'),'DEFINITE');
   add('符号付きリテラル引数',withCall('s=kasan(-2,+5);'),'DEFINITE');
-  add('floatリテラルは整数形にしない',withCall('s=kasan(1.5,2);'),'UNSUPPORTED','ARGUMENT_FORM_UNSUPPORTED');
+  add('doubleリテラルは型変換へ渡す',withCall('s=kasan(1.5,2);'),'DEFINITE');
   add('未定義呼出と未対応の優先順位','#define X 1\n'+main('foo(1,2);'),'UNKNOWN_CALL','PREPROCESSOR_UNSUPPORTED');
   add('コメント付きinclude','#include <stdio.h> // comment\n'+main(''),'NONE');
   add('関数名の途中にコメント',sum.replaceAll('kasan(', 'kasan /* comment */ ('),'DEFINITE');

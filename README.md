@@ -75,3 +75,11 @@ main直下whileの直接文と、その直下if／elseでも、L-EXAM1の安全�
 標準問題集の線形探索と挿入による昇順並べ替えは、配列名・定数・問題IDによる例外処理を使わず、原文のまま実行できます。for最大3階層・ソースforごと累計500進入、while500進入、配列100要素、添字の型・初期化・範囲・安全整数検査は維持しています。
 
 whileヘッダ配列、main直下if／入れ子if／else-ifチェーンの配列アクセス、while内scanf・宣言・任意ループ入れ子、loop外break、continue、switch、複数行配列初期化、サブ関数型拡張等は対象外です。既存UIの配置・アニメーション・SAMPLE・SECRET CODEは変更していません。
+
+## L-EXAM3 Typed Function Signatures & Return Flow
+
+Function Assistは戻り型int/double、仮引数int/doubleの混在0～4個に対応します。0個は`(void)`、定義の引数名は必須です。プロトタイプとの型・個数・順序を検査し、main直下の既存int/doubleスカラーへの呼出代入だけを実行します。実引数は同型のスカラー名または符号付き10進整数/小数リテラルです。サブ関数の局所int/double、算術式、既存if/else returnに対応し、原文のdouble square(double a)で`面積=25.000000`を出力できます。
+
+実引数→仮引数型、return式→関数戻り型、戻り値→代入先型を別々に変換し、VARIABLES/FLOWに型と値を表示します。doubleは有限値、intは既存Liteの安全整数モデル（ゼロ方向切捨て後±9007199254740991以内）を維持します。32bit C intの範囲・実装依存差すべてを再現するものではありません。
+
+未知call、署名不一致や未対応署名は通常経路へ流さず診断します。再帰、式中/入れ子/分岐内call、ポインタ/配列/可変長引数、float/char/void戻り型、calleeのI/O・ループ・配列は未対応です。これらを含むサブ関数が未呼出でも、構造検査の阻害診断がある場合は安全拒否します。型以外の既存確認・入力・履歴と実行上限は維持。上の旧Stage節の関数型・個数制限はこの節で置き換えます。新規検証入口は`tests-typed-functions.cjs`です。

@@ -7,6 +7,10 @@ const FunctionPreflight = (() => {
   const TYPES = new Set(['int', 'float', 'double', 'char', 'void', 'long', 'short', 'unsigned', 'signed', 'const', 'static', 'extern', 'struct', 'union', 'enum', 'typedef', 'volatile']);
   const NON_CALLS = new Set([...TYPES, 'if', 'else', 'for', 'while', 'switch', 'return', 'sizeof', '_Alignof', 'do', 'case']);
   const BUILTINS = new Set(['printf', 'scanf']);
+  const FUNCTION_TYPES = new Set(['int', 'double']);
+  const MAX_PARAMETERS = 4;
+  const RESERVED_NAMES = new Set([...NON_CALLS, 'auto','break','continue','default','goto','register','restrict','volatile','_Atomic','_Bool','_Complex','_Generic','_Imaginary','_Noreturn','_Static_assert','_Thread_local']);
+  const numericLiteral = text => /^(?:\d+\.\d*|\.\d+|\d+)$/.test(text);
   const PRIORITY = ['AMBIGUOUS', 'UNKNOWN_CALL', 'UNSUPPORTED'];
 
   function inspectFunctionStructure(source){
@@ -127,7 +131,7 @@ const FunctionPreflight = (() => {
         while(offset < source.length && /[A-Za-z_0-9]/.test(source[offset])) advance();
         addToken('identifier', start); continue;
       }
-      if(/[0-9]/.test(ch)){
+      if(/[0-9]/.test(ch) || (ch === '.' && /[0-9]/.test(next || ''))){
         advance();
         while(offset < source.length && /[A-Za-z_0-9.]/.test(source[offset])) advance();
         addToken('number', start); continue;
@@ -191,9 +195,9 @@ const FunctionPreflight = (() => {
       if(parts.length === 1 && raw(...parts[0]) === 'void') return [];
       return parts.map(([start, end]) => {
         const values = tokens.slice(start, end).map(item => item.value);
-        const simple = value(start) === 'int' && (end - start === 1 || (end - start === 2 && identifier(start + 1)));
+        const simple = FUNCTION_TYPES.has(value(start)) && (end - start === 1 || (end - start === 2 && identifier(start + 1) && !RESERVED_NAMES.has(value(start + 1))));
         const name = simple && end - start === 2 ? value(start + 1) : null;
-        return { type:simple ? 'int' : values.join(' '), name, range:start < end ? tokenRange(start, end) : tokens[h.close].range, supported:simple };
+        return { type:simple ? value(start) : values.join(' '), name, range:start < end ? tokenRange(start, end) : tokens[h.close].range, supported:simple };
       });
     }
     function register(start, end, h, bodyOpen = null, bodyClose = null){
@@ -203,13 +207,14 @@ const FunctionPreflight = (() => {
         range:tokenRange(start, definition ? bodyClose + 1 : end + 1),
         headerRange:tokenRange(start, end), parameters:params,
         returnType:h.returnType,
+        descriptor:{returnType:h.returnType, parameterTypes:params.map(param => param.type)},
         bodyRange:definition ? tokenRange(bodyOpen, bodyClose + 1) : null,
         contentRange:definition ? range(tokens[bodyOpen].range.end, tokens[bodyClose].range.start) : null
       };
       let fn = byName.get(h.name);
       const signature = h.returnType + '(' + params.map(param => param.type).join(',') + ')';
       if(!fn){
-        fn = { name:h.name, returnType:h.returnType, parameters:params, signature, declarations:[], definitions:[], structures:[] };
+        fn = { name:h.name, returnType:h.returnType, parameterTypes:params.map(param => param.type), descriptor:item.descriptor, parameters:params, signature, declarations:[], definitions:[], structures:[] };
         functions.push(fn); byName.set(h.name, fn);
       }else if(fn.signature !== signature){
         diagnose('SIGNATURE_MISMATCH', '同じ関数名の宣言と定義で、戻り型または引数の型・個数が一致しません。', item.headerRange);
@@ -226,8 +231,8 @@ const FunctionPreflight = (() => {
         if(h.returnType !== 'int' || params.length) diagnose('MAIN_SIGNATURE_UNSUPPORTED', 'mainはint main(void)またはint main()の構造だけを扱います。', item.headerRange, 'UNSUPPORTED');
       }else{
         if(BUILTINS.has(h.name)) diagnose('RESERVED_IO_NAME', 'printf・scanfをユーザー関数として宣言・定義する形は対応外です。', item.headerRange, 'UNSUPPORTED');
-        if(h.returnType !== 'int' || params.length !== 2 || params.some(param => !param.supported || (definition && !param.name))){
-          diagnose('FUNCTION_SIGNATURE_UNSUPPORTED', '初期範囲は戻り型int・名前付きint仮引数2個の定義です。その他の署名はLiteの対応外です。', item.headerRange, 'UNSUPPORTED');
+        if(!FUNCTION_TYPES.has(h.returnType) || params.length > MAX_PARAMETERS || (params.length === 0 && raw(h.open + 1,h.close) !== 'void') || params.some(param => !param.supported || (definition && !param.name))){
+          diagnose('FUNCTION_SIGNATURE_UNSUPPORTED', '戻り型と仮引数型はint/double、仮引数は0～4個（0個はvoid単独）、定義には仮引数名が必要です。', item.headerRange, 'UNSUPPORTED');
         }
       }
       return fn;
@@ -318,7 +323,7 @@ const FunctionPreflight = (() => {
               if(fn.name !== 'main' && value(a + 1) === '[') diagnose('SUBFUNCTION_ARRAY_UNSUPPORTED', 'サブ関数内の配列宣言は初期実行範囲外です。', tokens[a].range, 'UNSUPPORTED');
             }
             if(value(index + 1) === '*' || value(index + 1) === '(') diagnose('LOCAL_POINTER_UNSUPPORTED', 'ポインタまたは複雑な局所宣言は初期範囲外です。', tokens[index].range, 'UNSUPPORTED');
-            if(fn.name !== 'main' && ch !== 'int') diagnose('SUBFUNCTION_DECLARATION_UNSUPPORTED', 'サブ関数の局所宣言はintスカラーを初期対象とします。修飾子等を含む宣言は対応外です。', tokens[index].range, 'UNSUPPORTED');
+            if(fn.name !== 'main' && !FUNCTION_TYPES.has(ch)) diagnose('SUBFUNCTION_DECLARATION_UNSUPPORTED', 'サブ関数の局所宣言はint/doubleスカラーだけです。修飾子等を含む宣言は対応外です。', tokens[index].range, 'UNSUPPORTED');
           }
         }
         if(['if', 'else', 'return', 'for', 'while', 'switch', 'do'].includes(ch)){
@@ -350,6 +355,7 @@ const FunctionPreflight = (() => {
         const callEnd = pairs.get(index + 1);
         if(BUILTINS.has(callee) && !byName.has(callee)){
           if(fn.name !== 'main' && callee === 'scanf') diagnose('SUBFUNCTION_INPUT_UNSUPPORTED', 'サブ関数内scanfは初期実行範囲外です。', tokenRange(index, callEnd + 1), 'UNSUPPORTED');
+          if(fn.name !== 'main' && callee === 'printf') diagnose('SUBFUNCTION_OUTPUT_UNSUPPORTED', 'サブ関数内printfは実行範囲外です。', tokenRange(index, callEnd + 1), 'UNSUPPORTED');
           continue;
         }
         if(calls.length >= LIMITS.calls){ diagnose('CALL_LIMIT', '構造検査の暫定呼出数上限を超えています。', tokens[index].range, 'UNSUPPORTED'); break; }
@@ -385,14 +391,14 @@ const FunctionPreflight = (() => {
         if(simple){
           call.assignmentTarget = value(start);
           const declared = locals.findLast(local => local.name === call.assignmentTarget && local.position < start && local.scope === open);
-          if(!declared || declared.type !== 'int' || !declared.scalar) diagnose('ASSIGNMENT_TARGET_UNSUPPORTED', '呼出結果の代入先は、main直下で先に宣言されたintスカラーに限定します。', call.range, 'UNSUPPORTED');
+          if(!declared || !FUNCTION_TYPES.has(declared.type) || !declared.scalar) diagnose('ASSIGNMENT_TARGET_UNSUPPORTED', '呼出結果の代入先は、main直下で先に宣言されたint/doubleスカラーに限定します。', call.range, 'UNSUPPORTED');
           else call.directMainAssignment = true;
         }else diagnose(fn.name === callee ? 'RECURSION_UNSUPPORTED' : fn.name !== 'main' ? 'SUBFUNCTION_CALL_UNSUPPORTED' : 'CALL_CONTEXT_UNSUPPORTED', '呼出はmain直下の既存int変数への単純な戻り値代入だけを初期対象にします。', call.range, 'UNSUPPORTED');
         for(const [a, b] of args){
-          const integerLiteral = index => tokens[index]?.kind === 'number' && /^\d+$/.test(value(index));
-          if(!(b - a === 1 && (identifier(a) || integerLiteral(a))) &&
-             !(b - a === 2 && ['+', '-'].includes(value(a)) && integerLiteral(a + 1))){
-            diagnose('ARGUMENT_FORM_UNSUPPORTED', '初期の実引数はスカラー名または整数リテラルの形を対象とし、配列・アドレス・入れ子呼出等は実行しません。', call.range, 'UNSUPPORTED');
+          const literal = index => tokens[index]?.kind === 'number' && numericLiteral(value(index));
+          if(!(b - a === 1 && ((identifier(a) && !NON_CALLS.has(value(a))) || literal(a))) &&
+             !(b - a === 2 && ['+', '-'].includes(value(a)) && literal(a + 1))){
+            diagnose('ARGUMENT_FORM_UNSUPPORTED', '実引数はスカラー名または10進整数/小数リテラルだけです。配列・アドレス・式・入れ子呼出等は実行しません。', call.range, 'UNSUPPORTED');
           }
         }
       }
@@ -405,7 +411,7 @@ const FunctionPreflight = (() => {
     return finish();
   }
 
-  return Object.freeze({ inspectFunctionStructure, limits:LIMITS });
+  return Object.freeze({ inspectFunctionStructure, limits:LIMITS, maxParameters:MAX_PARAMETERS });
 })();
 
 // Nodeではmoduleだけへ出力。通常scriptとして読み込む開発ページには同名のlexical bindingを提供します。

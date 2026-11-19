@@ -62,6 +62,7 @@ const FunctionExecutionCore = (() => {
         if(token === ')') depth--;
         if(C_SYNTAX_KEYWORDS.has(token) || C_SYNTAX_TYPES.has(token)) fault('UNSUPPORTED_EXPRESSION','この式はL-FUNC3の対応範囲外です。',statement,'validation');
       }
+      if(!inspectConditionalExpressionSyntax(expr)) fault('EXPRESSION_SYNTAX','式の構文が不正または関数コアの対応範囲外です。',statement,'validation');
     }
     function expressionValue(expr, frame, statement, intOnly){
       const result = evaluateExpression(expr,frame.state.variables,null,frame.state.variableTypes);
@@ -203,7 +204,7 @@ const FunctionExecutionCore = (() => {
         const calls = catalog.calls.filter(c => c.range.start.offset >= node.start && c.range.end.offset <= node.end);
         if(calls.length){
           const call = calls[0];
-          if(fn.name !== 'main' || calls.length !== 1 || !call.directMainAssignment) fault('CALL_CONTEXT','main直下のint変数への単純な呼出代入だけを扱います。',node,'validation');
+          if(fn.name !== 'main' || calls.length !== 1 || !call.directMainAssignment) fault('CALL_CONTEXT','main直下のint/double変数への単純な呼出代入だけを扱います。',node,'validation');
           const callee = catalog.functions.find(f => f.name === call.callee);
           node.kind='call';node.call=call;node.callee=callee;
           node.arguments=call.arguments.map(arg => masked.slice(arg.range.start.offset,arg.range.end.offset).trim());
@@ -215,7 +216,7 @@ const FunctionExecutionCore = (() => {
           if(multiple.matched && !multiple.ok) fault('DECLARATION_SYNTAX',multiple.message,node,'validation');
           node.kind='declare';node.type=multiple.matched ? multiple.type : single[1];
           node.declarators=multiple.matched ? multiple.declarators : [{name:single[2],expr:single[3]}];
-          if(fn.name !== 'main' && node.type !== 'int') fault('LOCAL_TYPE','サブ関数の局所宣言はintだけです。',node,'validation');
+          if(fn.name !== 'main' && !['int','double'].includes(node.type)) fault('LOCAL_TYPE','サブ関数の局所宣言はint/doubleだけです。',node,'validation');
           for(const item of node.declarators){checkedName(item.name,node);if(names.has(item.name)) fault('DUPLICATE_LOCAL','仮引数または局所変数の名前が重複しています。',node,'validation');names.add(item.name);if(item.expr !== undefined) checkExpression(item.expr,node);}
         }else if(/^return\b/.test(text)){
           const match=text.match(/^return\s+([\s\S]+);$/);
@@ -259,38 +260,46 @@ const FunctionExecutionCore = (() => {
     }
     function call(statement, bodies){
       const target=statement.call.assignmentTarget,fn=statement.callee;
-      if(!hasOwnSymbol(main.state.variables,target)||executionScalarType(main.state,target)!=='int') fault('CALL_TARGET','戻り値の代入先は宣言済みintスカラーが必要です。',statement);
-      const values=statement.arguments.map(expr => {
-        if(!/^[A-Za-z_]\w*$/.test(expr)&&!/^(?:[+-]\s*)?\d+$/.test(expr)) fault('ARGUMENT_FORM','実引数はintスカラーまたは符号付き整数リテラルだけです。',statement);
-        return expressionValue(expr,main,statement,true).value;
+      if(!hasOwnSymbol(main.state.variables,target)||!['int','double'].includes(executionScalarType(main.state,target))) fault('CALL_TARGET','戻り値の代入先は宣言済みint/doubleスカラーが必要です。',statement);
+      const signature=fn.descriptor,parameters=fn.definitions[0].parameters;
+      if(!signature || !['int','double'].includes(signature.returnType) || !Array.isArray(signature.parameterTypes) ||
+        signature.parameterTypes.length>4 || signature.parameterTypes.length!==parameters.length ||
+        signature.parameterTypes.some((type,i)=>!['int','double'].includes(type)||type!==parameters[i].type)) fault('FUNCTION_SIGNATURE','関数署名descriptorの整合を確認できません。',statement,'validation');
+      if(statement.arguments.length!==signature.parameterTypes.length) fault('ARGUMENT_COUNT','実引数の個数が関数署名と一致しません。',statement);
+      const bindings=statement.arguments.map((expr,i) => {
+        if(!/^[A-Za-z_]\w*$/.test(expr)&&!/^(?:[+-]\s*)?(?:\d+\.\d*|\.\d+|\d+)$/.test(expr)) fault('ARGUMENT_FORM','実引数はint/doubleスカラーまたは10進整数/小数リテラルだけです。',statement);
+        const result=expressionValue(expr,main,statement,false);
+        if(!['int','double'].includes(result.type)) fault('ARGUMENT_TYPE','実引数はint/double型だけです。',statement);
+        const type=signature.parameterTypes[i],converted=convertScalarValue(result.value,type);
+        if(!converted.ok)fault('ARGUMENT_VALUE',converted.error,statement);
+        return {expression:expr,sourceType:result.type,sourceValue:result.value,sourceDisplay:displayScalarValue(result.value,result.type),parameterName:parameters[i].name,parameterType:type,value:converted.value,display:displayScalarValue(converted.value,type)};
       });
-      if(values.length!==2) fault('ARGUMENT_COUNT','実引数は2個必要です。',statement);
       if(callCount>=limits.calls) fault('CALL_LIMIT','関数呼出数が開発用上限に達しました。',statement,'runtime',true);
       const callId=++callCount;
-      emit('call',statement,{callId,calleeName:fn.name});
+      emit('call',statement,{callId,calleeName:fn.name,argumentBindings:bindings.map(b=>({...b}))});
       active={functionName:fn.name,scopeId:fn.name+'#'+callId,callId,callLineNo:statement.lineNo,state:createMainExecutionState()};
-      fn.definitions[0].parameters.forEach((param,i)=>declareExecutionScalar(active.state,param.name,values[i],'int'));
-      emit('arguments',statement,{lineNo:fn.definitions[0].headerRange.start.line,range:fn.definitions[0].headerRange});
+      parameters.forEach((param,i)=>declareExecutionScalar(active.state,param.name,bindings[i].value,param.type));
+      emit('arguments',statement,{lineNo:fn.definitions[0].headerRange.start.line,range:fn.definitions[0].headerRange,argumentBindings:bindings.map(b=>({...b}))});
       let control={kind:'normal'};
       for(let node of bodies.get(fn.name)){
         tick(node);
         if(node.kind==='branch'){
-          for(const operand of node.operands)expressionValue(operand,active,node,true);
-          const evaluated=expressionValue(node.condition,active,node,true),conditionMet=evaluated.value!==0;
+          for(const operand of node.operands)expressionValue(operand,active,node,false);
+          const evaluated=expressionValue(node.condition,active,node,false),conditionMet=evaluated.value!==0;
           emit('branch-decision',node,{branchDecision:{condition:node.condition,conditionMet,selectedBranch:conditionMet?'if':'else',comparison:evaluated.comparison ? {...evaluated.comparison} : null}});
           node=conditionMet?node.ifReturn:node.elseReturn;tick(node);
         }
         if(node.kind==='declare')declare(active,node);
         else if(node.kind==='assign')assign(active,node);
         else if(node.kind==='return'){
-          const result=expressionValue(node.expr,active,node,true),converted=convertScalarValue(result.value,'int');
+          const result=expressionValue(node.expr,active,node,false),converted=convertScalarValue(result.value,signature.returnType);
           if(!converted.ok)fault('RETURN_VALUE',converted.error,node);
-          control={kind:'return',value:converted.value};emit('return',node,{returnValue:control.value});break;
+          control={kind:'return',value:converted.value,type:signature.returnType};emit('return',node,{returnValue:control.value,returnType:control.type,returnDisplay:displayScalarValue(control.value,control.type),returnExpression:{expression:node.expr,type:result.type,value:result.value,display:displayScalarValue(result.value,result.type)}});break;
         }
       }
       if(control.kind!=='return')fault('MISSING_RETURN','戻り値が確定しませんでした。',statement);
-      active=main;recordCapacity(statement);saveValue(main,target,control.value,statement);
-      emit('return-assign',statement,{callId,calleeName:fn.name,target,returnValue:control.value});
+      active=main;recordCapacity(statement);const storedValue=saveValue(main,target,control.value,statement),targetType=executionScalarType(main.state,target);
+      emit('return-assign',statement,{callId,calleeName:fn.name,target,returnValue:control.value,returnType:control.type,returnDisplay:displayScalarValue(control.value,control.type),targetType,storedValue,storedDisplay:displayScalarValue(storedValue,targetType)});
     }
     let status='completed';
     try{

@@ -53,7 +53,7 @@ const FunctionAssistRouting = (() => {
       headerRanges:headers,sourceUnchanged:true};
     const errors=catalog.diagnostics.filter(d=>d.severity==='error');
     if(uncertain.length||candidates.some(c=>!c.catalogCall)||catalog.calls.some(c=>!c.resolved)||
-      (catalog.calls.length&&(catalog.classification==='AMBIGUOUS'||catalog.classification==='UNKNOWN_CALL'||catalog.classification==='UNSUPPORTED'||errors.length))){
+      ((catalog.calls.length||catalog.functions.some(f=>f.name!=='main'))&&(catalog.classification==='AMBIGUOUS'||catalog.classification==='UNKNOWN_CALL'||catalog.classification==='UNSUPPORTED'||errors.length))){
       return stop('P1','関数呼出の定義・署名・対応範囲を確認できません。実行していません。',catalog,evidence);
     }
     if(['DEFINITE','DECLARATION_ONLY'].includes(catalog.classification)&&catalog.canOfferFunctionConfirmation){
