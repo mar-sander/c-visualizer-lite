@@ -12,7 +12,7 @@ body{font:16px/1.65 system-ui,sans-serif;margin:0;background:#f5f6f8;color:#1822
 <section><h2>呼出・局所状態・復帰の時系列</h2><p>各STEPは元ソースの行番号と、main／活動中の関数の独立snapshotです。</p><div class="table"><table><thead><tr><th>STEP / 元行</th><th>イベント</th><th>関数・呼出・scope</th><th>時点の変数</th><th>時点の出力</th></tr></thead><tbody id="timeline"></tbody></table></div></section>
 </main>
 <div hidden><textarea id="codeInput"></textarea><textarea id="scanfInput"></textarea><pre id="codeHighlight"></pre><pre id="codeLineNumbers"></pre><div id="outputResult"></div><div id="variableState"></div><div id="stepResult"></div><div id="codePreview"></div><div id="hintResult"></div></div>
-<script src="script.js"></script><script src="function-preflight.js"></script><script src="function-execution-core.js"></script><script src="tests-function-execution-core.js"></script>
+<script src="safe-math-builtins.js"></script><script src="script.js"></script><script src="function-preflight.js"></script><script src="function-execution-core.js"></script><script src="tests-function-execution-core.js"></script>
 <script>
 'use strict';
 const productSentinel=JSON.stringify(window.cVisualizerLiteResult),domSentinel=document.getElementById('hintResult').innerHTML;

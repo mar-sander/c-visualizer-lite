@@ -1193,18 +1193,33 @@ function displayScalarValue(value, type){
   return String(value);
 }
 
+function containsMathFunctionCandidate(code){
+  const text=codeWithoutComments(code).split('\n').map(codeOutsideStringAndLineComment).join('\n');
+  return /\b(?:sin|cos|tan)\b/.test(text);
+}
+function describeMathCalls(result){
+  return (result.mathCalls || []).map(c => `数学組込：${c.name}(${c.argumentExpression})、引数 ${c.argumentType} ${c.argumentDisplay} → double ${c.argumentDouble}、戻り値 double ${c.resultDisplay}（ラジアン入力）。`).join(' ');
+}
+function describeExpressionDetails(result){
+  return [describeExplicitCastConversions(result),describeMathCalls(result)].filter(Boolean).join(' ');
+}
+function expressionMetadata(result){
+  return {...(result.castConversions?.length?{castConversions:result.castConversions}:{}),...(result.mathCalls?.length?{mathCalls:result.mathCalls}:{})};
+}
 const EXPLICIT_CAST_LIMITS = Object.freeze({characters:2048,tokens:256,depth:32});
 function hasExplicitCastTokens(tokens){
   return tokens.some((token,index) => token === '(' && C_SYNTAX_TYPES.has(tokens[index+1]));
 }
 function explicitCastBudgetError(expression){
-  if(!containsExplicitCastCandidate(expression)) return '';
-  if(expression.length>EXPLICIT_CAST_LIMITS.characters) return 'cast式の安全な文字数上限2048を超えています。';
+  if(!containsExplicitCastCandidate(expression) && !containsMathFunctionCandidate(expression)) return '';
+  const label=containsMathFunctionCandidate(expression)?'数学関数を含む式':'cast式';
+  if(expression.length>EXPLICIT_CAST_LIMITS.characters) return label+'の安全な文字数上限2048を超えています。';
   // Budget-only lexing includes comparisons. No values are evaluated or rewritten.
   const tokens=expression.match(/'(?:\\.|[^'\\])*'|(?:\d+\.\d*|\.\d+)[fF]?|\d+|[A-Za-z_]\w*\s*\[[^\[\]]+\]|[A-Za-z_]\w*|<=|>=|==|!=|[^\s]/g)||[];
-  if(tokens.length>EXPLICIT_CAST_LIMITS.tokens) return 'cast式の安全なtoken数上限256を超えています。';
+  if(tokens.filter((token,index)=>SafeMathBuiltins.isName(token)&&tokens[index+1]==='(').length>SafeMathBuiltins.limits.callsPerExpression)return '数学関数は1式16呼出までです。';
+  if(tokens.length>EXPLICIT_CAST_LIMITS.tokens) return label+'の安全なtoken数上限256を超えています。';
   let depth=0;
-  for(const token of tokens){if(token==='('&&++depth>EXPLICIT_CAST_LIMITS.depth)return 'cast式の括弧の安全な深さ32を超えています。';if(token===')')depth--;}
+  for(const token of tokens){if(token==='('&&++depth>EXPLICIT_CAST_LIMITS.depth)return label+'の括弧の安全な深さ32を超えています。';if(token===')')depth--;}
   return '';
 }
 function describeExplicitCastConversions(result){
@@ -1215,7 +1230,7 @@ function containsExplicitCastCandidate(code){
   return /\(\s*(?:int|double|float|char|void|long|short|signed|unsigned)\b/.test(source) || /\(\s*[A-Za-z_]\w*\s*\)\s*[A-Za-z_\d.(]/.test(source);
 }
 function inspectExplicitCastStatement(code){
-  if(!containsExplicitCastCandidate(code)) return true;
+  if(!containsExplicitCastCandidate(code) && !containsMathFunctionCandidate(code)) return true;
   const assign=code.match(/^[A-Za-z_]\w*(?:\s*\[[^\[\]]+\])?\s*=\s*(.+);$/);
   if(assign) return inspectConditionalExpressionSyntax(assign[1],true);
   const print=matchSimplePrintfStatement(code);
@@ -1232,11 +1247,15 @@ function evaluateArithmeticExpression(expr, variables, resolveArrayAccess = null
 
   const tokens = tokenResult.tokens;
   const hasCast = hasExplicitCastTokens(tokens);
+  const hasMath = tokens.some((token,index)=>SafeMathBuiltins.isName(token)&&tokens[index+1]==='(');
+  if(hasMath){const error=explicitCastBudgetError(expr);if(error)return {ok:false,error};}
   if(hasCast && (expr.length > EXPLICIT_CAST_LIMITS.characters || tokens.length > EXPLICIT_CAST_LIMITS.tokens)) return {ok:false,error:'cast式の安全上限（2048文字・256token）を超えています。'};
   let pos = 0;
   const usedVars = [];
   const arrayAccesses = [];
   const castConversions = [];
+  const mathCalls = [];
+  let mathDepth=0,mathCallCount=0;
   let factorDepth = 0;
 
   // 配列要素のread後に式の別部分で失敗しても、read済みの情報を失わないようにします。
@@ -1313,13 +1332,25 @@ function evaluateArithmeticExpression(expr, variables, resolveArrayAccess = null
   }
 
   function parseFactor(){
-    if(hasCast && factorDepth >= EXPLICIT_CAST_LIMITS.depth) return {ok:false,error:'cast式の括弧・単項演算の安全な深さ32を超えています。'};
+    if((hasCast || hasMath) && factorDepth >= EXPLICIT_CAST_LIMITS.depth) return {ok:false,error:(hasMath?'数学関数を含む式':'cast式')+'の括弧・単項演算の安全な深さ32を超えています。'};
     factorDepth++;
     try{return parseFactorValue();}finally{factorDepth--;}
   }
   function parseFactorValue(){
     const token = consume();
     if(token === undefined) return { ok:false, error:'式が途中で終わっています。' };
+    if(SafeMathBuiltins.isName(token) && peek()==='('){
+      if(mathDepth>=SafeMathBuiltins.limits.nesting || ++mathCallCount>SafeMathBuiltins.limits.callsPerExpression) return {ok:false,error:'数学関数は1式16呼出・入れ子4段までです。'};
+      consume();const argumentStart=pos;mathDepth++;
+      const argument=parseExpression();mathDepth--;
+      if(!argument.ok)return argument;
+      const argumentEnd=pos;
+      if(consume()!==')')return {ok:false,error:'数学関数の引数は数値式1個だけです。'};
+      const converted=convertScalarValue(argument.value,'double');if(!converted.ok)return converted;
+      const evaluated=SafeMathBuiltins.evaluate(token,converted.value);if(!evaluated.ok)return evaluated;
+      mathCalls.push({name:token,argumentExpression:tokens.slice(argumentStart,argumentEnd).join(' '),argumentType:argument.type,argumentValue:argument.value,argumentDisplay:displayScalarValue(argument.value,argument.type),argumentDouble:converted.value,result:evaluated.value,resultType:'double',resultDisplay:displayScalarValue(evaluated.value,'double')});
+      return {ok:true,value:evaluated.value,type:'double',readable:`${token}(${argument.readable})`};
+    }
     if(token === '(' && ['int','double'].includes(peek()) && tokens[pos+1] === ')'){
       const targetType=consume();consume();
       const operand=parseFactor();if(!operand.ok)return operand;
@@ -1413,6 +1444,7 @@ function evaluateArithmeticExpression(expr, variables, resolveArrayAccess = null
     readable:result.readable,
     usedVars,
     ...(castConversions.length ? {castConversions} : {}),
+    ...(mathCalls.length ? {mathCalls} : {}),
     arrayAccesses:[...arrayAccesses],
     arrayAccess:arrayAccesses[0] || null
   };
@@ -1507,17 +1539,24 @@ function inspectConditionalExpressionSyntax(expression, allowArrays = false){
     if(!tokenized.ok) return false;
     const tokens = tokenized.tokens;
     const hasCast = hasExplicitCastTokens(tokens);
+    const hasMath=tokens.some((token,index)=>SafeMathBuiltins.isName(token)&&tokens[index+1]==='(');
+    let mathDepth=0,mathCallCount=0;
     if(hasCast && (part.length > EXPLICIT_CAST_LIMITS.characters || tokens.length > EXPLICIT_CAST_LIMITS.tokens)) return false;
     let position = 0;
     let factorDepth = 0;
     function factor(){
-      if(hasCast && factorDepth >= EXPLICIT_CAST_LIMITS.depth) return false;
+      if((hasCast || hasMath) && factorDepth >= EXPLICIT_CAST_LIMITS.depth) return false;
       factorDepth++;
       try{return factorValue();}finally{factorDepth--;}
     }
     function factorValue(){
       const token = tokens[position++];
       if(token === '+' || token === '-') return factor();
+      if(SafeMathBuiltins.isName(token) && tokens[position]==='('){
+        if(mathDepth>=SafeMathBuiltins.limits.nesting || ++mathCallCount>SafeMathBuiltins.limits.callsPerExpression)return false;
+        position++;mathDepth++;const valid=sum();mathDepth--;
+        return valid && tokens[position++]===')';
+      }
       if(token === '('){
         if(['int','double'].includes(tokens[position]) && tokens[position+1] === ')'){
           position+=2;return factor();
@@ -1604,6 +1643,7 @@ function evaluateExpression(expr, variables, resolveArrayAccess = null, variable
     readable:`${left.readable} ${operator} ${right.readable}`,
     usedVars:[...left.usedVars, ...right.usedVars],
     ...((left.castConversions || right.castConversions) ? {castConversions:[...(left.castConversions || []),...(right.castConversions || [])]} : {}),
+    ...((left.mathCalls || right.mathCalls) ? {mathCalls:[...(left.mathCalls || []),...(right.mathCalls || [])]} : {}),
     arrayAccess:left.arrayAccess || right.arrayAccess || null,
     arrayAccesses:[...(left.arrayAccesses || []).map(a => ({...a, role:'比較左辺'})), ...(right.arrayAccesses || []).map(a => ({...a, role:'比較右辺'}))],
     comparison:{
@@ -1651,7 +1691,7 @@ function describeComparison(result){
     }
   };
   const conclusion = conclusions[comparison.operator][comparison.conditionMet];
-  return `${escapeHtml(result.readable)} を計算し、左右の値を比較しました。${escapeHtml(describeExplicitCastConversions(result))}${comparison.conversionNote || ''}${conclusion}`;
+  return `${escapeHtml(result.readable)} を計算し、左右の値を比較しました。${escapeHtml(describeExpressionDetails(result))}${comparison.conversionNote || ''}${conclusion}`;
 }
 
 
@@ -1674,8 +1714,8 @@ function makeInitialValueExplanation(name, expr, result, type = 'int', assignedV
       : /^[+-]?(?:\d+\.?\d*|\.\d+)[fF]?$/.test(expr.trim())
         ? '' : `<code>${escapeHtml(expr)}</code> を計算し、`;
     return {
-      analysis:`${learningType}の変数 <code>${name}</code> を作り、${operation}<code>${escapeHtml(value)}</code> を代入しました。${escapeHtml(describeExplicitCastConversions(result))}`,
-      step:`${name} という${learningType}の箱を作り、${escapeHtml(value)} を代入しました。${escapeHtml(describeExplicitCastConversions(result))}`
+      analysis:`${learningType}の変数 <code>${name}</code> を作り、${operation}<code>${escapeHtml(value)}</code> を代入しました。${escapeHtml(describeExpressionDetails(result))}`,
+      step:`${name} という${learningType}の箱を作り、${escapeHtml(value)} を代入しました。${escapeHtml(describeExpressionDetails(result))}`
     };
   }
   if(result.comparison){
@@ -1693,7 +1733,7 @@ function makeInitialValueExplanation(name, expr, result, type = 'int', assignedV
   }
   return {
     analysis:`整数型の変数 <code>${name}</code> を作り、<code>${escapeHtml(expr)}</code> を計算した結果 <code>${result.value}</code> を代入しました。`,
-    step:`${name} という整数型の箱を作り、${escapeHtml(result.readable)} の結果である ${result.value} を代入しました。${escapeHtml(describeExplicitCastConversions(result))}`
+    step:`${name} という整数型の箱を作り、${escapeHtml(result.readable)} の結果である ${result.value} を代入しました。${escapeHtml(describeExpressionDetails(result))}`
   };
 }
 
@@ -1851,7 +1891,8 @@ function evaluatePrintfArguments(parsedFormat, args, state, resolveArrayRead = n
   return { ok, error, failedResult, values, results };
 }
 
-function visualizeCode(){
+function visualizeCode(){return SafeMathBuiltins.withBudget(visualizeCodeUnchecked);}
+function visualizeCodeUnchecked(){
   updateCodeEditor();
   const code = document.getElementById('codeInput').value.replace(/\r\n/g, '\n');
   const scanfInput = document.getElementById('scanfInput');
@@ -2060,6 +2101,8 @@ function visualizeCode(){
   }
 
   function addStep(lineNo, text, markAsExecuted = true, arrayViews = [], branchDecision = null, scanfInputData = null, loopDecision = null){
+    const mathDecision=branchDecision?.mathCalls?.length ? branchDecision : loopDecision?.mathCalls?.length ? loopDecision : null;
+    if(mathDecision) text += '<br>'+escapeHtml(describeMathCalls(mathDecision));
     const conversionNote = branchDecision?.conversionNote || loopDecision?.conversionNote;
     const step = { step:stepNo++, lineNo, text:conversionNote ? `${text}<br>${escapeHtml(conversionNote)}` : text };
     if(arrayViews.length) step.arrayViews = arrayViews;
@@ -2130,14 +2173,14 @@ function visualizeCode(){
     if(before === UNINITIALIZED){
       addStep(
         lineNo,
-        `${stepPrefix}${escapeHtml(resolutionExplanation)}${name} の中身に ${escapeHtml(assigned)} を代入しました。計算：${escapeHtml(result.readable)} = ${escapeHtml(assigned)}${result.castConversions?.length ? ' '+escapeHtml(describeExplicitCastConversions(result)) : ''}`,
+        `${stepPrefix}${escapeHtml(resolutionExplanation)}${name} の中身に ${escapeHtml(assigned)} を代入しました。計算：${escapeHtml(result.readable)} = ${escapeHtml(assigned)}${(result.castConversions?.length || result.mathCalls?.length) ? ' '+escapeHtml(describeExpressionDetails(result)) : ''}`,
         true,
         resultArrayViews(result)
       );
     }else{
       addStep(
         lineNo,
-        `${stepPrefix}${escapeHtml(resolutionExplanation)}${name} の中身を ${escapeHtml(beforeDisplay)} から ${escapeHtml(assigned)} に変えました。計算：${escapeHtml(result.readable)} = ${escapeHtml(assigned)}${result.castConversions?.length ? ' '+escapeHtml(describeExplicitCastConversions(result)) : ''}`,
+        `${stepPrefix}${escapeHtml(resolutionExplanation)}${name} の中身を ${escapeHtml(beforeDisplay)} から ${escapeHtml(assigned)} に変えました。計算：${escapeHtml(result.readable)} = ${escapeHtml(assigned)}${(result.castConversions?.length || result.mathCalls?.length) ? ' '+escapeHtml(describeExpressionDetails(result)) : ''}`,
         true,
         resultArrayViews(result)
       );
@@ -2220,7 +2263,7 @@ function visualizeCode(){
     const before=warningLines.size;
     const result=processSimpleLineUnchecked(rawLine,index,insideIf,insideFor,insideWhile,allowConditionalArrayRead,loopControl);
     const code=codeOutsideStringAndLineComment(executableLines[index] || '');
-    if(warningLines.size>before && containsExplicitCastCandidate(code)){
+    if(warningLines.size>before && (containsExplicitCastCandidate(code) || containsMathFunctionCandidate(code))){
       castFailureIndex=index;
       return insideIf||insideFor||insideWhile ? 'execution-error' : 'cast-error';
     }
@@ -2855,7 +2898,7 @@ function visualizeCode(){
           .filter(value => value !== null);
         addStep(
           lineNo,
-          `${escapeHtml(resolutionExplanation)}画面に「${escapeHtml(visibleText)}」を表示しました。${charDescriptions.length ? ` 文字 ${charDescriptions.join('、')} を出力しました。` : ''}${results.some(r=>r.castConversions?.length) ? ' '+escapeHtml(results.map(describeExplicitCastConversions).filter(Boolean).join(' ')) : ''}`,
+          `${escapeHtml(resolutionExplanation)}画面に「${escapeHtml(visibleText)}」を表示しました。${charDescriptions.length ? ` 文字 ${charDescriptions.join('、')} を出力しました。` : ''}${results.some(r=>r.castConversions?.length || r.mathCalls?.length) ? ' '+escapeHtml(results.map(describeExpressionDetails).filter(Boolean).join(' ')) : ''}`,
           true,
           makeArrayViews(results.flatMap(result => result.arrayAccesses || []))
         );
@@ -3460,7 +3503,7 @@ function visualizeCode(){
       if(branch.branchKind !== 'else'){
         const evaluated = evaluateExpression(branch.condition, variables, null, variableTypes);
         if(!evaluated.ok){
-          if(containsExplicitCastCandidate(branch.condition)) castFailureIndex=branch.startIndex;
+          if(containsExplicitCastCandidate(branch.condition) || containsMathFunctionCandidate(branch.condition)) castFailureIndex=branch.startIndex;
           addAnalysis(analysis, lineNo, `条件チェーンの条件を評価できませんでした。${context.stopOnRuntimeError ? 'プログラムの実行を停止します。' : '残りの分岐は実行しません。'}`);
           addHint(hints, lineNo, 'if文の条件を評価できません', escapeHtml(evaluated.error));
           warningLines.add(lineNo);
@@ -3480,6 +3523,7 @@ function visualizeCode(){
         const comparison = evaluated.comparison;
         const decision = {
           kind:'if', depth:node.depth, condition:branch.condition,
+          ...expressionMetadata(evaluated),
           ...(comparison?.conversionNote ? {conversionNote:comparison.conversionNote} : {}),
           comparison:comparison ? {
             left:{ source:comparison.leftSource, value:comparison.leftValue, display:comparison.leftDisplay },
@@ -3528,7 +3572,7 @@ function visualizeCode(){
     const result = evaluateExpression(node.condition, variables, node.allowArrayRead ? resolveArrayRead : null, variableTypes);
 
     if(!result.ok){
-      if(containsExplicitCastCandidate(node.condition)) castFailureIndex=node.startIndex;
+      if(containsExplicitCastCandidate(node.condition) || containsMathFunctionCandidate(node.condition)) castFailureIndex=node.startIndex;
       const skippedTarget = node.hasElse ? 'if側とelse側の処理' : '中の処理';
       if(stopOnRuntimeError || castFailureIndex !== null){
         addAnalysis(analysis, lineNo, `${nested ? '入れ子の' : ''}if文の条件 <code>${escapeHtml(node.condition)}</code> を評価できませんでした。${skippedTarget}は実行せず、プログラムの実行を停止します。`);
@@ -3577,6 +3621,7 @@ function visualizeCode(){
       const comparison = result.comparison;
       const branchDecision = {
         kind:'if',
+        ...expressionMetadata(result),
         depth:node.depth,
         condition:node.condition,
         ...(comparison?.conversionNote ? {conversionNote:comparison.conversionNote} : {}),
@@ -4295,6 +4340,7 @@ function visualizeCode(){
       // 評価に成功した条件だけを記録します。UIで再評価せず、本文進入数と判定序数を区別します。
       const loopDecision = {
         kind:'while',
+        ...expressionMetadata(conditionResult),
         sourceId:`while:${lineNo}`,
         headerLineNo:lineNo,
         depth:1,
@@ -5135,10 +5181,20 @@ function visualizeCode(){
   let programEndIndex = null;
   let scanfStopIndex = null;
   let executionStop = null;
+  // The public direct engine API observes the same math gate as RUN routing.
+  if(containsMathFunctionCandidate(code) || /^\s*#\s*include\s*<math\.h>/m.test(codeWithoutComments(code))){
+    const catalog=typeof FunctionPreflight==='undefined' ? null : FunctionPreflight.inspectFunctionStructure(code);
+    const errors=catalog?.diagnostics.filter(d=>d.severity==='error') || [{line:1,message:'数学組込の事前検査を利用できません。'}];
+    if(errors.length){
+      for(const error of errors){addHint(hints,error.line,'数学組込の事前検査で停止',escapeHtml(error.message));warningLines.add(error.line);}
+      executionStop={index:errors[0].line-1,stopKind:'runtime-error',reason:'数学組込を含むプログラムの事前検査に失敗したため、この行は実行されませんでした。'};
+    }
+  }
   const executionStartIndex = mainRange?.closed ? mainRange.startIndex + 1 : 0;
   const executionEndIndex = mainRange?.closed ? mainRange.endIndex : 0;
 
   for(let index = executionStartIndex; index < executionEndIndex; index++){
+    if(executionStop !== null) break;
     const trimmed = executableLines[index].trim();
     const structuralCode = codeOutsideStringAndLineComment(executableLines[index]).trim();
 
@@ -5221,7 +5277,7 @@ function visualizeCode(){
     if(!/^if\s*\(/.test(structuralCode)){
       const result = processSimpleLine(lines[index], index);
       if(result === 'cast-error'){
-        executionStop={index,stopKind:'runtime-error',reason:'明示変換を含む式を安全に評価できないため、この行は実行されませんでした。'};
+        executionStop={index,stopKind:'runtime-error',reason:'明示変換・数学組込を含む式を安全に評価できないため、この行は実行されませんでした。'};
         break;
       }
       if(result === 'program-ended'){
@@ -5273,7 +5329,7 @@ function visualizeCode(){
 
     const ifResult = executeIfNode(block, { insideFor:false, stopOnRuntimeError:false });
     if(castFailureIndex !== null){
-      executionStop={index:castFailureIndex,stopKind:'runtime-error',reason:'明示変換を含む式を安全に評価できないため、この行以降は実行されませんでした。'};
+      executionStop={index:castFailureIndex,stopKind:'runtime-error',reason:'明示変換・数学組込を含む式を安全に評価できないため、この行以降は実行されませんでした。'};
       break;
     }
     if(ifResult.status === 'program-ended'){

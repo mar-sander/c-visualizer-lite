@@ -69,7 +69,7 @@ record('決定的な不完全入力1000件・例外や経路矛盾なし', () =>
 record('Stage5: 許可された依存順・RUN振分け・YESと明示入力接続（動作検査は独立UI）', () => {
   const html=fs.readFileSync(path.join(__dirname,'index.html'),'utf8');
   const scripts=[...html.matchAll(/<script src="([^"]+)"/g)].map(m=>m[1]);
-  const order=['script.js','function-preflight.js','function-execution-core.js','function-assist-routing.js','app.js'];
+  const order=['safe-math-builtins.js','script.js','function-preflight.js','function-execution-core.js','function-assist-routing.js','app.js'];
   if(!order.every((name,i)=>scripts.filter(s=>s===name).length===1 && (!i||scripts.indexOf(name)>scripts.indexOf(order[i-1]))))return false;
   const app=fs.readFileSync(path.join(__dirname,'app.js'),'utf8');
   const routing=fs.readFileSync(path.join(__dirname,'function-assist-routing.js'),'utf8');

@@ -13,7 +13,8 @@ const FunctionExecutionCore = (() => {
     }
   }
 
-  function execute(source, options = {}){
+  function execute(source, options = {}){return SafeMathBuiltins.withBudget(()=>executeUnchecked(source,options));}
+  function executeUnchecked(source, options = {}){
     const main = {functionName:'main', scopeId:'main', callId:0, callLineNo:null, state:createMainExecutionState()};
     let active = main, output = '', callCount = 0, statementsExecuted = 0;
     let snapshotCells = 0, outputSnapshotCharacters = 0, catalog = null, lineStarts = [0];
@@ -86,29 +87,31 @@ const FunctionExecutionCore = (() => {
         if(hasOwnSymbol(staging.variables,item.name)) fault('DUPLICATE_LOCAL','仮引数または局所変数の名前が重複しています。',statement);
         let value = UNINITIALIZED;
         let castConversions = [];
+        let mathCalls = [];
         if(item.expr !== undefined){
           const result = expressionValue(item.expr,{state:staging},statement,false);
           castConversions=result.castConversions || [];
+          mathCalls=result.mathCalls || [];
           const converted = convertScalarValue(result.value,statement.type);
           if(!converted.ok) fault('VALUE_RANGE',converted.error,statement);
           value = converted.value;
         }
         staging.variables[item.name] = value; staging.variableTypes[item.name] = statement.type;
-        pending.push({name:item.name,value,castConversions});
+        pending.push({name:item.name,value,castConversions,mathCalls});
       }
-      for(const item of pending){declareExecutionScalar(state,item.name,item.value,statement.type);emit('declare',statement,{target:item.name,...(item.castConversions.length?{castConversions:item.castConversions}:{})});}
+      for(const item of pending){declareExecutionScalar(state,item.name,item.value,statement.type);emit('declare',statement,{target:item.name,...expressionMetadata(item)});}
     }
     function assign(frame, statement){
       if(!hasOwnSymbol(frame.state.variables,statement.name)) fault('UNDECLARED_TARGET','代入先がこのスコープで宣言されていません。',statement);
       const result = expressionValue(statement.expr,frame,statement,false);
-      saveValue(frame,statement.name,result.value,statement);emit('assign',statement,{target:statement.name,...(result.castConversions?.length?{castConversions:result.castConversions}:{})});
+      saveValue(frame,statement.name,result.value,statement);emit('assign',statement,{target:statement.name,...expressionMetadata(result)});
     }
     function print(statement){
       const args = evaluatePrintfArguments(statement.parsedFormat,statement.args,main.state);
       if(!args.ok) fault('PRINTF_VALUE',args.error,statement);
       const formatted = formatPrintfString(statement.parsedFormat,args.values);
       if(output.length+formatted.text.length > limits.outputCharacters) fault('OUTPUT_LIMIT','共通出力が開発用の文字数上限を超えます。',statement,'runtime',true);
-      output += formatted.text;const castConversions=args.results.flatMap(r=>r.castConversions||[]);emit('printf',statement,castConversions.length?{castConversions}:{});
+      output += formatted.text;const castConversions=args.results.flatMap(r=>r.castConversions||[]),mathCalls=args.results.flatMap(r=>r.mathCalls||[]);emit('printf',statement,expressionMetadata({castConversions,mathCalls}));
     }
     function readInput(statement){
       const name=statement.name;
@@ -287,9 +290,9 @@ const FunctionExecutionCore = (() => {
       for(let node of bodies.get(fn.name)){
         tick(node);
         if(node.kind==='branch'){
-          for(const operand of node.operands)expressionValue(operand,active,node,false);
+          if(!containsMathFunctionCandidate(node.condition))for(const operand of node.operands)expressionValue(operand,active,node,false);
           const evaluated=expressionValue(node.condition,active,node,false),conditionMet=evaluated.value!==0;
-          emit('branch-decision',node,{branchDecision:{condition:node.condition,conditionMet,selectedBranch:conditionMet?'if':'else',comparison:evaluated.comparison ? {...evaluated.comparison} : null},...(evaluated.castConversions?.length?{castConversions:evaluated.castConversions}: {})});
+          emit('branch-decision',node,{branchDecision:{condition:node.condition,conditionMet,selectedBranch:conditionMet?'if':'else',comparison:evaluated.comparison ? {...evaluated.comparison} : null},...expressionMetadata(evaluated)});
           node=conditionMet?node.ifReturn:node.elseReturn;tick(node);
         }
         if(node.kind==='declare')declare(active,node);
@@ -297,7 +300,7 @@ const FunctionExecutionCore = (() => {
         else if(node.kind==='return'){
           const result=expressionValue(node.expr,active,node,false),converted=convertScalarValue(result.value,signature.returnType);
           if(!converted.ok)fault('RETURN_VALUE',converted.error,node);
-          control={kind:'return',value:converted.value,type:signature.returnType};emit('return',node,{returnValue:control.value,returnType:control.type,returnDisplay:displayScalarValue(control.value,control.type),returnExpression:{expression:node.expr,type:result.type,value:result.value,display:displayScalarValue(result.value,result.type)},...(result.castConversions?.length?{castConversions:result.castConversions}:{})});break;
+          control={kind:'return',value:converted.value,type:signature.returnType};emit('return',node,{returnValue:control.value,returnType:control.type,returnDisplay:displayScalarValue(control.value,control.type),returnExpression:{expression:node.expr,type:result.type,value:result.value,display:displayScalarValue(result.value,result.type)},...expressionMetadata(result)});break;
         }
       }
       if(control.kind!=='return')fault('MISSING_RETURN','戻り値が確定しませんでした。',statement);

@@ -7,6 +7,8 @@ const FunctionPreflight = (() => {
   const TYPES = new Set(['int', 'float', 'double', 'char', 'void', 'long', 'short', 'unsigned', 'signed', 'const', 'static', 'extern', 'struct', 'union', 'enum', 'typedef', 'volatile']);
   const NON_CALLS = new Set([...TYPES, 'if', 'else', 'for', 'while', 'switch', 'return', 'sizeof', '_Alignof', 'do', 'case']);
   const BUILTINS = new Set(['printf', 'scanf']);
+  const MATH_NAMES = new Set(['sin','cos','tan']);
+  const math = typeof SafeMathBuiltins!=='undefined' ? SafeMathBuiltins : typeof module==='object' && module.exports && typeof require==='function' ? require('./safe-math-builtins.js') : null;
   const FUNCTION_TYPES = new Set(['int', 'double']);
   const MAX_PARAMETERS = 4;
   const RESERVED_NAMES = new Set([...NON_CALLS, 'auto','break','continue','default','goto','register','restrict','volatile','_Atomic','_Bool','_Complex','_Generic','_Imaginary','_Noreturn','_Static_assert','_Thread_local']);
@@ -17,6 +19,7 @@ const FunctionPreflight = (() => {
     const diagnostics = [];
     const functions = [];
     const calls = [];
+    const mathCalls = [];
     const directives = [];
     const tokens = [];
     const pairs = new Map();
@@ -45,6 +48,7 @@ const FunctionPreflight = (() => {
           functions.some(item => item.name !== 'main') ? 'DECLARATION_ONLY' : 'NONE');
       return {
         schemaVersion:1, classification, functions, calls, directives, diagnostics,
+        ...(mathCalls.length?{mathCalls}:{}),
         safeToUseNormalPath:classification === 'NONE' && blocked.length === 0,
         canOfferFunctionConfirmation:['DEFINITE', 'DECLARATION_ONLY'].includes(classification) && blocked.length === 0,
         validationLevel:'structure-and-call-shape-only', readyForExecution:false,
@@ -283,6 +287,13 @@ const FunctionPreflight = (() => {
       if(byName.has(name)) diagnose('GLOBAL_NAME_COLLISION', '関数とmain外の変数等の名前が重複しています。', byName.get(name).definitions[0]?.headerRange || byName.get(name).declarations[0]?.headerRange);
     }
 
+    for(const fn of functions){
+      if(MATH_NAMES.has(fn.name)) diagnose('MATH_NAME_COLLISION','sin/cos/tanは予約済み数学組込名です。ユーザー関数を置き換えて実行しません。',fn.definitions[0]?.headerRange || fn.declarations[0]?.headerRange,'UNSUPPORTED');
+      for(const p of fn.parameters || [])if(MATH_NAMES.has(p.name))diagnose('MATH_NAME_COLLISION','数学組込名は仮引数名に使えません。',fn.definitions[0]?.headerRange || fn.declarations[0]?.headerRange,'UNSUPPORTED');
+    }
+    for(let i=0;i<tokens.length;i++)if(identifier(i) && MATH_NAMES.has(value(i)) && value(i+1)!=='('){
+      diagnose('MATH_NAME_COLLISION','数学組込名を変数・関数値として使う形は未対応です。',tokens[i].range,'UNSUPPORTED');
+    }
     // 本文を実行せず、宣言・呼出の形と、後続が参照する構造位置だけを記録します。
     for(const body of bodies){
       const { fn, open, close } = body;
@@ -293,6 +304,35 @@ const FunctionPreflight = (() => {
         let parent = parents[index];
         while(parent >= 0 && value(parent) !== '{') parent = parents[parent];
         return parent;
+      }
+      function inspectMathContainer(index){
+        // Locate the existing expression context, never evaluate an argument.
+        for(let parent=parents[index];parent>=0 && parent!==open;parent=parents[parent]){
+          if(value(parent)==='[')return false;
+          if(value(parent)==='(' && ['printf','if','while','for','scanf'].includes(value(parent-1))){
+            const owner=value(parent-1),end=pairs.get(parent);
+            if(owner==='for' || owner==='scanf')return false;
+            const spans=owner==='printf'?split(parent+1,end):[[parent+1,end]];
+            const span=spans.find(([a,b])=>a<=index&&index<b);
+            return !!span && inspectConditionalExpressionSyntax(raw(span[0],span[1]),true);
+          }
+        }
+        const curly=enclosingCurly(index);let start=index,end=index;
+        while(start>curly+1){
+          const previous=start-1;
+          if(value(previous)===';' && parents[previous]===curly)break;
+          if(value(previous)==='}' && enclosingCurly(previous)===curly)break;
+          start--;
+        }
+        while(end<close && !(value(end)===';' && parents[end]===curly))end++;
+        if(end>=close)return false;
+        const text=raw(start,end+1),ret=text.match(/^return\s+([\s\S]+);$/);
+        if(ret)return inspectConditionalExpressionSyntax(ret[1],true);
+        const multiple=parseMultipleScalarDeclaration(text),single=matchScalarDeclaration(text);
+        if(multiple.matched)return multiple.ok && multiple.declarators.every(d=>d.expr===undefined || inspectConditionalExpressionSyntax(d.expr,true));
+        if(single)return single[3]===undefined || inspectConditionalExpressionSyntax(single[3],true);
+        const assignment=text.match(/^[A-Za-z_]\w*(?:\s*\[[^\[\]]+\])?\s*=\s*([\s\S]+);$/);
+        return !!assignment && inspectConditionalExpressionSyntax(assignment[1],true);
       }
       for(let index = open + 1; index < close; index++){
         const curly = enclosingCurly(index);
@@ -354,12 +394,28 @@ const FunctionPreflight = (() => {
         if(!identifier(index) || value(index + 1) !== '(' || NON_CALLS.has(value(index)) || nestedHeaders.has(index)) continue;
         const callee = value(index);
         const callEnd = pairs.get(index + 1);
+        if(MATH_NAMES.has(callee)){
+          const at=tokenRange(index,callEnd+1),args=split(index+2,callEnd);
+          if(!math)diagnose('MATH_REGISTRY_UNAVAILABLE','数学組込registryを利用できません。',at,'UNSUPPORTED');
+          if(calls.length+mathCalls.length>=LIMITS.calls){diagnose('CALL_LIMIT','mathを含む呼出の構造検査上限を超えています。',at,'UNSUPPORTED');break;}
+          mathCalls.push({caller:fn.name,callee,line:at.start.line,range:at,argumentCount:args.length,arguments:args.map(([a,b])=>({text:raw(a,b),range:a<b?tokenRange(a,b):tokens[callEnd].range})),resultType:'double'});
+          if(value(index-1)==='.' || value(index-1)==='>')diagnose('MATH_CALL_FORM','member/間接的な数学呼出は対応外です。',at,'UNSUPPORTED');
+          if(byName.has(callee) || locals.some(x=>x.name===callee))diagnose('MATH_NAME_COLLISION','数学組込名と宣言が衝突しています。',at,'UNSUPPORTED');
+          if(!directives.some(d=>d.kind==='include' && /^#\s*include\s*<math\.h>\s*(?:\/\/[^\n]*|\/\*[^]*?\*\/)?$/.test(d.text)))diagnose('MATH_HEADER_REQUIRED','数学組込には #include <math.h> が必要です。',at,'UNSUPPORTED');
+          if(args.length!==1 || args.some(([a,b])=>a===b))diagnose('MATH_ARGUMENT_COUNT','sin/cos/tanの引数は数値式1個だけです。',at,'UNSUPPORTED');
+          else if(typeof inspectConditionalExpressionSyntax!=='function')diagnose('MATH_SYNTAX_UNAVAILABLE','数学式の共有構文検査を利用できません。構造だけから実行可能とは判定しません。',at,'UNSUPPORTED');
+          else{
+            const argument=raw(args[0][0],args[0][1]),comparison=findComparison(stripWrappingParentheses(argument));
+            if(!comparison.ok || comparison.comparison || !inspectConditionalExpressionSyntax(argument,true) || !inspectMathContainer(index))diagnose('MATH_ARGUMENT_SYNTAX','数学関数の引数式または使用文脈が不正・未対応です。',at,'UNSUPPORTED');
+          }
+          continue;
+        }
         if(BUILTINS.has(callee) && !byName.has(callee)){
           if(fn.name !== 'main' && callee === 'scanf') diagnose('SUBFUNCTION_INPUT_UNSUPPORTED', 'サブ関数内scanfは初期実行範囲外です。', tokenRange(index, callEnd + 1), 'UNSUPPORTED');
           if(fn.name !== 'main' && callee === 'printf') diagnose('SUBFUNCTION_OUTPUT_UNSUPPORTED', 'サブ関数内printfは実行範囲外です。', tokenRange(index, callEnd + 1), 'UNSUPPORTED');
           continue;
         }
-        if(calls.length >= LIMITS.calls){ diagnose('CALL_LIMIT', '構造検査の暫定呼出数上限を超えています。', tokens[index].range, 'UNSUPPORTED'); break; }
+        if(calls.length+mathCalls.length >= LIMITS.calls){ diagnose('CALL_LIMIT', '構造検査の暫定呼出数上限を超えています。', tokens[index].range, 'UNSUPPORTED'); break; }
         const args = split(index + 2, callEnd);
         const call = {
           caller:fn.name, callee, line:tokens[index].range.start.line,

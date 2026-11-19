@@ -70,7 +70,7 @@ record('Stage4: 正式依存順・FUNCTION実動作と入力伝達', () => {
   // L-QA1: one copy per standalone verifier; no production test dependency.
   const html=fs.readFileSync(path.join(__dirname,'index.html'),'utf8');
   const scripts=[...html.matchAll(/<script\b[^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*>/g)].map(m=>m[1]);
-  const order=['script.js','function-preflight.js','function-execution-core.js','function-assist-routing.js','app.js'];
+  const order=['safe-math-builtins.js','script.js','function-preflight.js','function-execution-core.js','function-assist-routing.js','app.js'];
   if(!order.every((name,i)=>scripts.filter(s=>s===name).length===1 && (!i||scripts.indexOf(name)>scripts.indexOf(order[i-1]))))return false;
   const elements=new Map(['codeInput','outputResult','variableState','stepResult','codePreview','hintResult'].map(id=>[id,{value:'',innerHTML:'',textContent:''}]));
   const engine=vm.createContext({document:{getElementById:id=>elements.get(id)||null,querySelectorAll:()=>[],createElement:()=>({innerHTML:'',textContent:''})},window:{addEventListener(){}}});
