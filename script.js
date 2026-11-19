@@ -2132,7 +2132,24 @@ function visualizeCode(){
     return { ok:true, value:after };
   }
 
-  function processSimpleLine(rawLine, index, insideIf = false, insideFor = false, insideWhile = false, allowConditionalArrayRead = false){
+  // L-EXAM2: the syntax-owning loop alone consumes this control signal.
+  function loopControlContext(node, kind){
+    return { sourceId:`${kind}:${node.startIndex + 1}`, kind,
+      headerLineNo:node.startIndex + 1, endLineNo:node.endIndex + 1,
+      nextLineNo:node.endIndex + 2, depth:node.forDepth || 1 };
+  }
+
+  function completeLoopBreak(node, signal){
+    for(let index = signal.stopIndex + 1; index < node.endIndex; index++){
+      if(executableLines[index].trim()) addAnalysis(analysis, index + 1,
+        'breakでこのループを脱出したため、残りの本体は実行しませんでした。');
+    }
+    addAnalysis(analysis, node.endIndex + 1,
+      'breakでこのループだけを終了し、ループの後の処理へ進みます。');
+    return { status:'normal', exitReason:'break' };
+  }
+
+  function processSimpleLine(rawLine, index, insideIf = false, insideFor = false, insideWhile = false, allowConditionalArrayRead = false, loopControl = null){
     const lineNo = index + 1;
     const rawTrimmed = rawLine.trim();
     const trimmed = executableLines[index].trim();
@@ -2155,6 +2172,21 @@ function visualizeCode(){
       addHint(hints, lineNo, '改行の確認', message);
       warningLines.add(lineNo);
       return;
+    }
+
+    if(/^break\s*;$/.test(trimmed) && insideLoop && loopControl){
+      const conditions = (loopControl.conditions || []).map(item => ({...item}));
+      const reason = conditions.length ? conditions.map(item =>
+        `条件 ${item.condition} が${item.result ? '成立' : '不成立'}（${item.selected}側）`).join('、') : '本体内のbreakに到達';
+      const skipped = loopControl.kind === 'for' ? '残りの本体と、このforの更新式は実行しません。'
+        : '残りの本体と、このwhileの次の条件判定は実行しません。';
+      const message = `${escapeHtml(reason)}。breakを実行しました。${loopControl.headerLineNo}～${loopControl.endLineNo}行目の${loopControl.kind}だけを終了し、${loopControl.nextLineNo}行目以降へ進みます。${skipped}`;
+      addAnalysis(analysis, lineNo, message);
+      addStep(lineNo, message);
+      Object.assign(steps[steps.length - 1], { stepKind:'loop-break',
+        breakDecision:{...loopControl, conditions, breakLineNo:lineNo,
+          exitReason:'break', skipsUpdate:loopControl.kind === 'for', skipsNextCondition:true} });
+      return { status:'break', ownerLoopId:loopControl.sourceId, stopIndex:index };
     }
 
     function stopArrayLine(title, message, arrayViews = []){
@@ -2295,10 +2327,10 @@ function visualizeCode(){
 
     let hasSupportedArrayRead = false;
     if(containsArrayElementSyntax(structuralCode)){
-      if(insideWhile || (insideIf && !(allowConditionalArrayRead && isArrayReadAssignment(trimmed)))){
+      if(insideIf && !(allowConditionalArrayRead && isArrayReadAssignment(trimmed))){
         return stopArrayLine(
           'この場所の配列操作は未対応',
-          '現在のVisualizerでは、配列要素の参照・代入はmain直下、またはmain直下にあるfor文の本体へ直接書いた文だけで実行できます。if／while内では実行しません。'
+          '配列要素の参照・代入はmain直下、対応範囲のfor／while本体とその直下if／elseで実行できます。この場所では実行しません。'
         );
       }
 
@@ -2930,7 +2962,15 @@ function visualizeCode(){
       args.every(arg => inspectConditionalExpressionSyntax(arg, true));
   }
 
-  // for内の直接ifだけに配列操作を許可します。入れ子if・whileの既存境界は維持します。
+  function inspectLoopArrayStatement(code, structuralCode, kind){
+    if(!containsArrayElementSyntax(structuralCode)) return {ok:true, matched:false};
+    if(!isSupportedArrayStatement(code)) return {ok:false,
+      title:`${kind}文本体の配列操作は未対応`,
+      message:`安全なint添字を使った代入・式・printfだけに対応しています。不正な添字式・要素更新は実行しません。未対応の文を含む${kind}全体を実行しません。`};
+    return {ok:true, matched:true};
+  }
+
+  // for/while内の直接ifだけに配列操作を許可。入れ子if/チェーンの境界は維持。
   function isArrayReadAssignment(code){
     return isSupportedArrayStatement(code);
   }
@@ -3321,6 +3361,7 @@ function visualizeCode(){
     const branches = node.conditionalChain.branches;
     const conditionCount = branches.filter(branch => branch.branchKind !== 'else').length;
     const hasFallbackElse = branches.at(-1).branchKind === 'else';
+    const evaluatedConditions = [];
     function skipBranch(branch, reason){
       addAnalysis(analysis, branch.startIndex + 1, reason);
       markSkippedIfBranch(branch.bodyStartIndex, branch.endIndex, branch.nestedIfs, reason,
@@ -3345,6 +3386,8 @@ function visualizeCode(){
           return { status:'normal' };
         }
         const conditionMet = evaluated.value !== 0;
+        evaluatedConditions.push({lineNo, condition:branch.condition, result:conditionMet,
+          selected:conditionMet ? branch.branchKind : '次の分岐'});
         const nextCondition = index + 1 < conditionCount;
         const comparison = evaluated.comparison;
         const decision = {
@@ -3375,7 +3418,9 @@ function visualizeCode(){
           continue;
         }
       }
-      const branchResult = executeIfBranch(branch.bodyStartIndex, branch.endIndex, branch.nestedIfs, context);
+      const branchResult = executeIfBranch(branch.bodyStartIndex, branch.endIndex, branch.nestedIfs,
+        {...context, breakConditions:[...(context.breakConditions || []), ...evaluatedConditions.map(item =>
+          ({...item, ...(branch.branchKind === 'else' ? {selected:'else'} : {})}))]});
       if(branchResult.status !== 'normal') return branchResult;
       branches.slice(index + 1).forEach(rest => skipBranch(rest,
         '先の分岐が選択されたため、この条件・本文は評価・実行されませんでした。'));
@@ -3485,8 +3530,10 @@ function visualizeCode(){
         addStep(lineNo, `${escapeHtml(node.condition)}を判定しました。<br>${stepExplanation}`, true, resultArrayViews(result), branchDecision);
       }
 
+      const branchContext = {...context, breakConditions:[...(context.breakConditions || []),
+        {lineNo, condition:node.condition, result:conditionMet, selected:conditionMet ? 'if' : 'else'}]};
       if(conditionMet){
-        const branchResult = executeIfBranch(node.ifBodyStartIndex, node.ifEndIndex, node.ifNestedIfs, context);
+        const branchResult = executeIfBranch(node.ifBodyStartIndex, node.ifEndIndex, node.ifNestedIfs, branchContext);
         if(branchResult.status !== 'normal') return branchResult;
         if(node.hasElse){
           markSkippedIfBranch(
@@ -3510,7 +3557,7 @@ function visualizeCode(){
           '外側の分岐が選択されなかったため、この入れ子のif文は評価されませんでした。'
         );
         if(node.hasElse){
-          const branchResult = executeIfBranch(node.elseBodyStartIndex, node.elseEndIndex, node.elseNestedIfs, context);
+          const branchResult = executeIfBranch(node.elseBodyStartIndex, node.elseEndIndex, node.elseNestedIfs, branchContext);
           if(branchResult.status !== 'normal') return branchResult;
         }
       }
@@ -3537,8 +3584,10 @@ function visualizeCode(){
         true,
         context.insideFor === true,
         context.insideWhile === true,
-        context.allowArrayRead === true
+        context.allowArrayRead === true,
+        context.loopControl ? {...context.loopControl, conditions:context.breakConditions || []} : null
       );
+      if(simpleResult?.status === 'break') return simpleResult;
       if(simpleResult === 'program-ended'){
         return { status:'program-ended', stopIndex:index };
       }
@@ -3883,9 +3932,11 @@ function visualizeCode(){
       }
 
       const supportedSimpleStatement =
+        /^break\s*;$/.test(structuralBodyCode) ||
         /^return\s+0\s*;$/.test(structuralBodyCode) ||
         /^[A-Za-z_]\w*\s*=\s*.+;$/.test(structuralBodyCode) ||
-        printfMatch !== null;
+        printfMatch !== null ||
+        (containsArrayElementSyntax(structuralBodyCode) && isSupportedArrayStatement(trimmed));
       if(!supportedSimpleStatement){
         return invalid(
           'if分岐内の文は未対応',
@@ -3909,6 +3960,7 @@ function visualizeCode(){
       if(/^if\b/.test(structuralBodyCode)){
         const ifNode = inspectSupportedIf(index, {
           containerEndIndex:Math.max(index, safeEndIndex - 1),
+          allowArrayRead:true,
           validateSimpleStatement:validateIfSimpleStatement
         });
         if(!ifNode.ok){
@@ -3934,12 +3986,8 @@ function visualizeCode(){
       if(/^int\b/.test(structuralBodyCode)){
         return failure('while文の本体内で変数を宣言する形は現在未対応です。while文全体を実行しません。', 'while文内の変数宣言は未対応', index);
       }
-      if(containsArrayElementSyntax(structuralBodyCode)){
-        return failure('現在はwhile文の本体から配列要素を参照・代入できません。while文全体を条件判定前に停止します。', 'while文内の配列操作は未対応', index);
-      }
-      if(/^break\b/.test(structuralBodyCode)){
-        return failure('while文の本体内にbreakがあります。現在のVisualizerではbreakに対応していないため、while文全体を実行しません。', 'breakは未対応', index);
-      }
+      const arrayStatement = inspectLoopArrayStatement(trimmed, structuralBodyCode, 'while');
+      if(!arrayStatement.ok) return failure(arrayStatement.message, arrayStatement.title, index);
       if(/^continue\b/.test(structuralBodyCode)){
         return failure('while文の本体内にcontinueがあります。現在のVisualizerではcontinueに対応していないため、while文全体を実行しません。', 'continueは未対応', index);
       }
@@ -3964,10 +4012,11 @@ function visualizeCode(){
       }
 
       const supportedSimpleStatement =
+        /^break\s*;$/.test(structuralBodyCode) ||
         /^return\s+0\s*;$/.test(structuralBodyCode) ||
         variableUpdate !== null ||
         /^[A-Za-z_]\w*\s*=\s*.+;$/.test(structuralBodyCode) ||
-        printfMatch !== null;
+        printfMatch !== null || arrayStatement.matched;
       if(!supportedSimpleStatement){
         return failure('while文の本体に、現在のVisualizerでは実行できない文があります。本体を部分実行せず、条件判定前に停止します。', 'while文本体の文は未対応', index);
       }
@@ -4021,7 +4070,7 @@ function visualizeCode(){
       for(let lineNo = firstLineNo; lineNo <= lastLineNo; lineNo++){
         analysisLengths[lineNo] = (analysis[lineNo] || []).length;
       }
-      return { analysisLengths, stepLength:steps.length };
+      return { analysisLengths, stepLength:steps.length, arrayViews:arrayOrder.map(name => makeArrayView({name}, true)) };
     }
 
     function beginIteration(iterationNumber){
@@ -4099,6 +4148,7 @@ function visualizeCode(){
           .slice(record.before.stepLength, record.after.stepLength)
           .map(item => ({
             ...item,
+            ...(item.arrayViews?.length ? {arrayLoopContext:[{label:'WHILE', state:`${record.iterationNumber}回目`}]} : {}),
             text:`${iterationPrefix(record.iterationNumber)}${item.text}`
           })));
 
@@ -4112,6 +4162,7 @@ function visualizeCode(){
             text:omissionText(omittedFirst, omittedLast),
             stepKind:'loop-omission',
             omittedRange:{first:omittedFirst, last:omittedLast, kind:'while', sourceLine:firstLineNo},
+            ...(lastRecord.before.arrayViews.length ? {arrayViews:lastRecord.before.arrayViews} : {}),
             outputAtStep:omittedState.outputAtStep,
             variablesAtStep:omittedState.variablesAtStep.map(([name, value]) => [name, value])
           });
@@ -4218,13 +4269,19 @@ function visualizeCode(){
           // 空行とコメントは最初の反復で一度だけ説明し、大量の同一説明を避けます。
           if(executableLines[index].trim() === '' && enteredBodyCount > 1) continue;
 
-          const bodyResult = processSimpleLine(lines[index], index, false, false, true);
+          const bodyResult = processSimpleLine(lines[index], index, false, false, true, false, loopControlContext(node, 'while'));
+          if(bodyResult?.status === 'break' && bodyResult.ownerLoopId === 'while:' + lineNo){
+            const result = completeLoopBreak(node, bodyResult);
+            explanationHistory.finishIteration(activeIteration);
+            explanationHistory.finalize();
+            return result;
+          }
           if(bodyResult === 'program-ended'){
             explanationHistory.finishIteration(activeIteration);
             explanationHistory.finalize();
             return { status:'program-ended', stopIndex:index };
           }
-          if(bodyResult === 'execution-error' || bodyResult === 'scanf-error'){
+          if(bodyResult === 'execution-error' || bodyResult === 'scanf-error' || bodyResult === 'array-error'){
             addAnalysis(analysis, index + 1, 'while文の本体で実行時エラーが発生したため、プログラム全体を停止します。');
             addStep(index + 1, 'while文の本体で処理を継続できないため、プログラムの実行を停止します。');
             explanationHistory.finishIteration(activeIteration);
@@ -4241,8 +4298,15 @@ function visualizeCode(){
 
         const ifResult = executeIfNode(bodyItem.node, {
           insideWhile:true,
-          stopOnRuntimeError:true
+          stopOnRuntimeError:true,
+          loopControl:loopControlContext(node, 'while')
         });
+        if(ifResult.status === 'break' && ifResult.ownerLoopId === 'while:' + lineNo){
+          const result = completeLoopBreak(node, ifResult);
+          explanationHistory.finishIteration(activeIteration);
+          explanationHistory.finalize();
+          return result;
+        }
         if(ifResult.status === 'program-ended'){
           explanationHistory.finishIteration(activeIteration);
           explanationHistory.finalize();
@@ -4347,6 +4411,7 @@ function visualizeCode(){
       }
 
       const supportedSimpleStatement =
+        /^break\s*;$/.test(structuralBodyCode) ||
         /^return\s+0\s*;$/.test(structuralBodyCode) ||
         /^[A-Za-z_]\w*\s*=\s*.+;$/.test(structuralBodyCode) ||
         printfMatch !== null ||
@@ -4360,13 +4425,6 @@ function visualizeCode(){
       return { ok:true };
     }
 
-    function validateDirectArrayStatement(trimmed, structuralBodyCode){
-      if(!containsArrayElementSyntax(structuralBodyCode)) return { ok:true, matched:false };
-      if(!isSupportedArrayStatement(trimmed)){
-        return {ok:false, title:'for文本体の配列操作は未対応', message:'安全なint添字を使った代入・式・printfだけに対応しています。不正な添字式・要素更新は実行しません。未対応の文を含むfor全体を実行しません。'};
-      }
-      return { ok:true, matched:true };
-    }
 
     for(let index = startIndex + 1; index < safeEndIndex; index++){
       const trimmed = executableLines[index].trim();
@@ -4441,7 +4499,7 @@ function visualizeCode(){
       if(/^int\b/.test(structuralBodyCode)){
         return failure('for文の本体内で変数を宣言する形は現在未対応です。for文全体を実行しません。', 'for文内の変数宣言は未対応', index);
       }
-      const arrayStatement = validateDirectArrayStatement(trimmed, structuralBodyCode);
+      const arrayStatement = inspectLoopArrayStatement(trimmed, structuralBodyCode, 'for');
       if(!arrayStatement.ok){
         return failure(arrayStatement.message, arrayStatement.title, index);
       }
@@ -4458,6 +4516,7 @@ function visualizeCode(){
       }
 
       const supportedSimpleStatement =
+        /^break\s*;$/.test(structuralBodyCode) ||
         /^return\s+0\s*;$/.test(structuralBodyCode) ||
         variableUpdate !== null ||
         /^[A-Za-z_]\w*\s*=\s*.+;$/.test(structuralBodyCode) ||
@@ -4841,7 +4900,13 @@ function visualizeCode(){
           // 空行とコメントは最初の反復で一度だけ説明し、同じ説明の大量重複を避けます。
           if(executableLines[index].trim() === '' && iterationCount > 1) continue;
 
-          const bodyResult = processSimpleLine(lines[index], index, false, true);
+          const bodyResult = processSimpleLine(lines[index], index, false, true, false, false, loopControlContext(node, 'for'));
+          if(bodyResult?.status === 'break' && bodyResult.ownerLoopId === 'for:' + lineNo){
+            const result = completeLoopBreak(node, bodyResult);
+            explanationHistory.finishIteration(activeIteration);
+            explanationHistory.finalize();
+            return result;
+          }
           if(bodyResult === 'program-ended'){
             explanationHistory.finishIteration(activeIteration);
             explanationHistory.finalize();
@@ -4895,8 +4960,15 @@ function visualizeCode(){
 
         const ifResult = executeIfNode(bodyItem.node, {
           insideFor:true,
-          stopOnRuntimeError:true
+          stopOnRuntimeError:true,
+          loopControl:loopControlContext(node, 'for')
         });
+        if(ifResult.status === 'break' && ifResult.ownerLoopId === 'for:' + lineNo){
+          const result = completeLoopBreak(node, ifResult);
+          explanationHistory.finishIteration(activeIteration);
+          explanationHistory.finalize();
+          return result;
+        }
         if(ifResult.status === 'program-ended'){
           explanationHistory.finishIteration(activeIteration);
           explanationHistory.finalize();

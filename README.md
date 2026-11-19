@@ -64,3 +64,14 @@ FLOWでは比較左辺／右辺、配列間代入の代入元／先を区別し�
 1次元int配列の添字は、10進整数・int変数と `+ - * / %`、括弧、単項 `+ -` を使う式に対応します。`start[gengo - 1]` のような式をmain直下のread/write/printf、既存対応のfor本体・for直下ifで共通に評価し、FLOWには式・解決添字・対象要素・値を表示します。上の旧Stage節にある「添字式は未対応」は過去時点の記録です。while・main直下if・入れ子if等の配列対応範囲は拡張していません。
 
 添字内のcall/array/更新/代入/cast/比較、小数/文字/8進/16進literalは拒否。文字数2048・token256・括弧深さと単項演算数の合計32に制限し、未初期化/非int/安全整数外/0除算/負数/範囲外では後続を実行しません。既存の配列100要素・for500回/3階層等の上限は維持。新規検証入口は `tests-array-index-expressions.cjs`。
+
+
+## L-EXAM2 Loop Break & Array Execution Integration
+
+構文上の最内側for／whileを終了する `break;` に対応しました。既存のif／else／else-ifを通じて所有ループへ伝播し、for更新・次条件やwhile再判定は行いません。内側for終了後は外側本体・更新を継続します。FLOWにはbreak行、選択条件、対象ループ範囲、脱出先、未実行の更新／本体を表示します。
+
+main直下whileの直接文と、その直下if／elseでも、L-EXAM1の安全なint添字による配列read/write/printf/比較を共通に実行します。while省略STEPにも独立配列snapshotを保持します。上の旧Stageの「break／while配列は未対応」は過去の範囲であり、この節が置き換えます。
+
+標準問題集の線形探索と挿入による昇順並べ替えは、配列名・定数・問題IDによる例外処理を使わず、原文のまま実行できます。for最大3階層・ソースforごと累計500進入、while500進入、配列100要素、添字の型・初期化・範囲・安全整数検査は維持しています。
+
+whileヘッダ配列、main直下if／入れ子if／else-ifチェーンの配列アクセス、while内scanf・宣言・任意ループ入れ子、loop外break、continue、switch、複数行配列初期化、サブ関数型拡張等は対象外です。既存UIの配置・アニメーション・SAMPLE・SECRET CODEは変更していません。

@@ -71,7 +71,7 @@
     for(const [label,body,text] of [
       ['scanf','@error scanf("%d",&i);','scanf'],
       ['宣言','@error int k=1;','宣言'],
-      ['break','@error break;','未対応'],
+      ['continue','@error continue;','未対応'],
       ['複数文','@error i=1;i=2;','改行'],
       ['本文のセミコロン不足','@error i=1','未対応'],
       ['returnのセミコロン不足','@error return 0','未対応'],
