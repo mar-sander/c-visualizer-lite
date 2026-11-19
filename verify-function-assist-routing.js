@@ -2,7 +2,7 @@ const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),asse
 const root=__dirname,source=__dirname;
 const elements=new Map(['codeInput','outputResult','variableState','stepResult','codePreview','hintResult'].map(id=>[id,{value:'',innerHTML:'',textContent:''}]));
 const context=vm.createContext({document:{getElementById:id=>elements.get(id)||null,querySelectorAll:()=>[],createElement:()=>({innerHTML:'',textContent:''})},window:{addEventListener(){}}});
-for(const file of ['script.js','function-preflight.js','function-assist-routing.js'])vm.runInContext(fs.readFileSync(path.join(source,file),'utf8'),context,{filename:file,timeout:10000});
+for(const file of ['safe-math-builtins.js','script.js','function-preflight.js','function-assist-routing.js'])vm.runInContext(fs.readFileSync(path.join(source,file),'utf8'),context,{filename:file,timeout:10000});
 const router=vm.runInContext('FunctionAssistRouting',context),api=vm.runInContext('FunctionPreflight',context),audit={corpus:{blocked:JSON.parse(fs.readFileSync(path.join(root,'tests-function-assist-routing-cases.json'),'utf8'))}};
 const rows=[];function record(name,fn){try{const value=fn();rows.push({name,pass:true,...value});}catch(e){rows.push({name,pass:false,error:String(e.stack||e)});}}
 for(const t of audit.corpus.blocked)record(t.name,()=>{const r=router.classify(t.code),typedZero=t.name==='L-BUG3 RESULT hint metadata main外のreturnは数えない',unsupportedFunction=r.catalog.functions.some(f=>f.name!=='main')&&!typedZero;assert.equal(r.route,typedZero?'CONFIRM':unsupportedFunction?'DIAGNOSTIC':'NORMAL',JSON.stringify(r));assert.equal(r.priority,typedZero?'P2':unsupportedFunction?'P1':'P4');return {priority:r.priority,evidence:r.evidence};});

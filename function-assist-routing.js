@@ -46,12 +46,14 @@ const FunctionAssistRouting = (() => {
       // still the unchanged findMainExecutionRange, never this token scan.
       if(token.value==='main'&&tokens[i-1]?.value==='int'&&(!tokens[i-2]||[';','{','}'].includes(tokens[i-2].value)||source.slice(0,tokens[i-1].start).trim().endsWith('>')))continue;
       if(['printf','scanf'].includes(token.value)&&!catalog.functions.some(f=>f.name===token.value))continue;
+      if(SafeMathBuiltins.isName(token.value))continue;
       candidates.push({name:token.value,offset:token.start,catalogCall:catalog.calls.find(c=>inside(token.start,c.range))||null});
     }
     const evidence={lexicalUserCalls:candidates.map(c=>({name:c.name,offset:c.offset,catalogued:!!c.catalogCall})),uncertain,
       catalogCalls:catalog.calls.map(c=>({caller:c.caller,callee:c.callee,range:c.range})),legacyMain:findMainExecutionRange(masked.split('\n')),
       headerRanges:headers,sourceUnchanged:true};
     const errors=catalog.diagnostics.filter(d=>d.severity==='error');
+    if(errors.some(d=>d.code.startsWith('MATH_')))return stop('P1','数学組込の名前・宣言・引数構文を確認できません。実行していません。',catalog,evidence);
     if(uncertain.length||candidates.some(c=>!c.catalogCall)||catalog.calls.some(c=>!c.resolved)||
       ((catalog.calls.length||catalog.functions.some(f=>f.name!=='main'))&&(catalog.classification==='AMBIGUOUS'||catalog.classification==='UNKNOWN_CALL'||catalog.classification==='UNSUPPORTED'||errors.length))){
       return stop('P1','関数呼出の定義・署名・対応範囲を確認できません。実行していません。',catalog,evidence);

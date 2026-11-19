@@ -1471,6 +1471,7 @@ function renderStep(){
         ? describeScanfPurpose(step.scanfInput)
       : decodeEngineExplanation(step.text))
   );
+  if(step.branchDecision?.mathCalls?.length) explanation.append(element('p', '', describeMathCalls(step.branchDecision)));
   if(step.arrayLoopContext?.length){
     const indexNames = new Set((step.arrayViews || []).flatMap(view => view.accesses || [])
       .map(access => access.indexVariable).filter(Boolean));
@@ -2184,7 +2185,7 @@ const renderFunctionAssistStep = function(step){
       document.createTextNode(' を ' + step.scanfInput.target + ' に保存します。'));
   }else description.textContent = descriptions[step.functionEvent] || '処理を確認します。';
   detail.append(element('small', '', context), description);
-  if(step.castConversions?.length) detail.append(element('p', '', describeExplicitCastConversions(step)));
+  if(step.castConversions?.length || step.mathCalls?.length) detail.append(element('p', '', describeExpressionDetails(step)));
   if(Array.isArray(step.argumentBindings)){
     for(const binding of step.argumentBindings){
       detail.append(element('p', '', `${binding.expression}：${binding.sourceType} ${binding.sourceDisplay} → ${binding.parameterName}：${binding.parameterType} ${binding.display}`));
